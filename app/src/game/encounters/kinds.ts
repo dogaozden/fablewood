@@ -38,6 +38,21 @@ function teachBlock(head: string, answer: string, fact?: FactLite): HTMLElement 
   ]);
 }
 
+/** The book's own words — verbatim excerpt + citation, shown win or lose (the source is the reward). */
+function excerptBlock(fact: FactLite): HTMLElement | null {
+  const src = fact.source_ref;
+  if (!src?.quote) return null;
+  const loc = src.loc ? ` › ${src.loc}` : '';
+  return el('blockquote', { class: 'fw-excerpt' }, [
+    el('span', { class: 'fw-openquote', 'aria-hidden': 'true', text: '“' }),
+    src.quote,
+    el('div', { class: 'fw-cite' }, [
+      el('span', { class: 'fw-citemark', 'aria-hidden': 'true', text: '❦' }),
+      el('span', { text: `${src.file}${loc}` }),
+    ]),
+  ]);
+}
+
 function continueButton(resolve: Resolve, result: EncounterResult): HTMLButtonElement {
   return el('button', {
     class: 'fw-btn fw-btn-primary',
@@ -166,6 +181,9 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
         ]),
       );
     }
+    // the source's verbatim words appear win or lose — a good cast EARNS the page
+    const excerpt = facts[0] ? excerptBlock(facts[0]) : null;
+    if (excerpt) parts.push(excerpt);
     o.body.replaceChildren(...parts);
 
     const cont = continueButton(resolve, {

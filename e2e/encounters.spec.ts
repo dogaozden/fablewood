@@ -29,6 +29,9 @@ test.describe('encounter overlay — all kinds', () => {
     // stub judge is deterministic + instant; a verdict banner + Clerk line renders
     await expect(page.locator('.fw-verdict.pass')).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('.fw-verdict.pass')).not.toBeEmpty();
+    // the book's verbatim words show even on a correct cast (the author's live request)
+    await expect(page.locator('.fw-excerpt')).toBeVisible();
+    await expect(page.locator('.fw-cite')).toContainText('compendium');
   });
 
   test('free_recall: real typing survives the game key captures (WASD/E/Space)', async ({ page }) => {
