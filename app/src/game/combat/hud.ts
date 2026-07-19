@@ -88,10 +88,11 @@ export class CombatHud {
     const total = order.length * cw;
     const startX = W / 2 - total / 2 + cw / 2;
     order.forEach((c, i) => {
+      const ringCol = tokenColor(c.kind);
       const chip = this.scene.add.container(startX + i * cw, 24);
-      const ring = this.scene.add.circle(0, 0, 13, teamColor(c.team)).setStrokeStyle(2, P.outline);
+      const ring = this.scene.add.circle(0, 0, 13, ringCol).setStrokeStyle(2, P.outline);
       const label = this.scene.add.text(0, 0, initial(c.kind), {
-        fontFamily: FONT, fontSize: '13px', color: hex(P.outline), fontStyle: 'bold',
+        fontFamily: FONT, fontSize: '13px', color: hex(readableText(ringCol)), fontStyle: 'bold',
       }).setOrigin(0.5);
       chip.add([ring, label]);
       this.strip.add(chip);
@@ -215,8 +216,23 @@ export class CombatHud {
   }
 }
 
-function teamColor(team: 'party' | 'enemy'): number {
-  return team === 'party' ? P.moss : P.berry;
+/** Per-archetype token tint so the initiative queue reads at a glance. */
+function tokenColor(kind: string): number {
+  switch (kind) {
+    case 'keeper': return P.moss;
+    case 'mira': return P.orchid;
+    case 'wisp': return P.waterLight;
+    case 'wraith': return P.duskViolet;
+    case 'construct': return P.stoneGrey;
+    case 'warden': return P.ember;
+    default: return P.stoneGrey;
+  }
+}
+
+/** Dark initial on light tokens, parchment on dark — keeps the glyph legible. */
+function readableText(bg: number): number {
+  const lum = 0.299 * ((bg >> 16) & 0xff) + 0.587 * ((bg >> 8) & 0xff) + 0.114 * (bg & 0xff);
+  return lum > 140 ? P.outline : P.parchment;
 }
 
 function initial(kind: string): string {
