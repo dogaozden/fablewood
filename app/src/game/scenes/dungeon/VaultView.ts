@@ -20,6 +20,8 @@ const FONT = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
 export interface NodeHandlers {
   onRoom: (index: number) => void;
   onCamp: () => void;
+  /** Open the Satchel from the camp card (inventory-handoff §9). */
+  onSatchel: () => void;
 }
 
 type Toast = 'info' | 'warn' | 'good';
@@ -31,6 +33,7 @@ export class VaultView {
   private nodeXs: number[] = [];
   private mapLayer?: Phaser.GameObjects.Container;
   private overlay?: Phaser.GameObjects.Container;
+  private handlers?: NodeHandlers;
   private headerText?: Phaser.GameObjects.Text;
   private statusText?: Phaser.GameObjects.Text;
 
@@ -196,6 +199,7 @@ export class VaultView {
   renderMap(spec: DungeonSpec, progress: DungeonProgress, handlers: NodeHandlers): void {
     this.mapLayer?.destroy();
     this.roomNodes = [];
+    this.handlers = handlers;
     const s = this.scene;
     const layer = s.add.container(0, 0).setDepth(10);
     this.mapLayer = layer;
@@ -436,7 +440,7 @@ export class VaultView {
   showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {
     const s = this.scene;
     const w = 480;
-    const h = 244;
+    const h = 300;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
     const top = (H - h) / 2 + 28;
@@ -451,6 +455,9 @@ export class VaultView {
         ? `The hearth mends you — ${heal.before} → ${heal.after} HP.`
         : `The hearth is warm; your party is already whole — ${heal.after}/${heal.after} HP.`;
     cont.add(s.add.text(cx, top + 104, healLine, { fontFamily: FONT, fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
+    if (this.handlers) {
+      cont.add(this.button(cx, top + 150, 'Open Satchel', C.timber, () => this.handlers!.onSatchel()));
+    }
     return this.finishCard(cont, h, mode, 'Onward ▸');
   }
 

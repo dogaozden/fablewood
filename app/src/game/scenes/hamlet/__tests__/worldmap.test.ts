@@ -49,9 +49,9 @@ describe('buildHamlet layout', () => {
     expect(map.solid[ROWS - 1][COLS - 1]).toBe(1);
   });
 
-  it('exposes all five locations', () => {
+  it('exposes all six locations', () => {
     expect(map.locations.map((l) => l.id).sort()).toEqual(
-      ['cottage', 'gate', 'records', 'tavern', 'wellspring'].sort(),
+      ['cottage', 'factor', 'gate', 'records', 'tavern', 'wellspring'].sort(),
     );
   });
 });
