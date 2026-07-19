@@ -13,21 +13,21 @@
 
 const vaultFloor: string[] = [
   'zzzzzzzzzzzzzzzz',
-  'zvvvDDDDzvvvDDDD',
-  'zvvDDDDDzvvDDDDD',
-  'zvDDDDDDzvDDDDDD',
+  'zvDDDDDvzvDDDDDv',
   'zDDDDDDDzDDDDDDD',
   'zDDDDDDDzDDDDDDD',
   'zDDDDDDDzDDDDDDD',
   'zDDDDDDDzDDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'vDDDDDDvvDDDDDDv',
   'zzzzzzzzzzzzzzzz',
-  'DDDDzvvvDDDDzvvv',
-  'DDDDzvvDDDDDzvvD',
-  'DDDDzvDDDDDDzvDD',
-  'DDDDzDDDDDDDzDDD',
-  'DDDDzDDDDDDDzDDD',
-  'DDDDzDDDDDDDzDDD',
-  'DDDDzDDDDDDDzDDD',
+  'zvDDDDDvzvDDDDDv',
+  'zDDDDDDDzDDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'vDDDDDDvvDDDDDDv',
 ];
 
 const vaultWall: string[] = [
