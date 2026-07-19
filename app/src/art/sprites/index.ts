@@ -5,7 +5,7 @@
 // Fan-out agents deliver per-set modules (set-enemies.ts, set-combat.ts,
 // set-hamlet-props.ts, set-characters.ts) exporting SpriteDef[]; the art director
 // imports + spreads them here — this index stays single-writer (no parallel edits).
-import { keeperSheet } from './keeper';
+import { keeperLaneBSheet } from './keeper-lane-b';
 import { tileGrass, tilePath, tileWater } from './hamletTiles';
 // Fan-out set modules (agents deliver these; the art director reviews the gate + wires here):
 import { hamletProps } from './set-hamlet-props'; // A3 — reviewed PASS: docs/art-reviews/hamlet-props.md
@@ -39,13 +39,14 @@ export interface SpriteDef {
 }
 
 export const SPRITES: readonly SpriteDef[] = [
-  // The Keeper (player). Reviewed: keeper-idle-down.md, char-keeper-walk-down.md,
-  // char-keeper-walk-up.md. char.keeper is 16×24 everywhere (D2); combat
-  // display-scales ×3 with bottom-center origin. Batches 1-2: idle + walk.down + walk.up;
-  // TODO(art-director): add walk.left/right (profile) frames + anims.
+  // The Keeper (player) — Lane-B sheet (gpt-image-2 turnaround, quantized +
+  // hand-polished; walk mechanics carried from the reviewed Lane-A frames).
+  // Reviewed: keeper-lane-b.md. Lane-A original preserved in keeper.ts.
+  // char.keeper is 16×24 everywhere (D2); combat display-scales ×3 with
+  // bottom-center origin.
   {
     key: 'char.keeper',
-    frames: keeperSheet,
+    frames: keeperLaneBSheet,
     scale: 1,
     anims: [
       { name: 'char.keeper.idle', from: 0, to: 1, frameRate: 2, repeat: -1 },
