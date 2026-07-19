@@ -31,6 +31,19 @@ test.describe('encounter overlay — all kinds', () => {
     await expect(page.locator('.fw-verdict.pass')).not.toBeEmpty();
   });
 
+  test('free_recall: real typing survives the game key captures (WASD/E/Space)', async ({ page }) => {
+    // Regression: hamlet's Phaser key captures preventDefault'ed W/A/S/D/E/Space at the
+    // window level even while the recall textarea was focused — "economics and control"
+    // arrived as "conomicncontrol". Real key events (not fill), over the hamlet scene so
+    // the captures are actually registered.
+    await openOverlay(page, 'free_recall', 7, 'hamlet');
+    const ta = page.locator('.fw-textarea');
+    await ta.click();
+    await page.keyboard.type('we saved economics and control', { delay: 20 });
+    await expect(ta).toHaveValue('we saved economics and control');
+    await page.screenshot({ path: 'screenshots/e2e-freerecall-typing.png' });
+  });
+
   test('scenario_branch (Parley): correct branch → pass verdict + consequence', async ({ page }) => {
     await openOverlay(page, 'scenario_branch');
     await expect(page.locator('.fw-eyebrow')).toContainText('Parley');

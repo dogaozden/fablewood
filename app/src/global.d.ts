@@ -6,7 +6,7 @@ declare global {
   interface Window {
     __FABLEWOOD_READY?: boolean;
     __FABLEWOOD_STATE?: FablewoodState;
-    __FABLEWOOD_GAME?: unknown;
+    __FABLEWOOD_GAME?: import('phaser').Game;
   }
 }
 

@@ -30,9 +30,27 @@ export interface Overlay {
   close(): Promise<void>;
 }
 
+/**
+ * While any overlay is open the game keyboard goes quiet: Phaser holds global key
+ * captures (the hamlet's WASD/E/Space/cursors) that preventDefault at the window
+ * level, which silently eats those characters out of a focused text input —
+ * "economics and control" once arrived as "conomicncontrol". Depth-counted for
+ * stacked overlays; key state resets on both edges so no held key keeps the
+ * Keeper walking under (or after) the card.
+ */
+let overlayDepth = 0;
+function quietGameKeyboard(quiet: boolean): void {
+  const game = window.__FABLEWOOD_GAME;
+  const kb = game?.input.keyboard;
+  if (!game || !kb) return;
+  kb.enabled = !quiet;
+  for (const s of game.scene.getScenes(true)) s.input?.keyboard?.resetKeys();
+}
+
 function buildOverlay(): Overlay {
   ensureStyles();
   const prevFocus = document.activeElement as HTMLElement | null;
+  let closed = false;
 
   const header = el('div', { class: 'fw-header' });
   const body = el('div', { class: 'fw-body' });
@@ -50,6 +68,7 @@ function buildOverlay(): Overlay {
   });
 
   document.body.appendChild(root);
+  if (++overlayDepth === 1) quietGameKeyboard(true);
   requestAnimationFrame(() => panel.focus());
 
   return {
@@ -74,10 +93,15 @@ function buildOverlay(): Overlay {
       handlers.push(fn);
     },
     close() {
+      // idempotent: a drill-flee racing a pending judge may finish twice, and the
+      // keyboard latch must only step once per overlay.
+      if (closed) return Promise.resolve();
+      closed = true;
       root.classList.add('is-closing');
       return new Promise<void>((resolve) => {
         setTimeout(() => {
           root.remove();
+          if (--overlayDepth === 0) quietGameKeyboard(false);
           prevFocus?.focus?.();
           resolve();
         }, 170);

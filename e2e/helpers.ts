@@ -31,9 +31,9 @@ export async function registryGet(page: Page, key: string): Promise<unknown> {
 }
 
 /** Open the encounter overlay dev harness for one kind and wait for it to render. */
-export async function openOverlay(page: Page, kind: string, seed = 7): Promise<void> {
-  await page.goto(`/?overlay=${kind}&seed=${seed}`);
-  await waitReady(page);
+export async function openOverlay(page: Page, kind: string, seed = 7, scene?: string): Promise<void> {
+  await page.goto(`/?overlay=${kind}&seed=${seed}${scene ? `&scene=${scene}` : ''}`);
+  await waitReady(page, scene);
   await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 10_000 });
 }
 
