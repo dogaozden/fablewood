@@ -32,6 +32,7 @@ import { ensureTextures, TILE_KEYS, UNIT_KEYS } from './textures';
 import { CombatHud } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS } from './fixtures';
 import { P } from './palette';
+import { music } from '../../music/instance';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
 
@@ -126,6 +127,9 @@ export class CombatScene extends Phaser.Scene {
 
     this.wireInput();
 
+    // Battle leitmotif (fire-and-forget; the shell handles gesture-resume + mute).
+    try { music.play('battle'); } catch { /* audio context may be locked pre-gesture */ }
+
     // markReady MUST fire at the end of create() or shots/e2e hang.
     markReady({ scene: 'combat', title: 'FABLEWOOD', seed: this.launch.seed });
 
@@ -133,6 +137,7 @@ export class CombatScene extends Phaser.Scene {
     // returned and __FABLEWOOD_READY is set before any encounter overlay opens.
     this.loadContent().then(() => {
       if (this.destroyed) return;
+      this.applyPoolHp(); // split the saved pooled HP onto Keeper/Mira (save is ready now)
       this.refreshParty();
       this.time.delayedCall(320, () => this.advanceTurn());
     });
@@ -155,7 +160,8 @@ export class CombatScene extends Phaser.Scene {
       for (let c = 0; c < GRID_W; c++) {
         const t = this.layout.tiles[r][c];
         const p = this.tileToScreen({ c, r });
-        this.add.image(p.x, p.y, TILE_KEYS[t]).setDepth(0);
+        const img = this.add.image(p.x, p.y, TILE_KEYS[t]).setDepth(0);
+        img.setScale(CELL / img.frame.realWidth); // placeholder 48px→×1, 16-native art→×3
       }
     }
   }
@@ -180,11 +186,30 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * The save holds ONE pooled party HP (max 16 = Keeper 10 + Mira 6). Split it
+   * proportionally onto the units on launch; the camp heals the pool back to 16.
+   * hpLost (the pooled delta) is reported in CombatOutcome for the dungeon/camp.
+   */
+  private applyPoolHp(): void {
+    let pool = 16;
+    try { pool = services.save.get()?.hp ?? 16; } catch { /* offline → full */ }
+    pool = Math.max(0, Math.min(16, pool));
+    const keeper = this.unitById('keeper');
+    const mira = this.unitById('mira');
+    if (keeper) { keeper.hp = pool > 0 ? Math.max(1, Math.min(10, Math.ceil((pool * 10) / 16))) : 0; keeper.alive = keeper.hp > 0; this.drawHpBar(keeper); }
+    if (mira) { mira.hp = pool > 0 ? Math.max(1, Math.min(6, Math.floor((pool * 6) / 16))) : 0; mira.alive = mira.hp > 0; this.drawHpBar(mira); }
+  }
+
   private makeUnitView(u: UnitState): void {
     const p = this.tileToScreen(u);
     const container = this.add.container(p.x, p.y).setDepth(10 + u.r);
-    const shadow = this.add.ellipse(0, CELL / 2 - 6, CELL * 0.6, 10, P.voidBlack, 0.35);
-    const sprite = this.add.image(0, 0, UNIT_KEYS[u.kind]);
+    const shadow = this.add.ellipse(0, CELL / 2 - 5, CELL * 0.6, 10, P.voidBlack, 0.35);
+    // Origin bottom-centre, feet at the cell's bottom edge, so taller real sprites
+    // (16×24 / up to 24×32 native, baked at 3×) overhang UPWARD — the tactics look.
+    // displayScale = CELL / frame width: 48px placeholder bakes → ×1, 16-native art → ×3.
+    const sprite = this.add.image(0, CELL / 2 - 4, UNIT_KEYS[u.kind]).setOrigin(0.5, 1);
+    sprite.setScale(CELL / sprite.frame.realWidth);
     sprite.setFlipX(u.team === 'enemy');
     const hp = this.add.graphics();
     container.add([shadow, sprite, hp]);
@@ -198,7 +223,9 @@ export class CombatScene extends Phaser.Scene {
     const g = v.hp;
     g.clear();
     const w = 38;
-    const y = -CELL / 2 - 4;
+    // Float the bar just above the sprite's displayed top (origin bottom-centre),
+    // so it clears any sprite height (placeholder 48px or taller real art).
+    const y = Math.round(v.sprite.y - v.sprite.displayHeight - 6);
     // boss shield pips, centred above the hp bar
     if (u.isBoss && u.maxShields) {
       for (let i = 0; i < u.maxShields; i++) {
@@ -283,7 +310,8 @@ export class CombatScene extends Phaser.Scene {
   private focusCue(unit: UnitState): void {
     const v = this.views.get(unit.id);
     if (!v) return;
-    this.tweens.add({ targets: v.sprite, y: -4, duration: 220, yoyo: true, ease: 'Sine.easeInOut' });
+    // small hop from the rest anchor (bottom-centre at CELL/2 - 4)
+    this.tweens.add({ targets: v.sprite, y: CELL / 2 - 10, duration: 220, yoyo: true, ease: 'Sine.easeInOut' });
   }
 
   // ---- player turn ------------------------------------------------------
@@ -583,6 +611,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private enemyStrike(attacker: UnitState, target: UnitState): void {
+    if (this.destroyed) return;
     if (attacker.ranged) {
       const line = this.add.graphics().setDepth(39);
       const a = this.tileToScreen(attacker); const b = this.tileToScreen(target);
@@ -601,12 +630,13 @@ export class CombatScene extends Phaser.Scene {
   // ---- damage / death ---------------------------------------------------
 
   private damageUnit(unit: UnitState, amount: number, color: number): void {
-    if (amount <= 0 || !unit.alive) return;
-    unit.hp -= amount;
-    if (unit.team === 'party') this.hpLost += amount;
+    if (this.destroyed || amount <= 0 || !unit.alive) return;
+    const before = unit.hp;
+    unit.hp = Math.max(0, unit.hp - amount);
+    if (unit.team === 'party') this.hpLost += before - unit.hp; // actual loss = pooled delta
     this.floatText(unit, `−${amount}`, color);
     this.cameras.main.shake(90, 0.004);
-    if (unit.hp <= 0) { unit.hp = 0; unit.alive = false; this.fadeDead(unit); }
+    if (unit.hp <= 0) { unit.alive = false; this.fadeDead(unit); }
     this.drawHpBar(unit);
   }
 
@@ -620,6 +650,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private fadeDead(unit: UnitState): void {
+    if (this.destroyed) return;
     const v = this.views.get(unit.id);
     if (!v) return;
     this.tweens.add({ targets: v.container, alpha: 0.18, scaleX: 0.8, scaleY: 0.8, angle: unit.team === 'enemy' ? 12 : -8, duration: 340 });
@@ -627,6 +658,7 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private floatText(unit: UnitState, text: string, color: number): void {
+    if (this.destroyed) return;
     const p = this.tileToScreen(unit);
     const t = this.add.text(p.x, p.y - 16, text, {
       fontFamily: 'Georgia, serif', fontSize: '16px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold',
