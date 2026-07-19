@@ -110,6 +110,34 @@ export class CombatScene extends Phaser.Scene {
     this.destroyed = false;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.destroyed = true; });
 
+    // Phaser reuses this Scene INSTANCE across scene.start('combat') calls, but the class-field
+    // initializers ran only once — so every battle must begin from zero here, or the second
+    // launch in a session (dungeon room 2+) inherits the previous fight's units, turn cursor,
+    // and boss state (observed live as a duplicated party + a locked board).
+    this.units = [];
+    this.views.clear();
+    this.order = [];
+    this.orderIndex = -1;
+    this.state = 'boot';
+    this.moved = false;
+    this.activeId = '';
+    this.moveField = null;
+    this.reachable.clear();
+    this.targetTiles.clear();
+    this.pendingAction = null;
+    this.results = [];
+    this.hpLost = 0;
+    this.graceAvailable = true;
+    this.debugPrefer = null;
+    this.actionLog = [];
+    this.allFactIds.clear();
+    this.tagToIds.clear();
+    this.roomTags = [];
+    this.boss = null;
+    this.shields = 0;
+    this.phaseIndex = 0;
+    this.pendingBossPhase = false;
+
     this.encSeed = this.launch.seed | 0;
     this.drawBackdrop();
     ensureTextures(this);
