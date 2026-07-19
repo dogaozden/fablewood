@@ -13,6 +13,15 @@
 import * as Tone from "tone";
 import type { Motif, Note, SynthSpec } from "./types";
 
+/**
+ * Shorten each note's scheduled release by this many seconds so a release never
+ * coincides with the next attack — most importantly at the loop seam, where the
+ * last note's end meets the loop-restart note's attack. Coincident release/attack
+ * on a monophonic Tone voice throws "Start time must be strictly greater than
+ * previous start time" (async, on the Transport tick). ~20ms is inaudible.
+ */
+const RELEASE_GAP_S = 0.02;
+
 /** Structural type satisfied by every Tone instrument we build. */
 interface Voice {
   // Tone's per-synth trigger signatures differ (noise omits the note); widen here.
@@ -93,6 +102,11 @@ export class MusicPlayer {
     return this.currentId;
   }
 
+  /** Current Transport position in seconds (dev/verification aid). */
+  transportSeconds(): number {
+    return Tone.getTransport().seconds;
+  }
+
   /** Play a registered motif by id. No-op if it's already the one playing. */
   play(id: string): void {
     if (this.currentId === id) return;
@@ -111,6 +125,11 @@ export class MusicPlayer {
     this.teardown();
 
     const transport = Tone.getTransport();
+    // Clean slate before (re)scheduling. On a motif SWITCH the Transport is still
+    // running from the previous motif; stop + clear its event/state timeline so we
+    // never call start() on an already-running Transport or leave stale events.
+    transport.stop();
+    transport.cancel(0);
     transport.bpm.value = motif.bpm;
     transport.timeSignature = motif.meter;
     transport.loop = true;
@@ -127,11 +146,15 @@ export class MusicPlayer {
 
       const part = new Tone.Part((time, ev) => {
         const n = ev as Note;
+        // Trim the release so it never coincides with the next attack (see
+        // RELEASE_GAP_S) — this is what keeps the loop seam from crashing Tone.
+        const durSecs = Tone.Time(n.dur).toSeconds();
+        const safeDur = Math.max(durSecs - RELEASE_GAP_S, durSecs * 0.5);
         if (n.note !== undefined) {
-          voice.triggerAttackRelease(n.note, n.dur, time, n.vel);
+          voice.triggerAttackRelease(n.note, safeDur, time, n.vel);
         } else {
           // Unpitched (NoiseSynth): triggerAttackRelease(duration, time, velocity)
-          voice.triggerAttackRelease(n.dur, time, n.vel);
+          voice.triggerAttackRelease(safeDur, time, n.vel);
         }
       }, track.notes.map((n) => ({ ...n })));
       part.start(0);

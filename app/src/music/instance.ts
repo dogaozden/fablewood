@@ -6,6 +6,12 @@ import { createPlayer } from './index';
 
 export const music = createPlayer();
 
+// Dev-only handle so E2E/debug tooling can observe playback (Transport seconds,
+// current motif). Stripped from production builds by the `import.meta.env.DEV` guard.
+if (import.meta.env.DEV) {
+  (globalThis as unknown as { __fwMusic?: typeof music }).__fwMusic = music;
+}
+
 let resumed = false;
 
 /** Idempotent: resume the audio context on the first real user gesture. */
