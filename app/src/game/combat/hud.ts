@@ -42,6 +42,7 @@ export class CombatHud {
   private panelBg: Phaser.GameObjects.Graphics;
   private panelText: Phaser.GameObjects.Text;
   private graceDot: Phaser.GameObjects.Arc;
+  private streakIcon: Phaser.GameObjects.Image | null = null;
 
   constructor(scene: Phaser.Scene, roomName: string) {
     this.scene = scene;
@@ -61,6 +62,12 @@ export class CombatHud {
     this.panelText = scene.add.text(12, 10, '', { fontFamily: FONT, fontSize: '13px', color: hex(P.parchment), lineSpacing: 5 });
     this.graceDot = scene.add.circle(160, 128, 5, P.lanternGold);
     this.panel.add([this.panelBg, this.panelText, this.graceDot]);
+    // A2's real hearth-flame beside the streak (the "flame = streak" motif). Guarded:
+    // absent in a texture-less boot; the text still reads the count either way.
+    if (scene.textures.exists('icon.streak')) {
+      this.streakIcon = scene.add.image(0, 0, 'icon.streak').setDisplaySize(15, 15).setVisible(false);
+      this.panel.add(this.streakIcon);
+    }
 
     // deliberation veil
     const vg = scene.add.graphics();
@@ -201,6 +208,10 @@ export class CombatHud {
     const lh = this.panelText.height / lines.length;
     this.graceDot.setFillStyle(status.graceAvailable ? P.lanternGold : P.stoneGrey)
       .setPosition(160, 10 + (lines.length - 0.5) * lh);
+    if (this.streakIcon) {
+      const si = lines.findIndex((l) => l.startsWith('Streak'));
+      this.streakIcon.setVisible(status.streak > 0).setPosition(88, 10 + (si + 0.5) * lh);
+    }
   }
 }
 

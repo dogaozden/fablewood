@@ -464,11 +464,12 @@ export class CombatScene extends Phaser.Scene {
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
-    this.hud.setDeliberating(false);
-    if (this.destroyed) return;
-
+    // Record FIRST — the learning record is sacred: never dropped, even if the
+    // scene tears down mid-overlay (record() is pure service work, safe when dead).
     this.results.push(result);
     await this.record(result);
+    if (this.destroyed) return;
+    this.hud.setDeliberating(false);
 
     // Lantern grace: standing on a lantern can soften a whiff for DAMAGE only —
     // the SRS record stays honest (we record result.quality, above).
@@ -547,9 +548,10 @@ export class CombatScene extends Phaser.Scene {
     } catch {
       result = { encounterId: phase.branchEncounterId, kind: 'scenario_branch', factIds: [], quality: 0.5, branchTag: 'neutral' };
     }
-    if (this.destroyed) return;
+    // Record FIRST — the learning record is sacred (see runPlayerAction).
     this.results.push(result);
     await this.record(result);
+    if (this.destroyed) return;
 
     const eff = applyBranch(result.branchTag);
     if (eff.shieldDelta) { this.shields = reduceShields(this.shields, eff.shieldDelta); }
