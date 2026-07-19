@@ -527,22 +527,38 @@ export class VaultView {
   /** Boss finale: golden light sweep + reward. hold=true leaves it on screen. */
   vaultOpensBeat(reward: string, streak: number, opts: { hold?: boolean } = {}): Promise<void> {
     const s = this.scene;
-    const scrim = s.add.rectangle(W / 2, H / 2, W, H, C.voidBlack, 0.5).setDepth(300).setAlpha(0);
-    const sweep = s.add.rectangle(-200, H / 2, 260, H, C.glowCore, 0.85).setDepth(301).setBlendMode(Phaser.BlendModes.ADD);
-    const title = s.add.text(W / 2, H / 2 - 40, 'THE VAULT OPENS', { fontFamily: 'Georgia, serif', fontSize: '34px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(302).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 10, false, true);
-    const line = s.add.text(W / 2, H / 2 + 12, reward, { fontFamily: 'Georgia, serif', fontSize: '17px', color: hex(C.parchment), align: 'center', wordWrap: { width: 620 } }).setOrigin(0.5).setDepth(302).setAlpha(0);
-    const streakT = s.add.text(W / 2, H / 2 + 60, `Streak  ${streak}`, { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(302).setAlpha(0);
+    const cx = W / 2;
+    const cy = H / 2 - 48;
+    // strong scrim so the finale text reads cleanly, clear of the map strip below
+    const scrim = s.add.rectangle(W / 2, H / 2, W, H, C.voidBlack, 0.9).setDepth(300).setAlpha(0);
+    // celebratory warm burst behind the title
+    const glow = s.add.circle(cx, cy - 26, 230, C.amber, 0).setDepth(301).setBlendMode(Phaser.BlendModes.ADD);
+    const ring = s.add.circle(cx, cy - 26, 44, C.glowCore, 0).setStrokeStyle(3, C.glowCore, 0.9).setDepth(301).setBlendMode(Phaser.BlendModes.ADD);
+    const sweep = s.add.rectangle(-200, H / 2, 260, H, C.glowCore, 0.85).setDepth(302).setBlendMode(Phaser.BlendModes.ADD);
+
+    const title = s.add.text(cx, cy - 62, 'THE VAULT OPENS', { fontFamily: 'Georgia, serif', fontSize: '38px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(303).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 12, false, true);
+    const rule = s.add.rectangle(cx, cy - 26, 220, 2, C.amber, 0.8).setDepth(303).setAlpha(0);
+    const line = s.add.text(cx, cy + 4, reward, { fontFamily: 'Georgia, serif', fontSize: '20px', color: hex(C.lanternGold), fontStyle: 'bold', align: 'center', wordWrap: { width: 640 } }).setOrigin(0.5).setDepth(303).setAlpha(0);
+    const streakT = s.add.text(cx, cy + 48, `Streak  ${streak}`, { fontFamily: 'Georgia, serif', fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
 
     return new Promise((resolve) => {
-      s.tweens.add({ targets: scrim, alpha: 1, duration: 260 });
+      s.tweens.add({ targets: scrim, alpha: 1, duration: 300 });
       s.tweens.add({
         targets: sweep,
         x: W + 200,
         duration: 720,
         ease: 'Quad.inOut',
         onComplete: () => {
-          s.tweens.add({ targets: [title, line, streakT], alpha: 1, duration: 400 });
-          s.time.delayedCall(opts.hold ? 200 : 1200, () => resolve());
+          sweep.destroy();
+          // burst: warm bloom + one expanding gold ring
+          s.tweens.add({ targets: glow, alpha: 0.45, duration: 420, yoyo: true, hold: 700 });
+          s.tweens.add({ targets: ring, alpha: { from: 0.9, to: 0 }, scale: { from: 0.4, to: 2.6 }, duration: 720, ease: 'Quad.out' });
+          // savour it: title → reward → streak, staggered
+          s.tweens.add({ targets: [title, rule], alpha: 1, duration: 360 });
+          s.tweens.add({ targets: line, alpha: 1, duration: 340, delay: 280 });
+          s.tweens.add({ targets: streakT, alpha: 1, duration: 300, delay: 560 });
+          // a deliberate extra beat to let the reward land before the hamlet return
+          s.time.delayedCall(opts.hold ? 1000 : 2000, () => resolve());
         },
       });
     });
