@@ -13,7 +13,10 @@ Phaser scene keys (registered via the scaffold's SceneRegistry; jumpable via `?s
 | `hamlet` | HamletScene | walkable home hub (the Fablewood clearing) |
 | `vaults` | DungeonScene | dungeon exploration (configured by a dungeon spec JSON from the pack) |
 | `combat` | CombatScene | grid-tactics battle, launched with a payload, resolves back to caller |
-| `ui` | UIScene | persistent overlay: dialogue boxes, encounter modals, HUD, toasts |
+
+*(AMENDED post-scaffold: no UIScene — dialogue is a hamlet-owned Phaser-drawn module (app/src/game/dialogue/);
+encounter presentation is a DOM overlay over the canvas (app/src/game/encounters/) — DOM inputs beat canvas
+text entry for free_recall. Cross-agent seams live in app/src/game/contracts.ts (orchestrator-owned).)*
 
 Flow: boot → hamlet ⇄ vaults; vaults rooms launch combat; combat resolves → vaults (or retreat → hamlet).
 React shell wraps the canvas: top bar = FABLEWOOD wordmark, Dashboard/Game/Library tabs, mute toggle.
@@ -29,7 +32,7 @@ React shell wraps the canvas: top bar = FABLEWOOD wordmark, Dashboard/Game/Libra
   `state/settings.json` `{muted}`. All writes go through PUT /api/state/<name> (atomic).
 - `encounters/engine.ts`: `pick(due: string[], packs, opts)` → chooses encounter whose fact_ids overlap due
   (fallback: new facts in prereq order); `reskin(encounter, seed)` → substitutes template_vars + shuffles
-  option order deterministically by seed. `encounters/ui/` renders the 5 kinds inside UIScene:
+  option order deterministically by seed. `encounters/` renders the 5 kinds in a DOM overlay:
   mcq (4 options), free_recall (text input → judge), scenario_branch (dialogue choices), match (pair the
   columns), order (arrange steps). Each resolves `{quality: 0|0.5|1, factIds, kind}`.
 - `judge/client.ts`: `judge({prompt, answer, rubric}): Promise<{verdict: 'pass'|'partial'|'fail', line: string}>`
