@@ -199,7 +199,12 @@ export class MusicPlayer {
 
   private teardown(): void {
     for (const p of this.parts) {
-      p.stop();
+      // stop(0), not stop(): with the Transport parked at position 0 (e.g. the
+      // pre-gesture resume path: scene played a motif on a suspended context,
+      // resumeMusicOnce stops it before restarting), Tone computes "now" as a
+      // negative floating-point epsilon and Part.stop() throws a RangeError.
+      // An explicit 0 is always in range; the part is disposed right after.
+      p.stop(0);
       p.dispose();
     }
     for (const v of this.voices) v.dispose();
