@@ -139,7 +139,7 @@ export interface FactLite {
   type: string;
   statement: string;
   detail?: string;
-  source_ref?: { file: string; loc?: string; quote: string };
+  source_ref?: { file: string; loc?: string | number; quote: string };
 }
 
 export interface SettingsApi {

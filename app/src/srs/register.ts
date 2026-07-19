@@ -1,45 +1,60 @@
 /**
- * SRS + save provider registration. OWNED BY THE SRS AGENT — this in-memory stub is
- * replaced wholesale (bridge-backed Leitner per slice-blueprint §2); keep the install shape.
+ * SRS + save + settings provider registration. OWNED BY THE SRS AGENT.
+ *
+ * Installs bridge-backed Leitner services (slice-blueprint §2) into the shared
+ * `services` registry as a side effect on import (scenes/index.ts imports this).
+ * The heavy lifting lives in ./leitner (pure math) and ./store (persistence);
+ * this file only wires them to the contracts and builds the prereq index that
+ * dueQueue ordering needs.
  */
-import { services, type Quality, type SaveData } from '../game/contracts';
+import { services } from '../game/contracts';
+import { getPacks } from '../bridge/client';
+import { buildFactMeta, dueQueue, type FactMeta } from './leitner';
+import { SaveStore, SettingsStore, SrsStore } from './store';
 
-const boxes = new Map<string, number>();
+const srsStore = new SrsStore();
+const saveStore = new SaveStore();
+const settingsStore = new SettingsStore();
+
+// packId → (factId → { prereqs }), built once from the installed packs.
+let factMetaByPack = new Map<string, Map<string, FactMeta>>();
+let packsPulled = false;
+
+async function pullPacks(): Promise<void> {
+  if (packsPulled) return;
+  packsPulled = true;
+  const { packs } = await getPacks();
+  factMetaByPack = buildFactMeta(packs);
+}
 
 services.srs = {
-  async ready() {},
-  dueQueue(_packId: string, factIds: string[]) {
-    return [...factIds];
+  async ready() {
+    // Load persisted state and the prereq index together (both idempotent).
+    await Promise.all([srsStore.ready(), pullPacks()]);
   },
-  async record(factId: string, quality: Quality) {
-    const cur = boxes.get(factId) ?? 0;
-    boxes.set(factId, quality === 1 ? Math.min(cur + 1, 5) : 1);
+  dueQueue(packId: string, factIds: string[], now: number = Date.now()) {
+    const meta = factMetaByPack.get(packId) ?? new Map<string, FactMeta>();
+    return dueQueue(srsStore.snapshot(), factIds, meta, now);
   },
-  boxOf(factId: string) {
-    return boxes.get(factId) ?? 0;
+  record(factId, quality, encounterId) {
+    return srsStore.record(factId, quality, encounterId);
   },
-  masteryAvg(factIds: string[]) {
-    if (!factIds.length) return 0;
-    return factIds.reduce((s, id) => s + (boxes.get(id) ?? 0), 0) / factIds.length;
+  boxOf(factId) {
+    return srsStore.boxOf(factId);
+  },
+  masteryAvg(factIds) {
+    return srsStore.masteryAvg(factIds);
   },
 };
-
-let save: SaveData = { scene: 'hamlet', hp: 10, streak: 0, lastPlayed: '' };
 
 services.save = {
-  async ready() {},
-  get: () => save,
-  async save(patch) {
-    save = { ...save, ...patch };
-  },
+  ready: () => saveStore.ready(),
+  get: () => saveStore.get(),
+  save: (patch) => saveStore.save(patch),
 };
 
-let settings = { muted: false };
-
 services.settings = {
-  async ready() {},
-  get: () => settings,
-  async set(patch) {
-    settings = { ...settings, ...patch };
-  },
+  ready: () => settingsStore.ready(),
+  get: () => settingsStore.get(),
+  set: (patch) => settingsStore.save(patch),
 };
