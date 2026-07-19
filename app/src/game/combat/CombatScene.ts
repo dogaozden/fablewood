@@ -42,6 +42,9 @@ interface UnitView {
   container: Phaser.GameObjects.Container;
   sprite: Phaser.GameObjects.Sprite;
   hp: Phaser.GameObjects.Graphics;
+  /** party-only: pulsing danger aura shown when near death */
+  danger?: Phaser.GameObjects.Graphics;
+  pulse?: Phaser.Tweens.Tween;
 }
 
 export class CombatScene extends Phaser.Scene {
@@ -216,8 +219,22 @@ export class CombatScene extends Phaser.Scene {
     const idleAnim = UNIT_KEYS[u.kind] + '.idle';
     if (this.anims.exists(idleAnim)) sprite.play(idleAnim);
     const hp = this.add.graphics();
+
+    // Party-only near-death vignette: a pulsing berry aura at the feet so a Keeper
+    // or Mira in danger reads across the board (teeth-but-fair legibility).
+    let danger: Phaser.GameObjects.Graphics | undefined;
+    let pulse: Phaser.Tweens.Tween | undefined;
+    if (u.team === 'party') {
+      danger = this.add.graphics();
+      danger.fillStyle(P.berry, 0.3).fillEllipse(0, CELL / 2 - 5, CELL * 1.15, 26);
+      danger.fillStyle(P.berry, 0.55).fillEllipse(0, CELL / 2 - 5, CELL * 0.82, 17);
+      danger.lineStyle(2, P.berry, 0.85).strokeEllipse(0, CELL / 2 - 5, CELL * 0.82, 17);
+      danger.setVisible(false);
+      pulse = this.tweens.add({ targets: danger, alpha: { from: 0.35, to: 1 }, duration: 620, yoyo: true, repeat: -1, paused: true });
+      container.add(danger); // under shadow + sprite
+    }
     container.add([shadow, sprite, hp]);
-    this.views.set(u.id, { container, sprite, hp });
+    this.views.set(u.id, { container, sprite, hp, danger, pulse });
     this.drawHpBar(u);
   }
 
@@ -246,6 +263,17 @@ export class CombatScene extends Phaser.Scene {
     const col = u.team === 'party' ? P.moss : P.berry;
     g.fillStyle(col, 1).fillRect(-w / 2, y, w * frac, 5);
     g.lineStyle(1, P.outline, 1).strokeRect(-w / 2, y, w, 5);
+    this.updateDanger(u);
+  }
+
+  /** Show the pulsing danger aura when a party unit drops to ≤ 1/3 HP; hide otherwise. */
+  private updateDanger(u: UnitState): void {
+    const v = this.views.get(u.id);
+    if (!v || !v.danger || !v.pulse) return;
+    const critical = u.team === 'party' && u.alive && u.hp > 0 && u.hp / u.maxHp <= 0.34;
+    v.danger.setVisible(critical);
+    if (critical && v.pulse.paused) v.pulse.resume();
+    else if (!critical && !v.pulse.paused) { v.pulse.pause(); v.danger.setAlpha(1); }
   }
 
   private tileToScreen(co: Coord): { x: number; y: number } {
