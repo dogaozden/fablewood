@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PhaserGame } from './game/PhaserGame';
-import { getPacks, type PackEntry } from './bridge/client';
+import { Dashboard } from './shell/Dashboard';
+import { Library } from './shell/Library';
 import { music, resumeMusicOnce } from './music/instance';
 import { services } from './game/contracts';
 
@@ -62,54 +63,10 @@ export function App() {
       </nav>
       <main className="pane">
         {tab === 'game' && <PhaserGame />}
-        {tab === 'dashboard' && <Dashboard />}
+        {tab === 'dashboard' && <Dashboard onSetOut={() => setTab('game')} />}
         {tab === 'library' && <Library />}
       </main>
     </div>
   );
 }
 
-function Dashboard() {
-  return (
-    <div className="placeholder">
-      <h2>The Hamlet</h2>
-      <p>Your dashboard — due queue, streaks, province mastery, retinue — will grow here.</p>
-    </div>
-  );
-}
-
-function Library() {
-  const [packs, setPacks] = useState<PackEntry[] | null>(null);
-  useEffect(() => {
-    getPacks().then((r) => setPacks(r.packs));
-  }, []);
-
-  if (packs === null) {
-    return (
-      <div className="placeholder">
-        <p>Reading the shelves…</p>
-      </div>
-    );
-  }
-  if (packs.length === 0) {
-    return (
-      <div className="placeholder">
-        <h2>Library</h2>
-        <p>
-          No packs installed yet. Drop a knowledge pack into <code>packs/</code> and it
-          will appear here.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <div className="placeholder">
-      <h2>Library</h2>
-      <ul>
-        {packs.map((p) => (
-          <li key={p.id}>{p.id}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
