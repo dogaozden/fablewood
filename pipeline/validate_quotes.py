@@ -55,11 +55,13 @@ def load_source(path: str, root: str, cache: dict):
 
 def validate(facts_path: str, root: str):
     with open(facts_path, encoding="utf-8") as f:
-        facts = json.load(f)
+        data = json.load(f)
+    # Accept either a bare facts array (staging) or a compiled pack with .facts.
+    facts = data["facts"] if isinstance(data, dict) and "facts" in data else data
 
     failures = []
     if not isinstance(facts, list):
-        return ["top-level JSON is not an array"], 0, 0
+        return ["top-level JSON is not a fact array or a pack object with .facts"], 0, 0
 
     ids = [fct.get("id") for fct in facts]
     seen, dupes = set(), set()
