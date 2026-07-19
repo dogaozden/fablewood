@@ -175,19 +175,19 @@ Two render conventions coexist and are reconciled here: **hamlet is 16px-native 
 | `prop.south-gate` | 48×52 | A | road into the dark |
 | `prop.wellspring` | 46×38 | A | **centred** origin |
 | `prop.lantern-post` | 12×28 | A | |
-| `char.keeper`\* `char.clerk` `char.berry` `char.alder` | 16×22 | A char | bottom-centre; optional walk anims `char.<who>.walk.<down\|up\|left\|right>` |
+| `char.keeper` `char.mira` `char.clerk` `char.berry` `char.alder` | 16×24 | A char | scale 1 EVERYWHERE (D2); bottom-centre origin; walk anims `char.<who>.walk.<down\|up\|left\|right>` (+ `.idle`) |
 | `fx.glow` 64×64 · `fx.spark` 8×8 | — | glow fx | painterly/code ok |
 
 **Combat keys** (scale 3 = 16-src ×3):
 
 | key | native px | lane | notes |
 |---|---|---|---|
-| `char.keeper`\* `char.mira` | 48×48 | A char | |
-| `enemy.wisp` `enemy.wraith` `enemy.construct` `enemy.warden` | 48×48 | A | friendly=round/warm; threats=taller/colder |
+| `char.keeper` `char.mira` (SAME 16×24 textures as hamlet) | 16×24 | A char | scale 1; combat DISPLAY-scales via `CELL/frame.width`, origin bottom-centre (D2) |
+| `enemy.wisp` `enemy.construct` (16×16) · `enemy.wraith` (16×24) · `enemy.warden` (24×32, boss) | 16-native | A | scale 3 bake; threats taller/colder; warden overhangs the cell |
 | `tile.vault-floor` `tile.vault-wall` `tile.gold-heap` `tile.lantern` | 48×48 | A tile | |
 | `icon.strike` `icon.weave` `icon.sequence` `icon.cast` `icon.parley` `icon.wait` | 36×36 | A UI | 36px — off the 16-grid; the UI-icon exception |
 
-**\* OPEN (orchestrator decision):** `char.keeper` is requested by BOTH hamlet (16×22) and combat (48×48); one global texture cannot be both sizes. Resolve by unifying on 16-native `char.keeper` (16×22) with combat display-scaling ×3 (unit origin bottom-centre, body overhangs the cell — standard tactics look), OR giving combat a distinct key. Until resolved, do NOT register `char.keeper` globally — it would shrink combat's unit or stretch hamlet's player.
+**D2 RESOLVED (orchestrator, 2026-07-19):** every character/companion/NPC is ONE 16×24-native texture (`scale: 1`) used EVERYWHERE. The hamlet consumes it natively (16px grid + 3× camera zoom); combat DISPLAY-scales each unit by `CELL / frame.width` with origin bottom-centre `(0.5, 1)` so bodies overhang the cell (standard tactics look) — this handles any native height, so 16-native chars and 48-native (`scale: 3`) enemies both render correctly. No shared-key size conflict remains.
 
 ---
 

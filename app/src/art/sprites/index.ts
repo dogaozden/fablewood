@@ -51,6 +51,8 @@ export const SPRITES: readonly SpriteDef[] = [
       { name: 'char.keeper.idle', from: 0, to: 1, frameRate: 2, repeat: -1 },
       { name: 'char.keeper.walk.down', from: 2, to: 5, frameRate: 8, repeat: -1 },
       { name: 'char.keeper.walk.up', from: 6, to: 9, frameRate: 8, repeat: -1 },
+      { name: 'char.keeper.walk.right', from: 10, to: 13, frameRate: 8, repeat: -1 },
+      { name: 'char.keeper.walk.left', from: 14, to: 17, frameRate: 8, repeat: -1 },
     ],
   },
   // Hamlet ground tiles — keys match hamlet/textures.ts; auto-upgrade the hamlet

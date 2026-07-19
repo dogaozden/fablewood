@@ -197,15 +197,102 @@ const upStepRight: readonly string[] = [
   '...zzzzzzzz.....',
 ];
 
+// ---- walk-right (profile): dark hood-back framing a skin face-front (+ one eye),
+// lantern held forward, clean scissor legs + 1px body-bob. Reviewed:
+// docs/art-reviews/char-keeper-walk-right.md. walk-left = horizontal mirror (§3).
+const rightRest: readonly string[] = [
+  '................',
+  '....xggx........',
+  '...xgggggx......',
+  '..xgggggggFx....',
+  '..xgggffFttx....',
+  '..xgggfFtxtx....',
+  '..xgggfFtttx....',
+  '..xggggfFttx....',
+  '..xgggggffx.....',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGAx..',
+  '..xgggggffFAx...',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xggggfffFx....',
+  '..xggggfffFx....',
+  '..xgggffffFx....',
+  '..xffffffffx....',
+  '...xkkkkx.......',
+  '...xKKKKx.......',
+  '...zzzzz........',
+];
+const rightStepA: readonly string[] = [
+  '....xggx........',
+  '...xgggggx......',
+  '..xgggggggFx....',
+  '..xgggffFttx....',
+  '..xgggfFtxtx....',
+  '..xgggfFtttx....',
+  '..xggggfFttx....',
+  '..xgggggffx.....',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGAx..',
+  '..xgggggffFAx...',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xggggfffFx....',
+  '..xggggfffFx....',
+  '..xgggffffFx....',
+  '..xffffffffx....',
+  '..xkk..KKx......',
+  '..x....KKx......',
+  '................',
+  '...zzzzzzz......',
+];
+const rightStepB: readonly string[] = [
+  '....xggx........',
+  '...xgggggx......',
+  '..xgggggggFx....',
+  '..xgggffFttx....',
+  '..xgggfFtxtx....',
+  '..xgggfFtttx....',
+  '..xggggfFttx....',
+  '..xgggggffx.....',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGWx..',
+  '..xgggggfFxGAx..',
+  '..xgggggffFAx...',
+  '..xgggggffFx....',
+  '..xgggggffFx....',
+  '..xggggfffFx....',
+  '..xggggfffFx....',
+  '..xgggffffFx....',
+  '..xffffffffx....',
+  '..xKK..kkx......',
+  '..xKK...........',
+  '................',
+  '...zzzzzzz......',
+];
+/** horizontal mirror of a frame: right-facing → left-facing (style-contract §3) */
+const mir = (f: readonly string[]): readonly string[] => f.map((r) => [...r].reverse().join(''));
+
 /** char.keeper sheet. Frame layout (index → anim):
- *  0-1  idle (idle0, idle1)                          → char.keeper.idle
- *  2-5  walk-down (stepLeft, pass, stepRight, pass)   → char.keeper.walk.down
- *  6-9  walk-up   (stepLeft, pass, stepRight, pass)   → char.keeper.walk.up
- *  left/right (profile) land in a later batch. */
+ *  0-1   idle                          → char.keeper.idle
+ *  2-5   walk.down                      → char.keeper.walk.down
+ *  6-9   walk.up                        → char.keeper.walk.up
+ *  10-13 walk.right (profile)           → char.keeper.walk.right
+ *  14-17 walk.left  (mirror of right)   → char.keeper.walk.left */
 export const keeperSheet: readonly (readonly string[])[] = [
   idle0, idle1,
   stepLeft, idle0, stepRight, idle0,
   upStepLeft, upRest, upStepRight, upRest,
+  rightStepA, rightRest, rightStepB, rightRest,
+  mir(rightStepA), mir(rightRest), mir(rightStepB), mir(rightRest),
 ];
 
 /** kept for the original idle exemplar reference */
