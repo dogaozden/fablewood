@@ -13,7 +13,11 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "shot": "node scripts/shot.mjs",
-    "check:zero-packs": "bash scripts/check-zero-packs.sh"
+    "check:zero-packs": "bash scripts/check-zero-packs.sh",
+    "dev:native": "vite --port 5183 --strictPort",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "ajv": "8.20.0",
@@ -24,6 +28,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
+    "@tauri-apps/cli": "2.11.4",
     "@types/node": "22.20.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
