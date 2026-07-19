@@ -1,3 +1,16 @@
 .DS_Store
 .claude/.DS_Store
 .venv/
+
+# node / build
+node_modules/
+dist/
+
+# transient test + e2e artifacts
+.state-e2e/
+test-results/
+playwright-report/
+playwright/.cache/
+*.local
+
+# NOTE: screenshots/ is intentionally NOT ignored — it is committed evidence.

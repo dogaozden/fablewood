@@ -1,0 +1,35 @@
+{
+  "name": "fablewood",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Fablewood — a knowledge-retention RPG engine (the Ledger Realms). Engine only; domain knowledge lives in packs/.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "shot": "node scripts/shot.mjs",
+    "check:zero-packs": "bash scripts/check-zero-packs.sh"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "phaser": "3.90.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tone": "15.1.22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "meta": {
+    "id": "mosslore",
+    "title": "Moss Lore of the Fablewood",
+    "version": "0.1.0",
+    "sources": [
+      {
+        "id": "green-compendium",
+        "title": "The Green Compendium",
+        "author": "The Old Mosswright",
+        "file": "raw/mosslore/compendium.md",
+        "version": "1.0"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "id": "mf-001",
+      "type": "concept",
+      "statement": "Lantern-moss glows brightest in the third week after rain.",
+      "detail": "The glow fades if the hollow dries before the third week.",
+      "source_ref": {
+        "file": "raw/mosslore/compendium.md",
+        "loc": "p.12",
+        "quote": "Lantern-moss glows brightest in the third week after rain."
+      },
+      "as_of": "2026-07-19",
+      "source_version": "1.0",
+      "tags": ["lantern-moss", "glow"],
+      "difficulty": 2,
+      "prereqs": []
+    },
+    {
+      "id": "mf-002",
+      "type": "rule",
+      "statement": "Never harvest whispermoss before the frost-bell rings.",
+      "source_ref": {
+        "file": "raw/mosslore/compendium.md",
+        "loc": "p.31",
+        "quote": "Never harvest whispermoss before the frost-bell rings."
+      },
+      "as_of": "2026-07-19",
+      "source_version": "1.0",
+      "tags": ["whispermoss"],
+      "difficulty": 3,
+      "prereqs": ["mf-001"]
+    },
+    {
+      "id": "mf-003",
+      "type": "number",
+      "statement": "A healthy moss-hollow holds seven singing stones.",
+      "source_ref": {
+        "file": "raw/mosslore/compendium.md",
+        "loc": "p.44",
+        "quote": "A healthy moss-hollow holds seven singing stones."
+      },
+      "as_of": "2026-07-19",
+      "source_version": "1.0",
+      "difficulty": 1
+    },
+    {
+      "id": "mf-004",
+      "type": "dont",
+      "statement": "Don't let emberfoxes near the dampmoss beds.",
+      "source_ref": {
+        "file": "raw/mosslore/compendium.md",
+        "loc": "p.58",
+        "quote": "Don't let emberfoxes near the dampmoss beds."
+      },
+      "as_of": "2026-07-19",
+      "source_version": "1.0",
+      "difficulty": 2
+    }
+  ],
+  "encounters": [
+    {
+      "id": "me-001",
+      "fact_ids": ["mf-001"],
+      "kind": "mcq",
+      "template_vars": { "moss": "lantern-moss" },
+      "prompt": "When does {{moss}} glow brightest after rain?",
+      "options": ["First week", "Second week", "Third week", "It never glows"],
+      "answer": "Third week",
+      "trap_notes": "Distractors are the adjacent weeks — tests precise recall, not vibe."
+    },
+    {
+      "id": "me-002",
+      "fact_ids": ["mf-002"],
+      "kind": "free_recall",
+      "prompt": "Recite the whispermoss harvest rule.",
+      "rubric": "Credit if the answer says to wait for the frost-bell before harvesting whispermoss."
+    },
+    {
+      "id": "me-003",
+      "fact_ids": ["mf-004"],
+      "kind": "scenario_branch",
+      "prompt": "An emberfox pads toward the dampmoss beds. What do you do?",
+      "branches": [
+        { "label": "Shoo it away gently", "outcome": "The dampmoss beds are safe.", "correct": true },
+        { "label": "Let it warm itself", "outcome": "The dampmoss withers by morning.", "correct": false }
+      ]
+    },
+    {
+      "id": "me-004",
+      "fact_ids": ["mf-001", "mf-003"],
+      "kind": "match",
+      "prompt": "Match each moss to its trait.",
+      "options": [["Lantern-moss", "Whispermoss"], ["glow", "song"]],
+      "answer": [["Lantern-moss", "glow"], ["Whispermoss", "song"]]
+    },
+    {
+      "id": "me-005",
+      "fact_ids": ["mf-001", "mf-002"],
+      "kind": "order",
+      "prompt": "Put the whispermoss harvest steps in order.",
+      "options": ["Gather at dawn", "Wait for the frost-bell", "Dry in lantern-light"],
+      "answer": ["Wait for the frost-bell", "Gather at dawn", "Dry in lantern-light"]
+    }
+  ],
+  "quests": [
+    {
+      "id": "mq-001",
+      "title": "The Mosswright's Errand",
+      "region": "The Fablewood",
+      "encounter_ids": ["me-001", "me-002", "me-003", "me-004", "me-005"],
+      "dialogue": [
+        { "speaker": "The Old Mosswright", "text": "Ah, an apprentice. Let us see what the hollows have taught you." }
+      ],
+      "reward": { "xp": 50, "item": "glimmercap-lantern" }
+    }
+  ],
+  "npcs": [
+    {
+      "id": "mn-001",
+      "name": "The Old Mosswright",
+      "role": "mentor",
+      "blurb": "Keeper of the moss-hollows; speaks in riddles, harvests in silence."
+    }
+  ],
+  "metaphor_map": {
+    "the Fade": "forgetting a fact",
+    "ghost": "a fact overdue for review",
+    "weld strength": "a fact's Leitner box"
+  }
+}

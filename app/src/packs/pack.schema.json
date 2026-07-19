@@ -1,0 +1,185 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fablewood.local/pack.schema.json",
+  "title": "Fablewood knowledge pack",
+  "description": "The pack contract — Fable_SPEC.md §4. One engine, many packs; this is the seam.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["meta", "facts", "encounters", "quests", "metaphor_map"],
+  "properties": {
+    "meta": { "$ref": "#/definitions/meta" },
+    "facts": { "type": "array", "items": { "$ref": "#/definitions/fact" } },
+    "encounters": { "type": "array", "items": { "$ref": "#/definitions/encounter" } },
+    "quests": { "type": "array", "items": { "$ref": "#/definitions/quest" } },
+    "npcs": { "type": "array", "items": { "$ref": "#/definitions/npc" } },
+    "metaphor_map": { "$ref": "#/definitions/metaphor_map" }
+  },
+  "definitions": {
+    "meta": {
+      "type": "object",
+      "required": ["id", "title", "version", "sources"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/source" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["title"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "minLength": 1 },
+        "author": { "type": "string" },
+        "file": { "type": "string" },
+        "loc": { "type": ["string", "number"] },
+        "url": { "type": "string" },
+        "version": { "type": "string" }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "statement",
+        "source_ref",
+        "as_of",
+        "source_version",
+        "difficulty"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": {
+          "type": "string",
+          "enum": ["rule", "concept", "advice", "do", "dont", "number", "story"]
+        },
+        "statement": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" },
+        "source_ref": { "$ref": "#/definitions/source_ref" },
+        "as_of": { "type": "string", "minLength": 1 },
+        "source_version": { "type": "string", "minLength": 1 },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "difficulty": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "prereqs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "source_ref": {
+      "type": "object",
+      "required": ["file", "loc", "quote"],
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "loc": { "type": ["string", "number"] },
+        "quote": { "type": "string", "minLength": 1 }
+      }
+    },
+    "encounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fact_ids", "kind", "prompt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "fact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["mcq", "free_recall", "scenario_branch", "match", "order"]
+        },
+        "template_vars": { "type": "object" },
+        "prompt": { "type": "string", "minLength": 1 },
+        "options": { "type": "array" },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "properties": {
+              "label": { "type": "string" },
+              "outcome": { "type": "string" },
+              "correct": { "type": "boolean" }
+            }
+          }
+        },
+        "answer": {
+          "type": ["string", "number", "boolean", "array", "object"]
+        },
+        "rubric": { "type": ["string", "object"] },
+        "trap_notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "mcq" } } },
+          "then": { "required": ["options", "answer"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "match" } } },
+          "then": { "required": ["options", "answer"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "order" } } },
+          "then": { "required": ["options", "answer"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "scenario_branch" } } },
+          "then": { "required": ["branches"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "free_recall" } } },
+          "then": { "required": ["rubric"] }
+        }
+      ]
+    },
+    "quest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "region", "encounter_ids"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "region": { "type": "string", "minLength": 1 },
+        "encounter_ids": { "type": "array", "items": { "type": "string" } },
+        "dialogue": {
+          "type": "array",
+          "items": { "type": ["string", "object"] }
+        },
+        "reward": { "type": ["string", "object"] }
+      }
+    },
+    "npc": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "role": { "type": "string" },
+        "blurb": { "type": "string" }
+      }
+    },
+    "metaphor_map": {
+      "oneOf": [
+        { "type": "object" },
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["game", "real"],
+            "properties": {
+              "game": { "type": "string" },
+              "real": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
