@@ -21,6 +21,7 @@ import {
 } from '../../contracts';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
+import { music } from '../../../music/instance';
 import {
   firstUnclearedIndex,
   markRoomCleared,
@@ -83,6 +84,10 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   create(): void {
+    // The Vaults explore in tense silence — the battle theme hits only when combat
+    // starts, and that contrast is deliberate (stops the hamlet motif on entry, and
+    // the battle motif when combat returns us here).
+    music.stop();
     this.view = new VaultView(this);
     this.handlers = { onRoom: (i) => this.onRoom(i), onCamp: () => void this.onCamp() };
     this.view.renderChrome();

@@ -771,12 +771,14 @@ export class CombatScene extends Phaser.Scene {
     }
 
     const payload: CombatOutcome = { outcome, hpLost: this.hpLost, results: this.results };
+    // Fire the event now (listeners registered before launch catch it) AND hand the
+    // outcome to the return scene's init data (listeners registered on resume catch it).
     this.game.events.emit('combat:resolved', payload);
 
     this.time.delayedCall(1600, () => {
       if (this.destroyed) return;
       const back = this.launch.returnScene;
-      if (back && this.scene.get(back)) this.scene.start(back, { seed: this.launch.seed });
+      if (back && this.scene.get(back)) this.scene.start(back, { seed: this.launch.seed, combatOutcome: payload });
     });
   }
 
