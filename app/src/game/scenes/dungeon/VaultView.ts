@@ -13,6 +13,9 @@ import { C, hex } from './palette';
 const W = 960;
 const H = 540;
 const STRIP_Y = 300;
+/** Match the encounters overlay's parchment type (encounters/styles.ts) so the
+ * two card families read as one system. */
+const FONT = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
 
 export interface NodeHandlers {
   onRoom: (index: number) => void;
@@ -60,7 +63,7 @@ export class VaultView {
 
     this.headerText = s.add
       .text(W / 2, 58, '', {
-        fontFamily: 'Georgia, serif',
+        fontFamily: FONT,
         fontSize: '30px',
         color: hex(C.lanternGold),
       })
@@ -71,7 +74,7 @@ export class VaultView {
 
     this.statusText = s.add
       .text(W - 20, 22, '', {
-        fontFamily: 'Georgia, serif',
+        fontFamily: FONT,
         fontSize: '14px',
         color: hex(C.parchment),
       })
@@ -175,7 +178,7 @@ export class VaultView {
     if (region && region !== name) {
       this.scene.add
         .text(W / 2, 84, region, {
-          fontFamily: 'Georgia, serif',
+          fontFamily: FONT,
           fontSize: '13px',
           color: hex(C.duskRose),
         })
@@ -283,7 +286,7 @@ export class VaultView {
     }
 
     if (state === 'cleared') {
-      c.add(s.add.text(0, 0, '✓', { fontFamily: 'Georgia, serif', fontSize: '22px', color: hex(C.glowCore) }).setOrigin(0.5));
+      c.add(s.add.text(0, 0, '✓', { fontFamily: FONT, fontSize: '22px', color: hex(C.glowCore) }).setOrigin(0.5));
     } else if (state === 'locked') {
       // padlock placeholder (prop.vault-door seam)
       if (s.textures.exists('prop.vault-door')) {
@@ -317,7 +320,7 @@ export class VaultView {
   private label(x: number, y: number, text: string, color: number): Phaser.GameObjects.Text {
     return this.scene.add
       .text(x, y, text, {
-        fontFamily: 'Georgia, serif',
+        fontFamily: FONT,
         fontSize: '12px',
         color: hex(color),
         align: 'center',
@@ -349,22 +352,44 @@ export class VaultView {
 
   // ---- cards ----------------------------------------------------------------
 
+  // Parchment card matching encounters/styles.ts .fw-panel: lit top-left gradient,
+  // bark border + inner gold hairline, soft ring + drop shadow, 20px radius.
   private openPanel(w: number, h: number): Phaser.GameObjects.Container {
     this.clearOverlay();
     const s = this.scene;
     const cont = s.add.container(0, 0).setDepth(200);
-    const scrim = s.add.rectangle(W / 2, H / 2, W, H, C.voidBlack, 0.58).setInteractive();
+    const scrim = s.add.rectangle(W / 2, H / 2, W, H, C.voidBlack, 0.62).setInteractive();
     const panel = s.add.graphics();
     const x = (W - w) / 2;
     const y = (H - h) / 2;
-    panel.fillStyle(C.parchment, 1).fillRoundedRect(x, y, w, h, 14);
-    panel.lineStyle(3, C.bark, 1).strokeRoundedRect(x, y, w, h, 14);
-    panel.lineStyle(1, C.timberLi, 0.8).strokeRoundedRect(x + 5, y + 5, w - 10, h - 10, 10);
+    const r = 20;
+    panel.fillStyle(C.voidBlack, 0.34).fillRoundedRect(x - 3, y - 1, w + 6, h + 12, r + 4); // drop shadow
+    panel.fillStyle(C.bark, 0.32).fillRoundedRect(x - 3, y - 3, w + 6, h + 6, r + 3); // ink ring
+    panel.fillGradientStyle(C.glowCore, C.parchment, C.parchment, C.pathStone, 1); // lantern-lit parchment
+    panel.fillRoundedRect(x, y, w, h, r);
+    panel.lineStyle(2, C.bark, 1).strokeRoundedRect(x, y, w, h, r);
+    panel.lineStyle(1, C.lanternGold, 0.4).strokeRoundedRect(x + 3, y + 3, w - 6, h - 6, r - 3);
     cont.add([scrim, panel]);
     this.overlay = cont;
     cont.setAlpha(0);
     s.tweens.add({ targets: cont, alpha: 1, duration: 220 });
     return cont;
+  }
+
+  /** Overlay-style eyebrow: uppercase, letter-spaced, ember (matches .fw-eyebrow). */
+  private eyebrow(cx: number, y: number, text: string): Phaser.GameObjects.Text {
+    return this.scene.add
+      .text(cx, y, text.toUpperCase(), { fontFamily: FONT, fontSize: '11px', color: hex(C.deepEmber), fontStyle: 'bold' })
+      .setLetterSpacing(4)
+      .setOrigin(0.5, 0);
+  }
+
+  /** Overlay-style rule: a gold→ember hairline (matches .fw-rule). */
+  private goldRule(cx: number, y: number, width: number): Phaser.GameObjects.Graphics {
+    const g = this.scene.add.graphics();
+    g.fillStyle(C.amber, 0.45).fillRect(cx - width / 2, y, width, 2);
+    g.fillStyle(C.lanternGold, 0.9).fillRect(cx - width * 0.32, y, width * 0.64, 2);
+    return g;
   }
 
   clearOverlay(): void {
@@ -384,20 +409,25 @@ export class VaultView {
   ): Promise<void> {
     const s = this.scene;
     const w = 560;
-    const h = facts.length ? 250 : 210;
+    const hasTeaser = facts.length > 0 && !opts.revisit;
+    const h = hasTeaser ? 288 : 244;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
-    let ty = (H - h) / 2 + 34;
+    let ty = (H - h) / 2 + 30;
 
-    cont.add(s.add.text(cx, ty, room.name, { fontFamily: 'Georgia, serif', fontSize: '25px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
+    cont.add(this.eyebrow(cx, ty, opts.revisit ? 'A chamber cleared' : 'You descend into'));
+    ty += 24;
+    cont.add(s.add.text(cx, ty, room.name, { fontFamily: FONT, fontSize: '27px', color: hex(C.barkShadow), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 70 } }).setOrigin(0.5, 0));
     ty += 42;
+    cont.add(this.goldRule(cx, ty, 220));
+    ty += 16;
     if (room.blurb) {
-      cont.add(s.add.text(cx, ty, room.blurb, { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 80 }, lineSpacing: 4 }).setOrigin(0.5, 0));
-      ty += 78;
+      cont.add(s.add.text(cx, ty, room.blurb, { fontFamily: FONT, fontSize: '15px', color: hex(C.darkBark), align: 'center', wordWrap: { width: w - 90 }, lineSpacing: 4 }).setOrigin(0.5, 0));
+      ty += 74;
     }
-    if (facts.length && !opts.revisit) {
+    if (hasTeaser) {
       const n = facts.length;
-      cont.add(s.add.text(cx, ty, `${n} faded record${n > 1 ? 's' : ''} stir here — the ledger will show them.`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: hex(C.deepEmber), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 90 } }).setOrigin(0.5, 0));
+      cont.add(s.add.text(cx, ty, `✦  ${n} faded record${n > 1 ? 's' : ''} wait here — the ledger will show them`, { fontFamily: FONT, fontSize: '13px', color: hex(C.bark), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 80 } }).setOrigin(0.5, 0));
     }
 
     return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Close' : 'Descend ▸');
@@ -406,19 +436,21 @@ export class VaultView {
   showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {
     const s = this.scene;
     const w = 480;
-    const h = 232;
+    const h = 244;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
-    const top = (H - h) / 2 + 32;
-    cont.add(s.add.text(cx, top, 'The Camp at the Vault-Mouth', { fontFamily: 'Georgia, serif', fontSize: '22px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
-    cont.add(s.add.text(cx, top + 42, 'Lanterns trimmed, wounds bound, the ledger set by the fire.', { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 70 } }).setOrigin(0.5, 0));
+    const top = (H - h) / 2 + 28;
+    cont.add(this.eyebrow(cx, top, 'You make camp'));
+    cont.add(s.add.text(cx, top + 22, 'The Camp at the Vault-Mouth', { fontFamily: FONT, fontSize: '22px', color: hex(C.barkShadow), fontStyle: 'bold' }).setOrigin(0.5, 0));
+    cont.add(this.goldRule(cx, top + 56, 200));
+    cont.add(s.add.text(cx, top + 70, 'Lanterns trimmed, wounds bound, the ledger set by the fire.', { fontFamily: FONT, fontSize: '15px', color: hex(C.darkBark), align: 'center', wordWrap: { width: w - 70 } }).setOrigin(0.5, 0));
     // concrete heal feedback — show the mend, not a generic line
     const healLine = !heal
       ? 'The party rests, and is restored to full.'
       : heal.before < heal.after
         ? `The hearth mends you — ${heal.before} → ${heal.after} HP.`
         : `The hearth is warm; your party is already whole — ${heal.after}/${heal.after} HP.`;
-    cont.add(s.add.text(cx, top + 76, healLine, { fontFamily: 'Georgia, serif', fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
+    cont.add(s.add.text(cx, top + 104, healLine, { fontFamily: FONT, fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
     return this.finishCard(cont, h, mode, 'Onward ▸');
   }
 
@@ -426,18 +458,20 @@ export class VaultView {
   showResumeChoice(roomName: string): Promise<'continue' | 'camp'> {
     const s = this.scene;
     const w = 500;
-    const h = 220;
+    const h = 232;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
-    const top = (H - h) / 2 + 30;
-    cont.add(s.add.text(cx, top, 'The Ledger remembers your descent.', { fontFamily: 'Georgia, serif', fontSize: '19px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
+    const top = (H - h) / 2 + 28;
+    cont.add(this.eyebrow(cx, top, 'The ledger remembers'));
+    cont.add(s.add.text(cx, top + 22, 'Where do you take up the descent?', { fontFamily: FONT, fontSize: '20px', color: hex(C.barkShadow), fontStyle: 'bold' }).setOrigin(0.5, 0));
+    cont.add(this.goldRule(cx, top + 54, 200));
     return new Promise((resolve) => {
       const pick = (v: 'continue' | 'camp') => {
         this.clearOverlay();
         resolve(v);
       };
-      cont.add(this.button(cx, top + 70, `Continue from ${roomName}`, C.leaf, () => pick('continue')));
-      cont.add(this.button(cx, top + 122, 'Return to the camp', C.timber, () => pick('camp')));
+      cont.add(this.button(cx, top + 84, `Continue from ${roomName}`, C.leaf, () => pick('continue')));
+      cont.add(this.button(cx, top + 136, 'Return to the camp', C.timber, () => pick('camp')));
     });
   }
 
@@ -445,7 +479,7 @@ export class VaultView {
     const s = this.scene;
     const cy = (H + h) / 2 - 30;
     if (mode !== 'auto') {
-      cont.add(s.add.text(W / 2, cy, hint, { fontFamily: 'Georgia, serif', fontSize: '14px', color: hex(C.deepEmber) }).setOrigin(0.5));
+      cont.add(s.add.text(W / 2, cy, hint, { fontFamily: FONT, fontSize: '14px', color: hex(C.deepEmber) }).setOrigin(0.5));
     }
     if (mode === 'persist') return Promise.resolve(); // leave it up (dev screenshots)
     if (mode === 'auto') {
@@ -470,7 +504,7 @@ export class VaultView {
     const s = this.scene;
     const b = s.add.container(x, y);
     const bg = s.add.rectangle(0, 0, 300, 40, color, 1).setStrokeStyle(2, C.darkBark, 1);
-    const t = s.add.text(0, 0, text, { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.parchment) }).setOrigin(0.5);
+    const t = s.add.text(0, 0, text, { fontFamily: FONT, fontSize: '15px', color: hex(C.parchment) }).setOrigin(0.5);
     b.add([bg, t]);
     b.setSize(300, 40).setInteractive({ useHandCursor: true });
     b.on('pointerover', () => bg.setScale(1.04));
@@ -484,7 +518,7 @@ export class VaultView {
   combatFlash(room: DungeonRoom): Promise<void> {
     const s = this.scene;
     const flash = s.add.rectangle(W / 2, H / 2, W, H, C.shadowPlum, 0).setDepth(150);
-    const label = s.add.text(W / 2, H / 2, `The wards of ${room.name} stir…`, { fontFamily: 'Georgia, serif', fontSize: '20px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(151).setAlpha(0);
+    const label = s.add.text(W / 2, H / 2, `The wards of ${room.name} stir…`, { fontFamily: FONT, fontSize: '20px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(151).setAlpha(0);
     return new Promise((resolve) => {
       s.tweens.add({ targets: flash, alpha: 0.55, duration: 200, yoyo: true, hold: 260 });
       s.tweens.add({
@@ -506,7 +540,7 @@ export class VaultView {
     const s = this.scene;
     const color = tone === 'warn' ? C.ember : tone === 'good' ? C.leafHi : C.parchment;
     const y = H - 70;
-    const t = s.add.text(W / 2, y, text, { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(color), backgroundColor: 'rgba(16,11,10,0.72)', padding: { x: 12, y: 7 } }).setOrigin(0.5).setDepth(120).setAlpha(0);
+    const t = s.add.text(W / 2, y, text, { fontFamily: FONT, fontSize: '15px', color: hex(color), backgroundColor: 'rgba(16,11,10,0.72)', padding: { x: 12, y: 7 } }).setOrigin(0.5).setDepth(120).setAlpha(0);
     s.tweens.add({ targets: t, alpha: 1, y: y - 8, duration: 220, ease: 'Quad.out' });
     s.tweens.add({ targets: t, alpha: 0, delay: 2000, duration: 500, onComplete: () => t.destroy() });
   }
@@ -520,8 +554,8 @@ export class VaultView {
     const cont = this.openPanel(520, 170);
     const cx = W / 2;
     const top = (H - 170) / 2 + 40;
-    cont.add(s.add.text(cx, top, 'The way is lost.', { fontFamily: 'Georgia, serif', fontSize: '20px', color: hex(C.berry), fontStyle: 'bold' }).setOrigin(0.5));
-    cont.add(s.add.text(cx, top + 40, text, { fontFamily: 'Georgia, serif', fontSize: '14px', color: hex(C.bark), align: 'center', wordWrap: { width: 440 } }).setOrigin(0.5, 0));
+    cont.add(s.add.text(cx, top, 'The way is lost.', { fontFamily: FONT, fontSize: '20px', color: hex(C.berry), fontStyle: 'bold' }).setOrigin(0.5));
+    cont.add(s.add.text(cx, top + 40, text, { fontFamily: FONT, fontSize: '14px', color: hex(C.bark), align: 'center', wordWrap: { width: 440 } }).setOrigin(0.5, 0));
   }
 
   /** Boss finale: golden light sweep + reward. hold=true leaves it on screen. */
@@ -536,10 +570,10 @@ export class VaultView {
     const ring = s.add.circle(cx, cy - 26, 44, C.glowCore, 0).setStrokeStyle(3, C.glowCore, 0.9).setDepth(301).setBlendMode(Phaser.BlendModes.ADD);
     const sweep = s.add.rectangle(-200, H / 2, 260, H, C.glowCore, 0.85).setDepth(302).setBlendMode(Phaser.BlendModes.ADD);
 
-    const title = s.add.text(cx, cy - 62, 'THE VAULT OPENS', { fontFamily: 'Georgia, serif', fontSize: '38px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(303).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 12, false, true);
+    const title = s.add.text(cx, cy - 62, 'THE VAULT OPENS', { fontFamily: FONT, fontSize: '38px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(303).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 12, false, true);
     const rule = s.add.rectangle(cx, cy - 26, 220, 2, C.amber, 0.8).setDepth(303).setAlpha(0);
-    const line = s.add.text(cx, cy + 4, reward, { fontFamily: 'Georgia, serif', fontSize: '20px', color: hex(C.lanternGold), fontStyle: 'bold', align: 'center', wordWrap: { width: 640 } }).setOrigin(0.5).setDepth(303).setAlpha(0);
-    const streakT = s.add.text(cx, cy + 48, `Streak  ${streak}`, { fontFamily: 'Georgia, serif', fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
+    const line = s.add.text(cx, cy + 4, reward, { fontFamily: FONT, fontSize: '20px', color: hex(C.lanternGold), fontStyle: 'bold', align: 'center', wordWrap: { width: 640 } }).setOrigin(0.5).setDepth(303).setAlpha(0);
+    const streakT = s.add.text(cx, cy + 48, `Streak  ${streak}`, { fontFamily: FONT, fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
 
     return new Promise((resolve) => {
       s.tweens.add({ targets: scrim, alpha: 1, duration: 300 });
