@@ -4,6 +4,7 @@
 // then (2) dropping its grid file here and listing it below. Keys are kebab-case
 // slugs (style-contract §7); scenes reference these keys.
 import { keeperIdleDown } from './keeper';
+import { tileGrass, tilePath, tileWater } from './hamletTiles';
 
 export interface SpriteDef {
   /** texture key scenes use, e.g. this.add.image(x, y, 'char.keeper') */
@@ -19,6 +20,11 @@ export const SPRITES: readonly SpriteDef[] = [
   // Neutral key for now (does NOT claim combat's `char.keeper` until the char
   // footprint contract is pinned — see coordination note to orchestrator).
   { key: 'keeper-idle-down', grid: keeperIdleDown, scale: 1 },
+  // Hamlet ground tiles — keys match hamlet/textures.ts; auto-upgrade the hamlet
+  // once buildTextures(this) runs in BootScene. Hamlet-only keys, no combat clash.
+  { key: 'tile.grass', grid: tileGrass, scale: 1 },
+  { key: 'tile.path', grid: tilePath, scale: 1 },
+  { key: 'tile.water', grid: tileWater, scale: 1 },
 ];
 
 /** All texture keys buildTextures() produces — consumers may check textures.exists(key). */
