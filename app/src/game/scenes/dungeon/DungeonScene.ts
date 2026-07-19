@@ -222,12 +222,12 @@ export class DungeonScene extends Phaser.Scene {
     void this.enterRoom(index);
   }
 
-  private async onCamp(): Promise<void> {
+  private async onCamp(opts: { persist?: boolean } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     await services.save.save({ hp: PARTY_MAX_HP, scene: 'vaults', dungeon: this.progress });
     this.refreshStatus();
-    await this.view.showCampCard();
+    await this.view.showCampCard(opts.persist ? 'persist' : 'wait');
     this.busy = false;
   }
 
@@ -245,18 +245,24 @@ export class DungeonScene extends Phaser.Scene {
 
   // ---- room sequence --------------------------------------------------------
 
-  private async enterRoom(index: number, opts: { stopAfterCard?: boolean } = {}): Promise<void> {
+  private async enterRoom(index: number, opts: { mode?: 'card' | 'drive' } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
     const room = this.spec.rooms[index];
     const facts = this.teachingFacts(room);
 
-    await this.view.showBlurbCard(room, facts, { persist: !!opts.stopAfterCard });
-    if (room.teaching?.length) await services.showTeaching(facts);
-    if (opts.stopAfterCard) {
+    // 'card' (dev screenshot): show my entry card and stop — never opens the
+    // teaching modal (which awaits a dismiss and would hang a headless capture).
+    if (opts.mode === 'card') {
+      await this.view.showBlurbCard(room, facts, { mode: 'persist' });
       this.busy = false;
       return;
     }
+
+    const driving = opts.mode === 'drive';
+    await this.view.showBlurbCard(room, facts, { mode: driving ? 'auto' : 'wait' });
+    // discovered documents (encounters agent's modal) — skipped only in auto-drive
+    if (!driving && room.teaching?.length) await services.showTeaching(facts);
 
     // teeth-but-fair: persist progress BEFORE combat so a wipe never costs story
     await services.save.save({ scene: 'vaults', dungeon: this.progress });
@@ -329,7 +335,7 @@ export class DungeonScene extends Phaser.Scene {
     await services.save.save({ dungeon: this.progress });
     this.drawMap();
     this.refreshStatus();
-    this.view.lootToast(`The ${room.name} falls quiet. You pocket a Faded Coin.`);
+    this.view.lootToast(`${room.name} falls quiet. You pocket a Faded Coin.`);
     this.busy = false;
     return { transitioned: false };
   }
@@ -387,14 +393,31 @@ export class DungeonScene extends Phaser.Scene {
     const first = firstUnclearedIndex(rooms, this.progress.cleared);
     switch (this.auto) {
       case 'enter':
-        if (first < rooms.length) await this.enterRoom(first, { stopAfterCard: true });
+        if (first < rooms.length) await this.enterRoom(first, { mode: 'card' });
         break;
       case 'win':
-        if (first < rooms.length) await this.enterRoom(first);
+        if (first < rooms.length) await this.enterRoom(first, { mode: 'drive' });
         break;
+      case 'teach': {
+        // integration capture: the encounters modal fed by our resolved facts
+        const room = rooms[first < rooms.length ? first : 0];
+        this.markReadyOnce();
+        void services.showTeaching(this.teachingFacts(room));
+        break;
+      }
       case 'camp':
-        await this.onCamp();
+        await this.onCamp({ persist: true });
         break;
+      case 'full': {
+        // full-playthrough smoke: drive every room in order (teach → sim fight →
+        // gate → clear), ending on the boss finale → hamlet. Exercises the gate.
+        for (let guard = 0; guard < rooms.length + 2; guard++) {
+          const idx = firstUnclearedIndex(rooms, this.progress.cleared);
+          if (idx >= rooms.length) break;
+          await this.enterRoom(idx, { mode: 'drive' });
+        }
+        break;
+      }
       case 'boss':
       case 'bossbeat': {
         const bossIdx = rooms.findIndex((r) => r.boss);
@@ -408,7 +431,7 @@ export class DungeonScene extends Phaser.Scene {
           const reward = (this.pack ? rewardText(bossQuest(this.pack)) : null) ?? DEV_REWARD;
           await this.view.vaultOpensBeat(reward, services.save.get().streak + 1, { hold: true });
         } else {
-          await this.enterRoom(bossIdx);
+          await this.enterRoom(bossIdx, { mode: 'drive' });
         }
         break;
       }

@@ -20,6 +20,8 @@ export interface NodeHandlers {
 }
 
 type Toast = 'info' | 'warn' | 'good';
+/** 'wait' resolves on click · 'auto' auto-advances after a beat · 'persist' stays up. */
+export type CardMode = 'wait' | 'auto' | 'persist';
 
 export class VaultView {
   private roomNodes: Phaser.GameObjects.Container[] = [];
@@ -318,43 +320,38 @@ export class VaultView {
     this.overlay = undefined;
   }
 
-  /** Room-entry card. persist=true leaves it up (dev screenshots); else resolves on click. */
-  showBlurbCard(room: DungeonRoom, facts: FactLite[], opts: { persist?: boolean; revisit?: boolean }): Promise<void> {
+  /**
+   * Room-entry beat: title + blurb + a light teaser of how many records wait
+   * (the full "discovered documents" are services.showTeaching's job — blueprint
+   * §4). mode: 'wait' resolves on click, 'auto' auto-advances, 'persist' stays up.
+   */
+  showBlurbCard(
+    room: DungeonRoom,
+    facts: FactLite[],
+    opts: { mode?: CardMode; revisit?: boolean } = {},
+  ): Promise<void> {
     const s = this.scene;
     const w = 560;
-    const h = facts.length ? 356 : 236;
+    const h = facts.length ? 250 : 210;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
     let ty = (H - h) / 2 + 34;
 
     cont.add(s.add.text(cx, ty, room.name, { fontFamily: 'Georgia, serif', fontSize: '25px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
-    ty += 40;
+    ty += 42;
     if (room.blurb) {
       cont.add(s.add.text(cx, ty, room.blurb, { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 80 }, lineSpacing: 4 }).setOrigin(0.5, 0));
-      ty += 74;
+      ty += 78;
+    }
+    if (facts.length && !opts.revisit) {
+      const n = facts.length;
+      cont.add(s.add.text(cx, ty, `${n} faded record${n > 1 ? 's' : ''} stir here — the ledger will show them.`, { fontFamily: 'Georgia, serif', fontSize: '13px', color: hex(C.deepEmber), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 90 } }).setOrigin(0.5, 0));
     }
 
-    if (facts.length) {
-      cont.add(s.add.text(cx, ty, opts.revisit ? 'Records recovered here' : 'Discovered records', { fontFamily: 'Georgia, serif', fontSize: '13px', color: hex(C.deepEmber), fontStyle: 'italic' }).setOrigin(0.5, 0));
-      ty += 24;
-      const recBg = s.add.graphics();
-      recBg.fillStyle(C.timberLi, 0.25).fillRoundedRect(cx - (w - 90) / 2, ty, w - 90, 96, 8);
-      cont.add(recBg);
-      const shown = facts.slice(0, 2);
-      let ry = ty + 10;
-      for (const f of shown) {
-        cont.add(s.add.text(cx - (w - 110) / 2, ry, '“' + f.statement + '”', { fontFamily: 'Georgia, serif', fontSize: '13px', color: hex(C.darkBark), fontStyle: 'italic', wordWrap: { width: w - 120 } }).setOrigin(0, 0));
-        ry += 40;
-      }
-      if (facts.length > shown.length) {
-        cont.add(s.add.text(cx, ty + 100, `+${facts.length - shown.length} more in the ledger`, { fontFamily: 'Georgia, serif', fontSize: '11px', color: hex(C.bark) }).setOrigin(0.5, 0));
-      }
-    }
-
-    return this.finishCard(cont, h, opts.persist, opts.revisit ? 'Close' : 'Descend ▸');
+    return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Close' : 'Descend ▸');
   }
 
-  showCampCard(): Promise<void> {
+  showCampCard(mode: CardMode = 'wait'): Promise<void> {
     const s = this.scene;
     const w = 480;
     const h = 224;
@@ -363,7 +360,7 @@ export class VaultView {
     const top = (H - h) / 2 + 34;
     cont.add(s.add.text(cx, top, 'The Camp at the Vault-Mouth', { fontFamily: 'Georgia, serif', fontSize: '22px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
     cont.add(s.add.text(cx, top + 44, 'Lanterns trimmed, wounds bound, the ledger set by the fire.\nThe party rests, and is restored to full.', { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 70 }, lineSpacing: 5 }).setOrigin(0.5, 0));
-    return this.finishCard(cont, h, false, 'Onward ▸');
+    return this.finishCard(cont, h, mode, 'Onward ▸');
   }
 
   /** Resume choice on re-entry. Resolves 'continue' | 'camp'. */
@@ -385,11 +382,22 @@ export class VaultView {
     });
   }
 
-  private finishCard(cont: Phaser.GameObjects.Container, h: number, persist: boolean | undefined, hint: string): Promise<void> {
+  private finishCard(cont: Phaser.GameObjects.Container, h: number, mode: CardMode, hint: string): Promise<void> {
     const s = this.scene;
     const cy = (H + h) / 2 - 30;
-    cont.add(s.add.text(W / 2, cy, hint, { fontFamily: 'Georgia, serif', fontSize: '14px', color: hex(C.deepEmber) }).setOrigin(0.5));
-    if (persist) return Promise.resolve();
+    if (mode !== 'auto') {
+      cont.add(s.add.text(W / 2, cy, hint, { fontFamily: 'Georgia, serif', fontSize: '14px', color: hex(C.deepEmber) }).setOrigin(0.5));
+    }
+    if (mode === 'persist') return Promise.resolve(); // leave it up (dev screenshots)
+    if (mode === 'auto') {
+      // auto-advance (auto-drive flows): brief hold, then dismiss
+      return new Promise((resolve) => {
+        s.time.delayedCall(900, () => {
+          this.clearOverlay();
+          resolve();
+        });
+      });
+    }
     return new Promise((resolve) => {
       const scrim = cont.list[0] as Phaser.GameObjects.Rectangle;
       scrim.once('pointerdown', () => {

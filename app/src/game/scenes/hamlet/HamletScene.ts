@@ -174,7 +174,7 @@ export class HamletScene extends Phaser.Scene {
 
   private buildNpcs(): void {
     const defs: { key: string; x: number; y: number }[] = [
-      { key: 'char.berry', x: 262, y: 70 },
+      { key: 'char.berry', x: 245, y: 76 },
       { key: 'char.clerk', x: 44, y: 180 },
       { key: 'char.alder', x: 236, y: 198 },
     ];
