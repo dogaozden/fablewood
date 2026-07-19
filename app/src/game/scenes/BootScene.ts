@@ -36,6 +36,11 @@ export class BootScene extends Phaser.Scene {
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
+    // Lane-B painterly hamlet buildings — loaded on every path so they register
+    // before buildTextures() runs in create(); an existing key makes it skip the
+    // Lane-A grid bake, so the painterly art wins with zero scene edits.
+    this.load.image('prop.cottage', '/art/cottage-moss-roof.png');
+    this.load.image('prop.tavern', '/art/tavern-gilded-acorn.png');
   }
 
   create(): void {
