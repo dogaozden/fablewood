@@ -56,7 +56,13 @@ is what the bundled app does.
 # dev
 STATE_DIR="$PWD/state" npm run tauri:dev
 
-# bundled .app (env vars don't survive Finder; launch from a terminal)
+# bundled .app, run straight from the build output (env vars don't survive Finder;
+# launch from a terminal) — the binary inside the bundle is lowercase `fablewood`
+# even though the bundle/product name is `Fablewood.app`:
+STATE_DIR="$HOME/AI_Projects/learning/state" PACKS_DIR="$HOME/AI_Projects/learning/packs" \
+  ./src-tauri/target/release/bundle/macos/Fablewood.app/Contents/MacOS/fablewood
+
+# or the same, if you've dragged the bundle to /Applications:
 STATE_DIR="$HOME/AI_Projects/learning/state" PACKS_DIR="$HOME/AI_Projects/learning/packs" \
   /Applications/Fablewood.app/Contents/MacOS/fablewood
 ```
