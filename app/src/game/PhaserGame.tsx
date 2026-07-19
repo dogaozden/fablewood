@@ -45,7 +45,9 @@ export function PhaserGame() {
     for (const { key, scene } of getRegisteredScenes()) {
       game.scene.add(key, scene, false);
     }
-    game.scene.start(sceneKey, { seed });
+    // Always enter through boot: it bakes real textures + warms services, then
+    // forwards to the requested scene — so ?scene= jumps see real art too.
+    game.scene.start('boot', sceneKey === 'boot' ? { seed } : { seed, next: sceneKey });
 
     // Scale.FIT computes against the parent's size at construction, which can
     // settle a frame later under flex layout — refresh next frame and on every

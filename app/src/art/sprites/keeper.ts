@@ -118,7 +118,7 @@ const stepRight: readonly string[] = [
 
 /** char.keeper down sheet: [idle0, idle1, stepLeft, pass, stepRight, pass].
  *  anims: idle = 0..1, walk.down = 2..5 (step, pass, step, pass). */
-export const keeperDownSheet: readonly string[][] = [idle0, idle1, stepLeft, idle0, stepRight, idle0];
+export const keeperDownSheet: readonly (readonly string[])[] = [idle0, idle1, stepLeft, idle0, stepRight, idle0];
 
 /** kept for the original idle exemplar reference */
 export const keeperIdleDown = idle0;
