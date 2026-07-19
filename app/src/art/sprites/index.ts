@@ -5,8 +5,10 @@
 // Fan-out agents deliver per-set modules (set-enemies.ts, set-combat.ts,
 // set-hamlet-props.ts, set-characters.ts) exporting SpriteDef[]; the art director
 // imports + spreads them here — this index stays single-writer (no parallel edits).
-import { keeperDownSheet } from './keeper';
+import { keeperSheet } from './keeper';
 import { tileGrass, tilePath, tileWater } from './hamletTiles';
+// Fan-out set modules (agents deliver these; the art director reviews the gate + wires here):
+import { hamletProps } from './set-hamlet-props'; // A3 — reviewed PASS: docs/art-reviews/hamlet-props.md
 
 export interface SpriteAnim {
   /** global animation key, e.g. 'char.keeper.walk.down' */
@@ -34,17 +36,18 @@ export interface SpriteDef {
 }
 
 export const SPRITES: readonly SpriteDef[] = [
-  // The Keeper (player). Reviewed: docs/art-reviews/keeper-idle-down.md +
-  // char-keeper-walk-down.md. char.keeper is 16×24 everywhere (D2); combat
-  // display-scales ×3 with bottom-center origin. Batch 1: idle + walk.down;
-  // TODO(art-director): add walk.up/left/right frames + anims.
+  // The Keeper (player). Reviewed: keeper-idle-down.md, char-keeper-walk-down.md,
+  // char-keeper-walk-up.md. char.keeper is 16×24 everywhere (D2); combat
+  // display-scales ×3 with bottom-center origin. Batches 1-2: idle + walk.down + walk.up;
+  // TODO(art-director): add walk.left/right (profile) frames + anims.
   {
     key: 'char.keeper',
-    frames: keeperDownSheet,
+    frames: keeperSheet,
     scale: 1,
     anims: [
       { name: 'char.keeper.idle', from: 0, to: 1, frameRate: 2, repeat: -1 },
       { name: 'char.keeper.walk.down', from: 2, to: 5, frameRate: 8, repeat: -1 },
+      { name: 'char.keeper.walk.up', from: 6, to: 9, frameRate: 8, repeat: -1 },
     ],
   },
   // Hamlet ground tiles — keys match hamlet/textures.ts; auto-upgrade the hamlet
@@ -52,6 +55,8 @@ export const SPRITES: readonly SpriteDef[] = [
   { key: 'tile.grass', frames: [tileGrass], scale: 1 },
   { key: 'tile.path', frames: [tilePath], scale: 1 },
   { key: 'tile.water', frames: [tileWater], scale: 1 },
+  // Hamlet props (A3) — gate-reviewed + validated (dims/palette/rows) by the art director.
+  ...hamletProps,
 ];
 
 /** All base texture keys buildTextures() produces — consumers may check textures.exists(key). */

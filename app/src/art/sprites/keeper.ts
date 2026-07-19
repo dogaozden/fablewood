@@ -116,9 +116,97 @@ const stepRight: readonly string[] = [
   '...zzzzzzzz.....',
 ];
 
-/** char.keeper down sheet: [idle0, idle1, stepLeft, pass, stepRight, pass].
- *  anims: idle = 0..1, walk.down = 2..5 (step, pass, step, pass). */
-export const keeperDownSheet: readonly (readonly string[])[] = [idle0, idle1, stepLeft, idle0, stepRight, idle0];
+// ---- walk-up (back view): green hood dome, plain cloak back, no face/placket/lantern.
+// Reviewed: docs/art-reviews/char-keeper-walk-up.md (iter2). Same bob + foot mechanics.
+const upRest: readonly string[] = [
+  '................',
+  '......xxxx......',
+  '.....xggggx.....',
+  '....xgggggFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '....xfgggfx.....',
+  '....xfffffx.....',
+  '...xggffffFx....',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xffffffffx....',
+  '...xkkx.xkkx....',
+  '...xKKx.xKKx....',
+  '...zzzzzzzz.....',
+];
+const upStepLeft: readonly string[] = [
+  '......xxxx......',
+  '.....xggggx.....',
+  '....xgggggFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '....xfgggfx.....',
+  '....xfffffx.....',
+  '...xggffffFx....',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xffffffffx....',
+  '...xkkx.xkkx....',
+  '...xKKx.xKKx....',
+  '...xKK..........',
+  '...zzzzzzzz.....',
+];
+const upStepRight: readonly string[] = [
+  '......xxxx......',
+  '.....xggggx.....',
+  '....xgggggFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '...xgggggfFx....',
+  '....xfgggfx.....',
+  '....xfffffx.....',
+  '...xggffffFx....',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xgggffffFFx...',
+  '..xffffffffx....',
+  '...xkkx.xkkx....',
+  '...xKKx.xKKx....',
+  '........xKK.....',
+  '...zzzzzzzz.....',
+];
+
+/** char.keeper sheet. Frame layout (index → anim):
+ *  0-1  idle (idle0, idle1)                          → char.keeper.idle
+ *  2-5  walk-down (stepLeft, pass, stepRight, pass)   → char.keeper.walk.down
+ *  6-9  walk-up   (stepLeft, pass, stepRight, pass)   → char.keeper.walk.up
+ *  left/right (profile) land in a later batch. */
+export const keeperSheet: readonly (readonly string[])[] = [
+  idle0, idle1,
+  stepLeft, idle0, stepRight, idle0,
+  upStepLeft, upRest, upStepRight, upRest,
+];
 
 /** kept for the original idle exemplar reference */
 export const keeperIdleDown = idle0;
