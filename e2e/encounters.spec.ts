@@ -6,14 +6,14 @@ import { openOverlay } from './helpers';
 // verdict mapping the combat layer relies on. Deterministic (fixture data + seed 7 + stub judge).
 
 test.describe('encounter overlay — all kinds', () => {
-  test('mcq (Strike): correct answer → pass verdict', async ({ page }) => {
+  test('mcq (Smite): correct answer → pass verdict', async ({ page }) => {
     await openOverlay(page, 'mcq');
-    await expect(page.locator('.fw-eyebrow')).toContainText('Strike');
+    await expect(page.locator('.fw-eyebrow')).toContainText('Smite');
     await page.locator('.fw-opt', { hasText: 'The third week' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
   });
 
-  test('mcq (Strike): wrong answer → fail verdict + teach-on-miss reveals the answer', async ({ page }) => {
+  test('mcq (Smite): wrong answer → fail verdict + teach-on-miss reveals the answer', async ({ page }) => {
     await openOverlay(page, 'mcq');
     await page.locator('.fw-opt', { hasText: 'It never glows' }).click();
     await expect(page.locator('.fw-verdict.fail')).toBeVisible();
