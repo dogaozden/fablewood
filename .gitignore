@@ -6,6 +6,10 @@
 node_modules/
 dist/
 
+# the precious tree: the author's real SRS history + saves. Never committed by accident,
+# never clobbered — back up deliberately or not at all.
+state/
+
 # transient test + e2e artifacts
 .state-e2e/
 test-results/
