@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { markReady } from '../ready';
 import { services } from '../contracts';
+import { buildTextures } from '../../art/buildTextures';
 
 const PALETTE = [0xf4c67a, 0xe98a5b, 0x8ecae6, 0xa7d17a, 0xc792ea, 0xffd6a5];
 
@@ -20,6 +21,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Real art first: any key registered here wins over scene placeholder bakes
+    // (their ensureTextures skip existing keys).
+    buildTextures(this);
+
     // Warm the persistence layer at boot (idempotent; scenes still await ready()
     // before reads). Fire-and-forget so the ready-flag timing stays deterministic.
     void Promise.all([
