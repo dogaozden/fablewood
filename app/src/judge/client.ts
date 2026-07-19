@@ -6,6 +6,8 @@
  */
 import type { Judge, JudgeVerdict } from '../game/contracts';
 import { stubJudge } from './stub';
+import { isTauri } from '../bridge/native';
+import { nativeJudge } from './native';
 
 function isVerdict(v: unknown): v is JudgeVerdict {
   return (
@@ -20,6 +22,7 @@ function isVerdict(v: unknown): v is JudgeVerdict {
 }
 
 export const judge: Judge = async ({ prompt, answer, rubric }) => {
+  if (isTauri()) return nativeJudge({ prompt, answer, rubric });
   try {
     const res = await fetch('/api/judge', {
       method: 'POST',
