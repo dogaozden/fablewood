@@ -27,6 +27,12 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Lane-B painterly ground tiles (16x16). Loaded on EVERY path — title and
+    // ?scene= jumps alike — so the hamlet floor upgrades everywhere. A loaded
+    // key wins: buildTextures + scene placeholders skip keys that exist.
+    this.load.image('tile.grass', '/art/tile-grass.png');
+    this.load.image('tile.path', '/art/tile-path.png');
+    this.load.image('tile.water', '/art/tile-water.png');
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
