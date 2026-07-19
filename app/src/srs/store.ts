@@ -47,15 +47,23 @@ function corruptName(file: string, now: number): string {
 
 export class SrsStore {
   private cache: SrsState = { version: 1, facts: {} };
-  private loaded = false;
+  private loadPromise: Promise<void> | null = null;
   private writeChain: Promise<void> = Promise.resolve();
   private warned = false;
 
   constructor(private bridge: Bridge = realBridge) {}
 
-  async ready(): Promise<void> {
-    if (this.loaded) return;
-    this.loaded = true;
+  /**
+   * Load persisted state once. Concurrent callers share the SAME in-flight
+   * promise, so a second ready() cannot resolve early against the default cache
+   * before the first load finishes — the race that silently dropped saved state
+   * on the fire-and-forget boot warm-up.
+   */
+  ready(): Promise<void> {
+    return (this.loadPromise ??= this.load());
+  }
+
+  private async load(): Promise<void> {
     const raw = await this.bridge.getState<unknown>(SRS_FILE);
     if (raw === null) {
       // missing file (or no bridge, or opaque byte-corruption) → start fresh
@@ -133,7 +141,7 @@ export class SrsStore {
  */
 class ObjectStore<T extends Record<string, unknown>> {
   private cache: T;
-  private loaded = false;
+  private loadPromise: Promise<void> | null = null;
   private writeChain: Promise<void> = Promise.resolve();
   private warned = false;
 
@@ -145,9 +153,12 @@ class ObjectStore<T extends Record<string, unknown>> {
     this.cache = { ...defaults };
   }
 
-  async ready(): Promise<void> {
-    if (this.loaded) return;
-    this.loaded = true;
+  /** Same shared-in-flight-promise guarantee as SrsStore.ready() (no ready() race). */
+  ready(): Promise<void> {
+    return (this.loadPromise ??= this.load());
+  }
+
+  private async load(): Promise<void> {
     const raw = await this.bridge.getState<unknown>(this.file);
     if (raw === null) {
       this.cache = { ...this.defaults };

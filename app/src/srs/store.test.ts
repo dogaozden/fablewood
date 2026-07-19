@@ -11,6 +11,7 @@ class FakeBridge implements Bridge {
   files = new Map<string, string>();
   offline = false;
   writeDelayMs = 0;
+  readDelayMs = 0;
   putCount = 0;
 
   seed(name: string, value: unknown): void {
@@ -25,6 +26,7 @@ class FakeBridge implements Bridge {
   }
 
   async getState<T = unknown>(name: string): Promise<T | null> {
+    if (this.readDelayMs) await new Promise((r) => setTimeout(r, this.readDelayMs));
     if (this.offline) return null;
     const s = this.files.get(name);
     return s === undefined ? null : (JSON.parse(s) as T);
@@ -42,6 +44,60 @@ afterEach(() => vi.restoreAllMocks());
 
 const NOW = 1_700_000_000_000;
 const DAY = 86_400_000;
+
+describe('ready() race — concurrent callers share one in-flight load', () => {
+  // Regression: ready() used to flip a `loaded` flag BEFORE awaiting getState,
+  // so a second caller during a slow load returned early against the default
+  // cache — dropping saved state (e.g. a saved hp 13 read back as the default).
+  // The fix memoizes the in-flight load promise so every caller awaits the real
+  // load. Each test seeds real data behind a DELAYED getState, fires ready()
+  // twice concurrently (first not awaited), and asserts the SEEDED value wins.
+
+  it('SaveStore: a second ready() during a slow load sees the saved value, not defaults', async () => {
+    const b = new FakeBridge();
+    b.readDelayMs = 25; // slow getState widens the race window
+    b.seed('save.json', { scene: 'vaults', hp: 13 });
+    const s = new SaveStore(b);
+    const first = s.ready(); // fire-and-forget warm-up — deliberately not awaited
+    await s.ready();         // second caller must await the SAME in-flight load
+    expect(s.get().hp).toBe(13); // not the default 16
+    expect(s.get().scene).toBe('vaults');
+    await first;
+  });
+
+  it('SettingsStore: concurrent ready() sees the persisted mute, not the default', async () => {
+    const b = new FakeBridge();
+    b.readDelayMs = 25;
+    b.seed('settings.json', { muted: true });
+    const s = new SettingsStore(b);
+    const first = s.ready();
+    await s.ready();
+    expect(s.get().muted).toBe(true); // not default false
+    await first;
+  });
+
+  it('SrsStore: concurrent ready() sees seeded boxes, not an empty store', async () => {
+    const b = new FakeBridge();
+    b.readDelayMs = 25;
+    b.seed('srs.json', { version: 1, facts: { a: { box: 4, next_due: NOW, history: [] } } });
+    const s = new SrsStore(b);
+    const first = s.ready();
+    await s.ready();
+    expect(s.boxOf('a')).toBe(4); // not 0
+    await first;
+  });
+
+  it('runs the underlying load exactly once under many concurrent ready() calls', async () => {
+    const b = new FakeBridge();
+    b.readDelayMs = 15;
+    b.seed('save.json', { hp: 7 });
+    const getSpy = vi.spyOn(b, 'getState');
+    const s = new SaveStore(b);
+    await Promise.all([s.ready(), s.ready(), s.ready(), s.ready()]);
+    expect(getSpy).toHaveBeenCalledTimes(1); // single shared load
+    expect(s.get().hp).toBe(7);
+  });
+});
 
 describe('SrsStore — load & read', () => {
   it('loads existing state so boxOf/masteryAvg read from disk', async () => {
