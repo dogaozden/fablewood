@@ -18,13 +18,19 @@ const settingsStore = new SettingsStore();
 
 // packId → (factId → { prereqs }), built once from the installed packs.
 let factMetaByPack = new Map<string, Map<string, FactMeta>>();
-let packsPulled = false;
+let pullPromise: Promise<void> | null = null;
 
-async function pullPacks(): Promise<void> {
-  if (packsPulled) return;
-  packsPulled = true;
-  const { packs } = await getPacks();
-  factMetaByPack = buildFactMeta(packs);
+/**
+ * Concurrent callers share the SAME in-flight pull (the store's ready() idiom):
+ * a synchronous "already pulled" flag let a second ready() resolve while
+ * /api/packs was still in flight, so its dueQueue calls ran against an empty
+ * prereq index and blocked facts surfaced in the wrong order.
+ */
+function pullPacks(): Promise<void> {
+  return (pullPromise ??= (async () => {
+    const { packs } = await getPacks();
+    factMetaByPack = buildFactMeta(packs);
+  })());
 }
 
 services.srs = {
