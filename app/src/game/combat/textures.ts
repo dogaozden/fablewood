@@ -111,37 +111,50 @@ function drawLantern(g: Phaser.GameObjects.Graphics): void {
 
 // ---- units (friendly = rounded/bottom-heavy; threats = taller/colder) -----
 
-function body(g: Phaser.GameObjects.Graphics, color: number, hi: number, w: number, top: number) {
+/** A friendly, bottom-heavy figure: narrow torso + a flaring rounded robe hem. */
+function figure(g: Phaser.GameObjects.Graphics, robe: number, hi: number, headCol: number, headY: number, headR: number) {
   const cx = CELL / 2;
   g.lineStyle(2, P.outline, 1);
-  g.fillStyle(color, 1).fillRoundedRect(cx - w / 2, top, w, CELL - top - 3, 6);
-  g.strokeRoundedRect(cx - w / 2, top, w, CELL - top - 3, 6);
-  g.fillStyle(hi, 1).fillRoundedRect(cx - w / 2 + 3, top + 2, w / 2 - 2, 6, 3); // top-left light
-}
-
-function head(g: Phaser.GameObjects.Graphics, color: number, y: number, rad = 7) {
-  const cx = CELL / 2;
-  g.lineStyle(2, P.outline, 1).fillStyle(color, 1).fillCircle(cx, y, rad);
-  g.strokeCircle(cx, y, rad);
-  g.fillStyle(P.glowCore, 0.5).fillCircle(cx - 2, y - 2, 2);
+  g.fillStyle(robe, 1);
+  g.fillEllipse(cx, 41, 30, 15); // flaring hem (the bottom-heavy base)
+  g.fillRoundedRect(cx - 8, headY + headR - 2, 16, 22, 6); // torso
+  g.strokeEllipse(cx, 41, 30, 15);
+  g.strokeRoundedRect(cx - 8, headY + headR - 2, 16, 22, 6);
+  g.fillStyle(hi, 1).fillRoundedRect(cx - 6, headY + headR, 6, 9, 3); // top-left cloak light
+  g.fillStyle(headCol, 1).fillCircle(cx, headY, headR); // head
+  g.strokeCircle(cx, headY, headR);
+  g.fillStyle(P.glowCore, 0.45).fillCircle(cx - headR / 2, headY - headR / 2, 2); // cheek light
 }
 
 function drawKeeper(g: Phaser.GameObjects.Graphics): void {
-  body(g, P.timber, P.timberLight, 26, 20);
-  head(g, P.parchment, 15, 8);
-  g.fillStyle(P.timber, 1).fillRoundedRect(CELL / 2 - 10, 8, 20, 8, 4); // hood brim
-  g.lineStyle(2, P.outline, 1).strokeRoundedRect(CELL / 2 - 10, 8, 20, 8, 4);
-  g.fillStyle(P.bark, 1).fillRect(CELL / 2 + 9, 22, 3, 20); // staff
-  g.fillStyle(P.lanternGold, 1).fillCircle(CELL / 2 + 10, 22, 4);
-  g.fillStyle(P.glowCore, 1).fillCircle(CELL / 2 + 10, 22, 2);
+  const cx = CELL / 2;
+  figure(g, P.timber, P.timberLight, P.parchment, 15, 7);
+  // hood cowl framing the face (bark, lit rim)
+  g.lineStyle(2, P.outline, 1).fillStyle(P.bark, 1);
+  g.fillEllipse(cx, 11, 20, 14);
+  g.strokeEllipse(cx, 11, 20, 14);
+  g.fillStyle(P.timber, 1).fillEllipse(cx, 9, 16, 8); // lit hood top
+  g.fillStyle(P.parchment, 1).fillCircle(cx, 16, 6).lineStyle(2, P.outline, 1).strokeCircle(cx, 16, 6); // face
+  g.fillStyle(P.outline, 1).fillCircle(cx - 2, 16, 1).fillCircle(cx + 2, 16, 1); // eyes
+  // lantern staff
+  g.fillStyle(P.bark, 1).fillRect(cx + 10, 18, 3, 24).lineStyle(1, P.outline, 1).strokeRect(cx + 10, 18, 3, 24);
+  g.fillStyle(P.amber, 0.3).fillCircle(cx + 11, 20, 8);
+  g.fillStyle(P.lanternGold, 1).fillCircle(cx + 11, 20, 4).lineStyle(1, P.outline, 1).strokeCircle(cx + 11, 20, 4);
+  g.fillStyle(P.glowCore, 1).fillCircle(cx + 11, 20, 2);
 }
 
 function drawMira(g: Phaser.GameObjects.Graphics): void {
-  body(g, P.orchid, P.blossom, 22, 21);
-  head(g, P.parchment, 15, 7);
-  g.fillStyle(P.blossom, 1).fillTriangle(CELL / 2 - 8, 12, CELL / 2 + 8, 12, CELL / 2, 2); // hat
-  g.lineStyle(2, P.outline, 1).strokeTriangle(CELL / 2 - 8, 12, CELL / 2 + 8, 12, CELL / 2, 2);
-  g.fillStyle(P.lanternGold, 1).fillCircle(CELL / 2, 2, 2);
+  const cx = CELL / 2;
+  figure(g, P.orchid, P.blossom, P.parchment, 16, 6);
+  g.fillStyle(P.outline, 1).fillCircle(cx - 2, 16, 1).fillCircle(cx + 2, 16, 1); // eyes
+  // pointed scholar's hat
+  g.lineStyle(2, P.outline, 1).fillStyle(P.duskViolet, 1);
+  g.fillTriangle(cx - 9, 12, cx + 9, 12, cx, 1);
+  g.strokeTriangle(cx - 9, 12, cx + 9, 12, cx, 1);
+  g.fillStyle(P.blossom, 1).fillTriangle(cx - 3, 11, cx + 2, 11, cx, 3); // hat sheen
+  g.fillStyle(P.lanternGold, 1).fillCircle(cx, 1, 2); // star tip
+  g.fillStyle(P.parchment, 1).fillRect(cx - 10, 30, 7, 9); // her ledger/book
+  g.lineStyle(1, P.outline, 1).strokeRect(cx - 10, 30, 7, 9).lineBetween(cx - 6, 30, cx - 6, 39);
 }
 
 function drawWisp(g: Phaser.GameObjects.Graphics): void {

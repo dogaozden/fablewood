@@ -39,6 +39,7 @@ export class CombatHud {
   private veil: Phaser.GameObjects.Container;
   private menu: Phaser.GameObjects.Container;
   private panel: Phaser.GameObjects.Container;
+  private panelBg: Phaser.GameObjects.Graphics;
   private panelText: Phaser.GameObjects.Text;
   private graceDot: Phaser.GameObjects.Arc;
 
@@ -55,13 +56,11 @@ export class CombatHud {
       fontFamily: FONT, fontSize: '13px', color: hex(P.parchment),
     }).setDepth(50);
 
-    // party panel frame
-    const pg = scene.add.graphics();
-    pg.fillStyle(P.shadowPlum, 0.72).fillRoundedRect(0, 0, 176, 150, 8);
-    pg.lineStyle(2, P.bark, 1).strokeRoundedRect(0, 0, 176, 150, 8);
+    // party panel frame (bg is re-sized to fit content in updateParty)
+    this.panelBg = scene.add.graphics();
     this.panelText = scene.add.text(12, 10, '', { fontFamily: FONT, fontSize: '13px', color: hex(P.parchment), lineSpacing: 5 });
     this.graceDot = scene.add.circle(160, 128, 5, P.lanternGold);
-    this.panel.add([pg, this.panelText, this.graceDot]);
+    this.panel.add([this.panelBg, this.panelText, this.graceDot]);
 
     // deliberation veil
     const vg = scene.add.graphics();
@@ -187,18 +186,21 @@ export class CombatHud {
   // ---- party panel ------------------------------------------------------
 
   updateParty(keeper: UnitState | undefined, mira: UnitState | undefined, status: PartyStatus): void {
-    const lines: string[] = ['THE RETINUE', ''];
-    if (keeper) lines.push(`Keeper   ${bar(keeper)}  ${keeper.hp}/${keeper.maxHp}`);
-    if (mira) {
-      lines.push(`Mira     ${bar(mira)}  ${mira.hp}/${mira.maxHp}`);
-      lines.push(status.miraBonusActive ? '  Mira: ATK +1 (mastery ≥ 2.5)' : '  Mira: mastery low — no bonus');
-    }
-    lines.push('');
+    const lines: string[] = ['THE RETINUE'];
+    if (keeper) lines.push(`Keeper  ${bar(keeper)} ${keeper.hp}/${keeper.maxHp}`);
+    if (mira) lines.push(`Mira    ${bar(mira)} ${mira.hp}/${mira.maxHp}`);
+    lines.push(status.miraBonusActive ? 'Mira: ATK +1 (mastery)' : 'Mira: no bonus yet');
     lines.push(`Streak: ${status.streak}`);
-    lines.push(status.graceAvailable ? 'Lantern grace: ready' : 'Lantern grace: spent');
+    lines.push(`Lantern grace: ${status.graceAvailable ? 'ready' : 'spent'}`);
     this.panelText.setText(lines.join('\n'));
+
+    const h = this.panelText.height + 20;
+    this.panelBg.clear();
+    this.panelBg.fillStyle(P.shadowPlum, 0.75).fillRoundedRect(0, 0, 176, h, 8);
+    this.panelBg.lineStyle(2, P.bark, 1).strokeRoundedRect(0, 0, 176, h, 8);
+    const lh = this.panelText.height / lines.length;
     this.graceDot.setFillStyle(status.graceAvailable ? P.lanternGold : P.stoneGrey)
-      .setPosition(150, this.panelText.height - 6);
+      .setPosition(160, 10 + (lines.length - 0.5) * lh);
   }
 }
 

@@ -6,4 +6,4 @@ export { PAL, PAL_CHAR, PAL_HEX, hex } from './palette';
 export type { PaletteName } from './palette';
 export { buildTextures } from './buildTextures';
 export { SPRITES, TEXTURE_KEYS } from './sprites';
-export type { SpriteDef } from './sprites';
+export type { SpriteDef, SpriteAnim } from './sprites';

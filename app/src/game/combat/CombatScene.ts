@@ -199,13 +199,15 @@ export class CombatScene extends Phaser.Scene {
     g.clear();
     const w = 38;
     const y = -CELL / 2 - 4;
-    // boss shield pips above the hp bar
+    // boss shield pips, centred above the hp bar
     if (u.isBoss && u.maxShields) {
       for (let i = 0; i < u.maxShields; i++) {
         const filled = i < this.shields;
-        const x = -w / 2 + i * 10 + 4;
-        g.fillStyle(filled ? P.waterLight : P.shadowPlum, 1).fillCircle(x, y - 8, 4);
-        g.lineStyle(1, P.outline, 1).strokeCircle(x, y - 8, 4);
+        const px = (i - (u.maxShields - 1) / 2) * 13;
+        const py = y - 12;
+        g.lineStyle(1.5, P.outline, 1).fillStyle(filled ? P.waterLight : P.shadowPlum, 1).fillCircle(px, py, 5.5);
+        g.strokeCircle(px, py, 5.5);
+        if (filled) g.fillStyle(P.glowCore, 0.9).fillCircle(px - 1.5, py - 1.5, 2);
       }
     }
     g.fillStyle(P.shadowPlum, 0.9).fillRect(-w / 2, y, w, 5);
