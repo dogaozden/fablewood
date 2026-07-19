@@ -1,0 +1,103 @@
+# FABLEWOOD CI — every push to master: prove the engine, then play the game.
+#
+# Design notes (patterns adapted from personal-code's ci.yml):
+#   - Single ubuntu job: linux bills at 1x and the whole pipeline is minutes, so
+#     personal-code's cron-gated macOS split would be pure overhead here.
+#   - Actions are SHA-pinned with the tag as a trailing comment;
+#     .github/dependabot.yml keeps the pins fresh monthly.
+#   - concurrency cancels superseded runs on rapid pushes to the same ref.
+#   - paths-ignore skips doc/screenshot-only pushes (screenshots/ is committed
+#     e2e evidence — a push that only refreshes it must not re-run the suite
+#     that produced it). A push mixing code + docs still runs.
+#   - NO API KEYS, ever (hard rule): playwright.config.ts starts the e2e server
+#     with JUDGE_MODE=stub and STATE_DIR=.state-e2e, so the suite is
+#     deterministic and secret-free. Nothing in this workflow reads a secret.
+#   - check:zero-packs IS the build step (Fable_SPEC §2: the engine must build
+#     with zero packs installed) — it runs the full production build plus the
+#     unit suite against an empty packs dir; a separate `npm run build` would
+#     just rebuild the identical artifacts.
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "docs/**"
+      - "screenshots/**"
+      - "**.md"
+      - ".claude/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Zero-packs proof (production build + unit suite, empty packs)
+        run: npm run check:zero-packs
+
+      - name: Unit tests (real packs tree)
+        run: npm test
+        env:
+          STATE_DIR: .state-ci
+
+      # Browser cache keyed on the exact pinned @playwright/test version — a
+      # version bump invalidates it, nothing else does. System deps are not in
+      # the cached dir, so install-deps still runs on a hit.
+      - name: Read Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Playwright chromium (+ system deps)
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (browser restored from cache)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # Full e2e on real inputs against the stub judge + isolated state (all
+      # from playwright.config.ts webServer env). Trace/json come in via CLI so
+      # local runs keep the config's lighter defaults.
+      - name: Playwright e2e
+        run: npm run e2e -- --trace retain-on-failure --reporter=list,html,json
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+
+      - name: E2E step summary
+        if: always()
+        run: node e2e/ci-summary.mjs
+
+      - name: Upload failure artifacts (traces, screenshots, html report)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-failure-${{ github.run_number }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
