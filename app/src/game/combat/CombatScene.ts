@@ -486,6 +486,9 @@ export class CombatScene extends Phaser.Scene {
 
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
     const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag });
+    if (action === 'strike' || action === 'weave' || action === 'sequence' || action === 'cast') {
+      this.attackerTell(unit, tile, ACTIONS[action].tint);
+    }
     this.applyOutcome(unit, action, tile, outcome, target);
     this.hud.showBanner(outcome.banner, outcome.hits > 0 || outcome.weaken ? ACTIONS[action].tint : P.duskRose);
 
@@ -631,6 +634,24 @@ export class CombatScene extends Phaser.Scene {
     }
     this.damageUnit(target, attacker.attack, P.berry);
     this.hud.showBanner(`${attacker.name} strikes ${target.name} (−${attacker.attack}).`, P.berry);
+  }
+
+  /**
+   * Player attacker "tell" — the sender's half of the hit-feedback story (the
+   * struck unit's white flash is the receiver's half): a lunge toward the target
+   * plus a brief cast-flash in the action's colour, so an attack visibly commits.
+   */
+  private attackerTell(actor: UnitState, tile: Coord, tint: number): void {
+    const v = this.views.get(actor.id);
+    if (!v) return;
+    const from = this.tileToScreen(actor);
+    const to = this.tileToScreen(tile);
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    this.tweens.add({ targets: v.container, x: from.x + (dx / len) * 12, y: from.y + (dy / len) * 12, duration: 110, yoyo: true, ease: 'Quad.easeOut' });
+    v.sprite.setTintFill(tint);
+    this.time.delayedCall(120, () => { if (!this.destroyed) v.sprite.clearTint(); });
   }
 
   // ---- damage / death ---------------------------------------------------
