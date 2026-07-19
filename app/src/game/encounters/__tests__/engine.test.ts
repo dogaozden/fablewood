@@ -109,6 +109,22 @@ describe('reskin — deterministic surface randomization', () => {
     expect([...l].sort()).toEqual(['A', 'B', 'C']);
     expect([...rr].sort()).toEqual(['1', '2', '3']);
   });
+
+  it('never presents an order encounter pre-solved, for any seed', () => {
+    const ord: Encounter = {
+      id: 'oo',
+      fact_ids: ['f'],
+      kind: 'order',
+      prompt: 'sequence',
+      options: ['a', 'b', 'c', 'd'],
+      answer: ['a', 'b', 'c', 'd'],
+    };
+    for (let seed = 0; seed < 200; seed++) {
+      const r = reskin(ord, seed);
+      expect(r.options).not.toEqual(r.answer); // the ritual always needs work
+      expect([...(r.options as string[])].sort()).toEqual(['a', 'b', 'c', 'd']);
+    }
+  });
 });
 
 describe('scoreMatch', () => {
