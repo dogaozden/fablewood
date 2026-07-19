@@ -1,8 +1,8 @@
-# FABLEWICK
+# FABLEWOOD
 ### a knowledge-retention RPG · the door into the Ledger Realms
 
-> *Fable* — a story that makes a lesson stick. *-wick* — the old suffix for a village
-> (Warwick, Berwick). **Fablewick: the village of teaching-stories.**
+> *Fable* — a story that makes a lesson stick. *Wood* — where living things grow wild.
+> **Fablewood: the forest where knowledge lives** — and you go walking.
 > Cozy on the surface, load-bearing underneath — like the app.
 
 **Provenance:** `SPEC.md` is the author's founding brain-dump (2026-07-09, preserved untouched, by request). This document is the compiled spec — the brain dump refined through the design proposal (`docs/superpowers/specs/2026-07-09-knowledge-platform-architecture-design.md`) and the full interview (2026-07-12 → 2026-07-19). Every decision below is **final** unless the author reopens it. Where the two documents disagree, this one wins.
@@ -11,9 +11,9 @@
 
 ## 1. North star
 
-the author reads books, attends lectures, collects gems — and forgets them. Fablewick is where knowledge goes to be *kept*: ingested from real sources into knowledge packs, then drilled through a genuinely good game until it welds into memory. Not a chatbot's knowledge base — **a knowledge base for a human**, where the retrieval practice is the fun part.
+the author reads books, attends lectures, collects gems — and forgets them. Fablewood is where knowledge goes to be *kept*: ingested from real sources into knowledge packs, then drilled through a genuinely good game until it welds into memory. Not a chatbot's knowledge base — **a knowledge base for a human**, where the retrieval practice is the fun part.
 
-**The success bar (the author's explicit choice — "addiction only"):** at ~90 days (mid-October 2026), the experiment worked if he still opens Fablewick voluntarily, repeatedly, without forcing himself. Retention is not the official metric — the bet is that if the pull is real, retention follows. *(Recorded risk: fun ≠ learning. Mitigation costs nothing: the SRS data computes retention stats anyway; the dashboard will quietly show them.)*
+**The success bar (the author's explicit choice — "addiction only"):** at ~90 days (mid-October 2026), the experiment worked if he still opens Fablewood voluntarily, repeatedly, without forcing himself. Retention is not the official metric — the bet is that if the pull is real, retention follows. *(Recorded risk: fun ≠ learning. Mitigation costs nothing: the SRS data computes retention stats anyway; the dashboard will quietly show them.)*
 
 **The addiction mandate (his words: "i play whenever i want to. your job is to get me addicted"):** no prescribed session shape. Two interlocking loops — 5–15 min **bounty runs** (due-queue patrols, ghost-hunts) and long **dungeon crawls** (story arcs, setpiece bosses). Instant load, save anywhere, always-one-more-thing, streaks, cliffhangers, daily hooks.
 
@@ -25,8 +25,8 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 | Pack #1 | **VC law**, seeded from *Venture Deals* (Feld/Mendelson) + **NVCA model documents** |
 | Depth | **~300 facts v1**, with *expansion* as a first-class pipeline verb — new sources merge into a live pack without disturbing fact IDs or SRS history |
 | LLM access | **No API keys, ever.** Runtime intelligence = headless `claude -p` / Agent SDK (Claude or Codex) on the author's subscriptions |
-| Name | **Fablewick** (chosen 2026-07-19 after five rounds — the author's register: cozy & whimsical; that register also informs art direction) |
-| World | **High fantasy: the Ledger Realms.** VC law = the Venture Coast; Fablewick is the home village |
+| Name | **Fablewood** (chosen 2026-07-19 after six rounds — the author's register: cozy & whimsical; that register also informs art direction) |
+| World | **High fantasy: the Ledger Realms.** VC law = the Venture Coast; the Fablewood is the heart-forest, its hamlet the home base |
 | Combat | **Full grid tactics** — Fire Emblem/BG3-style movement, terrain, AoE, initiative |
 | Stakes | **Teeth, but fair** — wrong answers cost HP/resources; wipes = retreat to camp (lose the loot roll, never story progress) |
 | Pedagogy | **Teach AND test** — self-contained: mentor NPCs and discovered documents (verbatim source excerpts, cited) introduce facts; drills follow |
@@ -45,7 +45,7 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 
 **The Ledger Realms** — a high-fantasy realm bound together by the Laws. the author is a **Keeper of the Great Ledger**, sworn to keep knowledge alive against **the Fade** — the creeping force that unwrites what is not renewed. Faded facts return as ghosts and monsters; renewing them (recall) drives them back.
 
-- **Fablewick** (the home village, and the app's namesake): lantern-lit and tavern-warmed, the place every expedition departs from and returns to. The Laconic Clerk keeps his records office here; your cottage fills with trophies as provinces fall to mastery. The village IS the dashboard — cozy hub outside, campaign map on the table. The name's register is deliberate: **cozy-whimsical**, and it steers the art direction (warm palette, lantern glow, friendly silhouettes) even where the provinces beyond turn dangerous.
+- **The Fablewood** (the app's namesake): the enchanted forest at the heart of the Ledger Realms, where fables — living knowledge — grow wild among the trees. In its central clearing sits the home hamlet: lantern-lit and tavern-warmed, the place every expedition departs from and returns to. The Laconic Clerk keeps his records office here; your cottage fills with trophies as provinces fall to mastery. The hamlet IS the dashboard — cozy hub outside, campaign map on the table. The name's register is deliberate: **cozy-whimsical**, and it steers the art direction (warm palette, lantern glow, friendly silhouettes) even where the provinces beyond turn dangerous.
 
 - **The Venture Coast** (province #1): merchant-princes fund expeditions for a share of the spoils; their treaties are term sheets in all but name. A **dragon hoards unvested equity**. The Crown's Inquisitors enforce the Old Statutes — the '33 and '34 Codices.
 - **The Laconic Clerk**: the Ledger's assessor. Appears when you cast from memory. Verdict, one line, gone.
@@ -99,7 +99,7 @@ Vite + React + TS, local-first on the primary Mac. Panes: **Dashboard** (due que
 
 **Parked** (revisit on the author's word): the maintainer agent standing ops (mandate already chosen: nightly small + weekly deep, behind PRs), phone capture (likely text-the maintainer agent; `inbox/` contract exists now), supplement-reader integration, MCP serving, freshness sweeps, 3D/VR.
 
-## 9. What Fablewick needs from the author
+## 9. What Fablewood needs from the author
 
 1. Drop *Venture Deals* (digital copy) into `raw/vc-law/book/` — the only blocking input.
 2. Optionally: named blog posts/memos into `raw/vc-law/posts/`.
