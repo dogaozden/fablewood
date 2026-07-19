@@ -40,7 +40,7 @@ type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'resolving' | 'enemy' | 'o
 
 interface UnitView {
   container: Phaser.GameObjects.Container;
-  sprite: Phaser.GameObjects.Image;
+  sprite: Phaser.GameObjects.Sprite;
   hp: Phaser.GameObjects.Graphics;
 }
 
@@ -208,9 +208,13 @@ export class CombatScene extends Phaser.Scene {
     // Origin bottom-centre, feet at the cell's bottom edge, so taller real sprites
     // (16×24 / up to 24×32 native, baked at 3×) overhang UPWARD — the tactics look.
     // displayScale = CELL / frame width: 48px placeholder bakes → ×1, 16-native art → ×3.
-    const sprite = this.add.image(0, CELL / 2 - 4, UNIT_KEYS[u.kind]).setOrigin(0.5, 1);
+    const sprite = this.add.sprite(0, CELL / 2 - 4, UNIT_KEYS[u.kind]).setOrigin(0.5, 1);
     sprite.setScale(CELL / sprite.frame.realWidth);
     sprite.setFlipX(u.team === 'enemy');
+    // Play the shipped 2-frame idle (gentle breathe/flicker) when real art registered
+    // one; placeholder bakes have no anim, so the guard leaves them as static poses.
+    const idleAnim = UNIT_KEYS[u.kind] + '.idle';
+    if (this.anims.exists(idleAnim)) sprite.play(idleAnim);
     const hp = this.add.graphics();
     container.add([shadow, sprite, hp]);
     this.views.set(u.id, { container, sprite, hp });
