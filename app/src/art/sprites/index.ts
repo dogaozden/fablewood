@@ -5,7 +5,7 @@
 // Fan-out agents deliver per-set modules (set-enemies.ts, set-combat.ts,
 // set-hamlet-props.ts, set-characters.ts) exporting SpriteDef[]; the art director
 // imports + spreads them here — this index stays single-writer (no parallel edits).
-import { keeperIdleDown } from './keeper';
+import { keeperDownSheet } from './keeper';
 import { tileGrass, tilePath, tileWater } from './hamletTiles';
 
 export interface SpriteAnim {
@@ -34,10 +34,19 @@ export interface SpriteDef {
 }
 
 export const SPRITES: readonly SpriteDef[] = [
-  // The Keeper (player). Reviewed: docs/art-reviews/keeper-idle-down.md. char.keeper
-  // is 16×24 everywhere (D2); combat display-scales ×3 with bottom-center origin.
-  // TODO(art-director): expand to full idle×2 + walk×4×4-dir sheet + anims.
-  { key: 'char.keeper', frames: [keeperIdleDown], scale: 1 },
+  // The Keeper (player). Reviewed: docs/art-reviews/keeper-idle-down.md +
+  // char-keeper-walk-down.md. char.keeper is 16×24 everywhere (D2); combat
+  // display-scales ×3 with bottom-center origin. Batch 1: idle + walk.down;
+  // TODO(art-director): add walk.up/left/right frames + anims.
+  {
+    key: 'char.keeper',
+    frames: keeperDownSheet,
+    scale: 1,
+    anims: [
+      { name: 'char.keeper.idle', from: 0, to: 1, frameRate: 2, repeat: -1 },
+      { name: 'char.keeper.walk.down', from: 2, to: 5, frameRate: 8, repeat: -1 },
+    ],
+  },
   // Hamlet ground tiles — keys match hamlet/textures.ts; auto-upgrade the hamlet
   // floor once buildTextures(this) runs in BootScene. Hamlet-only, no combat clash.
   { key: 'tile.grass', frames: [tileGrass], scale: 1 },

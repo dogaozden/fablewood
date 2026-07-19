@@ -86,3 +86,39 @@ describe('collision', () => {
     expect(out.y).toBe(start.y + 6); // y slides freely
   });
 });
+
+describe('reachability', () => {
+  const map = buildHamlet();
+
+  // 4-connected flood fill over walkable tiles from a starting tile.
+  function reachableFrom(solid: Grid, sc: number, sr: number): boolean[][] {
+    const seen = Array.from({ length: ROWS }, () => Array<boolean>(COLS).fill(false));
+    const stack: [number, number][] = [[sc, sr]];
+    seen[sr][sc] = true;
+    while (stack.length) {
+      const [c, r] = stack.pop()!;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nc = c + dc;
+        const nr = r + dr;
+        if (nc < 0 || nr < 0 || nc >= COLS || nr >= ROWS) continue;
+        if (seen[nr][nc] || solid[nr][nc]) continue;
+        seen[nr][nc] = true;
+        stack.push([nc, nr]);
+      }
+    }
+    return seen;
+  }
+
+  it('can walk from spawn to every location (no place is walled off)', () => {
+    const seen = reachableFrom(
+      map.solid,
+      Math.floor(map.spawn.x / TILE),
+      Math.floor(map.spawn.y / TILE),
+    );
+    for (const loc of map.locations) {
+      const c = Math.floor(loc.door.x / TILE);
+      const r = Math.floor(loc.door.y / TILE);
+      expect(seen[r][c], `${loc.id} approach tile unreachable`).toBe(true);
+    }
+  });
+});
