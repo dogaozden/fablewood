@@ -7,10 +7,11 @@
  * through the vite.config.ts import instead — mirroring app/src/bridge/plugin.ts.
  *
  *   JUDGE_MODE=stub → deterministic heuristic (e2e + offline).
- *   otherwise       → spawn `claude -p … --model haiku`, 45s cap, STRICT-JSON out.
+ *   otherwise       → spawn `claude -p … --model haiku`, 15s cap, STRICT-JSON out.
  *
  * The game must never hang on the Clerk: spawn error / timeout / unparseable output all
- * fall back to the stub's verdict with the "away from his desk" line.
+ * fall back to the stub's verdict with the "away from his desk" line — and every
+ * fallback logs its layer + latency here, so "why did the Clerk fail" is answerable.
  */
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -18,7 +19,11 @@ import { spawn } from 'node:child_process';
 import { stubJudge, AWAY_LINE, type JudgeArgs } from './src/judge/stub';
 import type { JudgeVerdict } from './src/game/contracts';
 
-const TIMEOUT_MS = 45_000;
+// Measured 2026-07-19: with the user's MCP servers loading, a haiku one-shot ran
+// 17–26s; with MCP disabled, 7–13s from an idle shell and a few seconds worse when
+// the dev server is busy. 20s converts most would-be fallbacks into real verdicts
+// while still bounding the worst case (the deliberating quill covers the wait).
+const TIMEOUT_MS = 20_000;
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -90,10 +95,15 @@ function parseVerdict(raw: string): JudgeVerdict | null {
 function runClaude(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     // stdin ignored → the CLI gets immediate EOF and never waits on stdin.
-    const child = spawn('claude', ['-p', prompt, '--model', 'haiku'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
-    });
+    // The Clerk needs zero tools: skipping MCP server startup is a 3x latency win.
+    const child = spawn(
+      'claude',
+      ['-p', prompt, '--model', 'haiku', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: process.env,
+      },
+    );
     let out = '';
     let err = '';
     const timer = setTimeout(() => {
@@ -116,11 +126,17 @@ function runClaude(prompt: string): Promise<string> {
 
 async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
   if (process.env.JUDGE_MODE === 'stub') return stubJudge(args);
+  const t0 = Date.now();
   try {
-    const parsed = parseVerdict(await runClaude(buildPrompt(args)));
-    if (parsed) return parsed;
-  } catch {
-    // fall through to the away-from-desk fallback below
+    const raw = await runClaude(buildPrompt(args));
+    const parsed = parseVerdict(raw);
+    if (parsed) {
+      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t0}ms`);
+      return parsed;
+    }
+    console.warn(`[clerk] fallback: unparseable output after ${Date.now() - t0}ms → ${raw.slice(0, 80)}`);
+  } catch (e) {
+    console.warn(`[clerk] fallback: ${(e as Error).message} after ${Date.now() - t0}ms`);
   }
   // keep a fair grade (stub verdict) but tell the player the Clerk was away
   return { ...stubJudge(args), line: AWAY_LINE };
