@@ -24,9 +24,11 @@ const NPCS = [
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+  // 1045x640 leaves room for the page chrome so the canvas lands at ~960x540 CSS
+  // (1:1 with the internal buffer -> pixel-exact true-zoom captures).
+  const page = await browser.newPage({ viewport: { width: 1045, height: 640 } });
   page.on('console', (m) => {
-    if (m.type() === 'error' || m.type() === 'warning') console.log('[console]', m.type(), m.text());
+    if (m.type() === 'error') console.log('[console]', m.type(), m.text());
   });
   await page.goto(`${BASE}/?scene=hamlet&seed=7`, { waitUntil: 'load', timeout: 45000 });
   await page.waitForFunction(() => window.__FABLEWOOD_READY === true, undefined, { timeout: 45000 });
@@ -53,6 +55,14 @@ try {
   await page.waitForTimeout(250);
   console.log('[cam]', JSON.stringify(cam));
 
+  // Pin the canvas to exactly 960x540 CSS = 1:1 with the internal buffer, so
+  // captures are pixel-exact true game zoom (no browser resampling).
+  await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    c.style.width = '960px';
+    c.style.height = '540px';
+  });
+  await page.waitForTimeout(120);
   const canvas = page.locator('canvas').first();
   const box = await canvas.boundingBox();
   console.log('[canvas]', JSON.stringify(box));
@@ -70,9 +80,10 @@ try {
     const y0 = box.y + (n.y - 32 - cam2.vy) * cam2.zoom * fy;
     const w = 32 * cam2.zoom * fx;
     const h = 40 * cam2.zoom * fy;
+    const vp = page.viewportSize();
     const clip = {
       x: Math.max(0, x0), y: Math.max(0, y0),
-      width: Math.min(w, 960 - Math.max(0, x0)), height: Math.min(h, 540 - Math.max(0, y0)),
+      width: Math.min(w, vp.width - Math.max(0, x0)), height: Math.min(h, vp.height - Math.max(0, y0)),
     };
     console.log('[crop]', n.who, JSON.stringify(clip));
     await page.screenshot({ path: `${outdir}/${tag}-${n.who}.png`, clip });
