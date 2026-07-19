@@ -34,3 +34,13 @@ export function reduceShields(current: number, delta: number): number {
 export function bossDefeated(shields: number, hp: number): boolean {
   return shields <= 0 || hp <= 0;
 }
+
+/**
+ * The Warden's preference-shields turn aside every mundane blow: while shielded, ONLY
+ * Cast From Memory (citing your authority) wounds it. This keeps the boss's questions
+ * mandatory now that Strike is free — you cannot brute-force the Warden's HP to the
+ * fallback-victory with un-gated attacks; you must engage the phase branches + Casts.
+ */
+export function wardenAbsorbs(action: string, isBoss: boolean | undefined, shields: number): boolean {
+  return !!isBoss && shields > 0 && action !== 'cast';
+}

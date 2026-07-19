@@ -29,6 +29,7 @@ export const UNIT_KEYS: Record<string, string> = {
 
 export const ICON_KEYS: Record<string, string> = {
   strike: 'icon.strike',
+  smite: 'icon.smite',
   weave: 'icon.weave',
   sequence: 'icon.sequence',
   cast: 'icon.cast',
@@ -50,6 +51,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, UNIT_KEYS.warden, CELL, CELL, (g) => drawWarden(g));
 
   bake(scene, ICON_KEYS.strike, ICON, ICON, drawIconStrike);
+  bake(scene, ICON_KEYS.smite, ICON, ICON, drawIconSmite);
   bake(scene, ICON_KEYS.weave, ICON, ICON, drawIconWeave);
   bake(scene, ICON_KEYS.sequence, ICON, ICON, drawIconSequence);
   bake(scene, ICON_KEYS.cast, ICON, ICON, drawIconCast);
@@ -218,6 +220,23 @@ function drawIconStrike(g: Phaser.GameObjects.Graphics): void {
   g.lineStyle(3, P.lanternGold, 1).lineBetween(8, 28, 28, 8); // blade
   g.fillStyle(P.timber, 1).fillCircle(9, 27, 4); // pommel
   g.lineStyle(2, P.parchment, 1).lineBetween(22, 6, 30, 14); // guard
+}
+
+function drawIconSmite(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  g.fillStyle(P.amber, 0.3).fillCircle(19, 18, 12); // hot glow behind the bolt
+  const bolt = [
+    new Phaser.Geom.Point(22, 4),
+    new Phaser.Geom.Point(11, 20),
+    new Phaser.Geom.Point(18, 20),
+    new Phaser.Geom.Point(14, 32),
+    new Phaser.Geom.Point(28, 14),
+    new Phaser.Geom.Point(20, 14),
+  ];
+  g.lineStyle(2, P.outline, 1);
+  g.fillStyle(P.ember, 1).fillPoints(bolt, true);
+  g.strokePoints(bolt, true);
+  g.fillStyle(P.lanternGold, 1).fillTriangle(21, 7, 15, 19, 20, 15); // lit upper facet
 }
 
 function drawIconWeave(g: Phaser.GameObjects.Graphics): void {

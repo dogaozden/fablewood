@@ -25,7 +25,7 @@ import {
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction } from './damage';
-import { applyBranch, reduceShields, bossDefeated } from './boss';
+import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from './boss';
 import { decideEnemy, occupancyExcept } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS } from './textures';
@@ -74,6 +74,11 @@ export class CombatScene extends Phaser.Scene {
   private encSeed = 0;
   private destroyed = false;
   private demo = false; // ?demo=1 → autopilot the party (screenshots + e2e)
+  // DEV/e2e testability: an optional pilot action preference and a log of resolved player
+  // actions (what fired, damage dealt, whether it opened a question overlay). Read-only surface,
+  // mirrors the hamlet's debug reads; inert in normal play (nothing sets the preference).
+  private debugPrefer: ActionKind | null = null;
+  private actionLog: Array<{ action: string; dmg: number; overlay: boolean }> = [];
 
   // content resolution
   private allFactIds = new Set<string>();
@@ -361,10 +366,14 @@ export class CombatScene extends Phaser.Scene {
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
   }
 
-  /** Dev autopilot (?demo=1): act if a target is in range, else close in, else wait. */
+  /** Dev autopilot (?demo=1): act if a target is in range, else close in, else wait.
+   *  A pilot preference (set via setPilotPreference, e2e-only) forces one action kind. */
   private autoStep(unit: UnitState): void {
     if (this.destroyed || this.state === 'over' || unit.id !== this.activeId) return;
-    for (const a of ['cast', 'sequence', 'weave', 'strike', 'parley'] as ActionKind[]) {
+    const order: ActionKind[] = this.debugPrefer
+      ? [this.debugPrefer]
+      : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
+    for (const a of order) {
       const targets = this.validTargets(unit, a);
       if (targets.length) {
         const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
@@ -432,6 +441,7 @@ export class CombatScene extends Phaser.Scene {
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
     switch (action) {
       case 'strike': return enemies.filter((e) => manhattan(unit, e) <= 1);
+      case 'smite': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'weave': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'cast': return enemies.filter((e) => manhattan(unit, e) <= 3);
       case 'parley': return enemies.filter((e) => e.parley && manhattan(unit, e) <= 1);
@@ -480,9 +490,28 @@ export class CombatScene extends Phaser.Scene {
     this.hoverGfx.clear();
     this.hud.hideActionMenu();
 
+    const target = this.enemyAt(tile);
+
+    // FREE STRIKE (friction redesign): no encounter, no question, cannot miss. It resolves
+    // synchronously — reusing the attacker lunge + hit-flash — so plain fighting FLOWS with
+    // no overlay and no dead frame. Deals fixed, modest damage; no SRS record (no question).
+    if (action === 'strike') {
+      const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
+      const outcome = resolveAction('strike', 1, { miraBonus, vsBoss: !!target?.isBoss });
+      const before = this.enemyHpSum();
+      this.attackerTell(unit, tile, ACTIONS.strike.tint);
+      this.applyOutcome(unit, 'strike', tile, outcome, target);
+      this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
+      this.actionLog.push({ action: 'strike', dmg: before - this.enemyHpSum(), overlay: false });
+      this.refreshParty();
+      this.time.delayedCall(440, () => this.endPlayerTurn());
+      return;
+    }
+
+    // GATED POWER MOVES: answering the question IS the cast. Each hits far harder than a
+    // free Strike — that payoff is what the friction now buys.
     const meta = ACTIONS[action];
     const kind = meta.encounter as EncounterKind;
-    const target = this.enemyAt(tile);
     const vsBoss = !!target?.isBoss;
     const isBossCast = action === 'cast' && vsBoss;
     const tags = isBossCast ? this.launch.room.boss?.phases[this.phaseIndex]?.recallTags : this.roomTags;
@@ -514,10 +543,12 @@ export class CombatScene extends Phaser.Scene {
 
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
     const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag });
-    if (action === 'strike' || action === 'weave' || action === 'sequence' || action === 'cast') {
+    if (action === 'smite' || action === 'weave' || action === 'sequence' || action === 'cast') {
       this.attackerTell(unit, tile, ACTIONS[action].tint);
     }
+    const before = this.enemyHpSum();
     this.applyOutcome(unit, action, tile, outcome, target);
+    this.actionLog.push({ action, dmg: before - this.enemyHpSum(), overlay: true });
     this.hud.showBanner(outcome.banner, outcome.hits > 0 || outcome.weaken ? ACTIONS[action].tint : P.duskRose);
 
     if (isBossCast) {
@@ -530,17 +561,17 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private applyOutcome(actor: UnitState, action: ActionKind, tile: Coord, o: ReturnType<typeof resolveAction>, target: UnitState | null): void {
-    if (action === 'strike' || action === 'cast') {
-      if (target && o.hits > 0) this.damageUnit(target, o.hits, ACTIONS[action].tint);
+    if (action === 'strike' || action === 'cast' || action === 'smite') {
+      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS[action].tint, action);
       if (o.extraShield && target?.isBoss) { this.shields = reduceShields(this.shields, -o.extraShield); this.floatText(target, '−shield', P.waterLight); this.syncBoss(); }
       if (o.fade > 0) this.damageParty(o.fade, actor);
     } else if (action === 'weave') {
-      if (target && o.hits > 0) this.damageUnit(target, o.hits, ACTIONS.weave.tint);
+      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS.weave.tint, action);
       if (o.aoeHit > 0) {
         for (const co of crossTiles(tile)) {
           if (co.c === tile.c && co.r === tile.r) continue;
           const e = this.enemyAt(co);
-          if (e) this.damageUnit(e, o.aoeHit, ACTIONS.weave.tint);
+          if (e) this.hitEnemy(e, o.aoeHit, ACTIONS.weave.tint, action);
         }
       }
     } else if (action === 'sequence') {
@@ -548,7 +579,7 @@ export class CombatScene extends Phaser.Scene {
       if (dir) {
         lineTiles(actor, dir, o.lineDepth).forEach((co, i) => {
           const e = this.enemyAt(co);
-          if (e) this.damageUnit(e, i === 0 ? o.hits : o.aoeHit, ACTIONS.sequence.tint);
+          if (e) this.hitEnemy(e, i === 0 ? o.hits : o.aoeHit, ACTIONS.sequence.tint, action);
         });
       }
     } else if (action === 'parley') {
@@ -683,6 +714,20 @@ export class CombatScene extends Phaser.Scene {
   }
 
   // ---- damage / death ---------------------------------------------------
+
+  /**
+   * Player → enemy damage, honoring the Warden's shield absorption: while the boss is
+   * shielded, only Cast wounds it (wardenAbsorbs) — so a free Strike (or any un-gated
+   * move) can never brute-force the boss to its fallback-victory and skip the mandatory
+   * phase questions. Regular enemies take the hit normally.
+   */
+  private hitEnemy(enemy: UnitState, amount: number, color: number, action: ActionKind): void {
+    if (wardenAbsorbs(action, enemy.isBoss, this.shields)) {
+      this.floatText(enemy, 'shielded', P.waterLight);
+      return;
+    }
+    this.damageUnit(enemy, amount, color);
+  }
 
   private damageUnit(unit: UnitState, amount: number, color: number): void {
     if (this.destroyed || amount <= 0 || !unit.alive) return;
@@ -920,4 +965,29 @@ export class CombatScene extends Phaser.Scene {
   private unitById(id: string): UnitState | undefined { return this.units.find((u) => u.id === id); }
   private isAlive(id: string): boolean { return this.unitById(id)?.alive ?? false; }
   private aliveIds(): Set<string> { return new Set(this.units.filter((u) => u.alive).map((u) => u.id)); }
+  private enemyHpSum(): number {
+    return this.units.filter((u) => u.team === 'enemy' && u.alive).reduce((s, u) => s + Math.max(0, u.hp), 0);
+  }
+
+  // ---- DEV/e2e testability surface (read-only snapshot + a pilot hint) ----------
+  // Mirrors the hamlet's debug reads (window.__FABLEWOOD_GAME → getScene('combat')). The
+  // combat board exposes no turn/board state otherwise, so the e2e drives + observes here.
+
+  /** Force the ?demo autopilot to prefer one action kind (e2e only); null = default order. */
+  setPilotPreference(kind: string | null): void {
+    this.debugPrefer = (kind as ActionKind) || null;
+  }
+
+  combatSnapshot(): {
+    state: string; activeTeam: string | null; enemyHp: number; partyHp: number;
+    log: Array<{ action: string; dmg: number; overlay: boolean }>;
+  } {
+    return {
+      state: this.state,
+      activeTeam: this.unitById(this.activeId)?.team ?? null,
+      enemyHp: this.enemyHpSum(),
+      partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
+      log: this.actionLog.slice(),
+    };
+  }
 }
