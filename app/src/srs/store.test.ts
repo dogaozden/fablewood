@@ -207,7 +207,7 @@ describe('SaveStore', () => {
   it('defaults a fresh save to the hamlet with a full HP pool', async () => {
     const s = new SaveStore(new FakeBridge());
     await s.ready();
-    expect(s.get()).toMatchObject({ scene: 'hamlet', hp: 10, streak: 0, lastPlayed: '' });
+    expect(s.get()).toMatchObject({ scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' });
   });
 
   it('backs up a corrupt save and resets to defaults', async () => {

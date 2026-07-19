@@ -27,7 +27,7 @@ const SRS_FILE = 'srs.json';
 const SAVE_FILE = 'save.json';
 const SETTINGS_FILE = 'settings.json';
 
-const DEFAULT_SAVE: SaveData = { scene: 'hamlet', hp: 10, streak: 0, lastPlayed: '' };
+const DEFAULT_SAVE: SaveData = { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
 const DEFAULT_SETTINGS = { muted: false };
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
