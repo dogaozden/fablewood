@@ -18,3 +18,4 @@ playwright/.cache/
 *.local
 
 # NOTE: screenshots/ is intentionally NOT ignored — it is committed evidence.
+node_modules

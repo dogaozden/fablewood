@@ -44,6 +44,12 @@ export class BootScene extends Phaser.Scene {
     this.load.image('prop.tavern', '/art/tavern-gilded-acorn.png');
     this.load.image('prop.records-office', '/art/records-office.png');
     this.load.image('prop.south-gate', '/art/south-gate.png');
+    this.load.image('prop.wellspring', '/art/wellspring-fountain.png');
+    this.load.image('prop.tree', '/art/tree-canopy-lane-b.png');
+    this.load.image('prop.lantern-post', '/art/lantern-post.png');
+    // Lane-B glow fx (luma-keyed on black; ADD-blended by the hamlet scene).
+    this.load.image('fx.glow', '/art/fx-glow.png');
+    this.load.image('fx.spark', '/art/fx-spark.png');
   }
 
   create(): void {
