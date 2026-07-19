@@ -47,7 +47,16 @@ export function PhaserGame() {
     }
     game.scene.start(sceneKey, { seed });
 
+    // Scale.FIT computes against the parent's size at construction, which can
+    // settle a frame later under flex layout — refresh next frame and on every
+    // parent resize so the canvas never sits mis-fit until a manual resize.
+    const raf = requestAnimationFrame(() => game.scale.refresh());
+    const ro = new ResizeObserver(() => game.scale.refresh());
+    ro.observe(parent);
+
     return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
       game.destroy(true);
       window.__FABLEWOOD_READY = false;
       window.__FABLEWOOD_GAME = undefined;
