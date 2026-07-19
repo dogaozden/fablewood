@@ -84,10 +84,14 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   create(): void {
-    // The Vaults explore in tense silence — the battle theme hits only when combat
-    // starts, and that contrast is deliberate (stops the hamlet motif on entry, and
-    // the battle motif when combat returns us here).
-    music.stop();
+    // The Ledger Deep — the vaults' hushed explore leitmotif (supersedes the v1
+    // deliberate-silence design). Combat returns via scene.start, so this same
+    // line also swaps the battle motif back to the explore theme after a fight.
+    try {
+      music.play('vaults');
+    } catch {
+      /* audio is optional; never let it block the scene */
+    }
     this.view = new VaultView(this);
     this.handlers = { onRoom: (i) => this.onRoom(i), onCamp: () => void this.onCamp() };
     this.view.renderChrome();
