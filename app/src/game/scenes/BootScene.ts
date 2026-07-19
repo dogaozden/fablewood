@@ -30,6 +30,11 @@ export class BootScene extends Phaser.Scene {
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
+    // Lane-B painterly hamlet props (chroma-keyed cutouts). Loaded on every
+    // path: buildTextures skips keys that already exist, so these win over
+    // the Lane-A placeholder grids for the same key.
+    this.load.image('prop.records-office', '/art/records-office.png');
+    this.load.image('prop.south-gate', '/art/south-gate.png');
   }
 
   create(): void {
