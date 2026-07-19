@@ -36,7 +36,7 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 | Freshness | **Stamps now, sweeps later** — every fact carries `as_of` + source version from day one; automated supersession sweeps arrive with the maintainer agent |
 | Quoting | **Verbatim + citation** (private personal use; repo private) |
 | SRS | Leitner port from Bar repo: boxes 1–5, intervals 1/3/7/14/30 days; correct → box+1, miss → box 1 |
-| Stack | Phaser 3 + TypeScript (game) inside Vite + React + TS shell; Python scaffolding + Claude-skills pipeline; Tone.js music-as-code; Claude-drawn pixel art via render→screenshot→critique→revise loop |
+| Stack | Phaser 3 + TypeScript (game) inside Vite + React + TS shell; Python scaffolding + Claude-skills pipeline; Tone.js music-as-code; two-lane art — gpt-image-2 via Codex (painterly) + code-drawn pixels (precision), all gated by the screenshot-critique loop |
 | Machines | One primary Mac. State = plain JSON, append-friendly formats so multi-machine can come later |
 | Priorities | **Main quest = game/frontend + ingestion pipeline** ("that's the hard part"). the maintainer agent ops, phone capture, reader integration, MCP serving: parked |
 | First dungeon | **Term sheet economics** — liquidation preferences, anti-dilution, option pools, pay-to-play |
@@ -81,7 +81,7 @@ Knowledge ↔ mechanics: abilities fire by answering — answer quality sets dam
 
 **Vertical slice** (the build target): the Preference Vaults — ~30 facts, all five encounter kinds, grid combat v1, one companion, term-sheet-negotiation boss, one leitmotif, original sprites. Polished until *actually fun* — the only test that counts.
 
-Art: Claude-drawn pixel sprite sheets via the Bar repo's critique loop (16px tiles, fixed palette, style contract; CC0 placeholders allowed only on dev branches). Music: leitmotifs as note-sequence data through Tone.js.
+Art — two lanes, one gate: **(a) gpt-image-2 via Codex CLI** (`codex-image.md` skill; ChatGPT login, no API key — verified 2026-07-19, first mood canon at `docs/art/fablewood-mood-v1.png`) for painterly/organic assets: key art, backgrounds, portraits, location vignettes, concepts — optionally downscaled/quantized/chroma-keyed into engine use. **(b) Code-drawn pixel sheets** for precision in-engine assets: tiles, walk cycles, UI icons — anywhere grid/palette discipline and cross-sheet consistency rule. Every asset from either lane passes the same render→screenshot→critique→revise loop against `docs/style-contract.md` (warm cozy-whimsical palette; CC0 placeholders only on dev branches). Music: leitmotifs as note-sequence data through Tone.js.
 
 ## 7. Shell
 
