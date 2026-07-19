@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import './scenes'; // side-effect: registers all scenes
 import { getRegisteredScenes, hasScene, DEFAULT_SCENE } from './SceneRegistry';
+import { GAME_TEARDOWN_EVENT } from './encounters/overlay';
 
 /**
  * Mounts the Phaser game inside React. Dev-only URL params drive the harness:
@@ -59,6 +60,9 @@ export function PhaserGame() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      // Encounter overlays live on document.body, not under this component —
+      // tell them the game is going away so none keeps floating over the shell.
+      window.dispatchEvent(new Event(GAME_TEARDOWN_EVENT));
       game.destroy(true);
       window.__FABLEWOOD_READY = false;
       window.__FABLEWOOD_GAME = undefined;

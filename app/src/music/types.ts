@@ -63,6 +63,8 @@ export interface Motif {
   lengthBars: number;
   /** Loop region start bar (default 0). Battle uses this to play its intro once. */
   loopStartBar: number;
+  /** Loop playback (default true). `false` = one-shot sting: plays once, rings out. */
+  loop?: boolean;
   /** Reverb wet 0..1 applied on the master bus while this motif plays. */
   reverbWet: number;
   tracks: Track[];

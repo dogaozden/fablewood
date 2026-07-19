@@ -19,3 +19,6 @@ playwright/.cache/
 
 # NOTE: screenshots/ is intentionally NOT ignored — it is committed evidence.
 node_modules
+
+# harness agent worktrees (session workspaces — never commit their contents to master)
+.claude/worktrees/

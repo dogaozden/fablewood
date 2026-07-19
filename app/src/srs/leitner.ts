@@ -78,7 +78,13 @@ export function record(
   now: number,
   encounterId: string,
 ): SrsEntry {
-  const curBox = entry?.box ?? MIN_BOX; // unseen == box 1 for transition purposes
+  // unseen == box 1 for transition purposes; a corrupted box (out of range /
+  // non-numeric from a mangled state file) is clamped so BOX_INTERVALS[newBox]
+  // can never be undefined — that would poison next_due with NaN.
+  const rawBox = entry?.box;
+  const curBox = Number.isFinite(rawBox)
+    ? Math.min(Math.max(rawBox as number, MIN_BOX), MAX_BOX)
+    : MIN_BOX;
   let newBox: number;
   if (quality === 1) newBox = Math.min(curBox + 1, MAX_BOX);
   else if (quality === 0.5) newBox = curBox;
@@ -117,6 +123,11 @@ export function dueQueue(
     const entry = state.facts[id];
     if (!entry) {
       unseen.push(id);
+    } else if (!Number.isFinite(entry.next_due)) {
+      // Malformed entry (missing/NaN next_due from a mangled state file): the
+      // comparison below would be false forever, silently hiding the fact from
+      // review. Surface it as most-overdue instead — the next record() heals it.
+      seenDue.push({ id, box: entry.box, due: -Infinity });
     } else if (entry.next_due <= now) {
       seenDue.push({ id, box: entry.box, due: entry.next_due });
     }

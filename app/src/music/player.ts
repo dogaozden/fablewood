@@ -109,9 +109,11 @@ export class MusicPlayer {
 
   /** Play a registered motif by id. No-op if it's already the one playing. */
   play(id: string): void {
-    if (this.currentId === id) return;
     const motif = this.registry.get(id);
     if (!motif) throw new Error(`MusicPlayer: unknown motif "${id}"`);
+    // Looping motifs no-op when already current; a one-shot (loop: false) always
+    // restarts — replaying a sting is a fresh event, not a continuation.
+    if (this.currentId === id && motif.loop !== false) return;
     this.loadMotif(motif);
     Tone.getTransport().start();
     this.currentId = id;
@@ -132,9 +134,14 @@ export class MusicPlayer {
     transport.cancel(0);
     transport.bpm.value = motif.bpm;
     transport.timeSignature = motif.meter;
-    transport.loop = true;
-    transport.loopStart = `${motif.loopStartBar}:0:0`;
-    transport.loopEnd = `${motif.lengthBars}:0:0`;
+    // One-shot stings (loop: false) run past their length and ring out; the next
+    // play() switches away through this same reset path.
+    const looping = motif.loop !== false;
+    transport.loop = looping;
+    if (looping) {
+      transport.loopStart = `${motif.loopStartBar}:0:0`;
+      transport.loopEnd = `${motif.lengthBars}:0:0`;
+    }
     transport.position = 0;
     this.reverb.wet.value = motif.reverbWet;
 
@@ -192,7 +199,12 @@ export class MusicPlayer {
 
   private teardown(): void {
     for (const p of this.parts) {
-      p.stop();
+      // stop(0), not stop(): with the Transport parked at position 0 (e.g. the
+      // pre-gesture resume path: scene played a motif on a suspended context,
+      // resumeMusicOnce stops it before restarting), Tone computes "now" as a
+      // negative floating-point epsilon and Part.stop() throws a RangeError.
+      // An explicit 0 is always in range; the part is disposed right after.
+      p.stop(0);
       p.dispose();
     }
     for (const v of this.voices) v.dispose();

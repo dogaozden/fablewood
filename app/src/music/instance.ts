@@ -1,6 +1,7 @@
 /**
- * Shared music singleton for scenes + shell. Scenes: music.play('hamlet'|'battle') /
- * music.stop(). The shell wires the first-gesture resume + mute persistence.
+ * Shared music singleton for scenes + shell. Scenes: music.play('hamlet'|'battle'|
+ * 'vaults') / music.stop(); 'warden' is the one-shot boss sting. The shell wires
+ * the first-gesture resume + mute persistence.
  */
 import { createPlayer } from './index';
 

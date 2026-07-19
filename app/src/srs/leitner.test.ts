@@ -66,6 +66,21 @@ describe('record — box transitions', () => {
     }
   });
 
+  it('clamps a corrupted box back into 1-5 so next_due never goes NaN', () => {
+    // box 9 (or "3", or NaN) has no BOX_INTERVALS entry — without clamping,
+    // next_due = now + undefined * DAY = NaN and the schedule corrupts further.
+    const partial = record(entry(9, 0), 0.5, NOW, 'e'); // partial holds ground → clamp to 5
+    expect(partial.box).toBe(5);
+    expect(partial.next_due).toBe(NOW + BOX_INTERVALS[5] * DAY);
+
+    const promoted = record(entry(99, 0), 1, NOW, 'e');
+    expect(promoted.box).toBe(5);
+
+    const nonNumeric = record({ box: Number.NaN, next_due: 0, history: [] }, 0.5, NOW, 'e');
+    expect(nonNumeric.box).toBe(1); // unusable box → treated as box 1
+    expect(Number.isFinite(nonNumeric.next_due)).toBe(true);
+  });
+
   it('sets next_due to the correct interval for every resulting box', () => {
     // box result → the interval that produced it
     expect(record(entry(1, 0), 1, NOW, 'e').next_due).toBe(NOW + 3 * DAY); // →2
@@ -163,6 +178,26 @@ describe('dueQueue', () => {
   it('treats facts missing from factMeta as having no prereqs', () => {
     const s = state({});
     expect(dueQueue(s, ['x', 'y'], noMeta, NOW)).toEqual(['x', 'y']);
+  });
+
+  it('surfaces a seen entry with a malformed next_due as most-overdue (never silently unschedulable)', () => {
+    // A hand-edited or partially-written srs.json can leave next_due missing or
+    // NaN. `undefined <= now` is false, so such a fact would otherwise fall into
+    // the "seen & not due" bucket FOREVER — invisible to review with no error.
+    const missing = { box: 2, history: [] } as unknown as SrsEntry; // no next_due
+    const s = state({
+      ghost: missing,
+      due: entry(1, NOW - DAY),
+      future: entry(2, NOW + 10 * DAY),
+    });
+    const q = dueQueue(s, ['due', 'ghost', 'future'], noMeta, NOW);
+    expect(q).toContain('ghost'); // the regression: ghost vanished entirely
+    expect(q).toEqual(['ghost', 'due']); // surfaced first so record() heals it
+  });
+
+  it('surfaces a NaN next_due too', () => {
+    const s = state({ nan: entry(3, Number.NaN) });
+    expect(dueQueue(s, ['nan'], noMeta, NOW)).toEqual(['nan']);
   });
 });
 

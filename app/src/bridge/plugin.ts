@@ -56,10 +56,29 @@ export function isValidStateName(name: string): boolean {
 
 export async function readState(dir: string, name: string): Promise<unknown | null> {
   if (!isValidStateName(name)) throw new Error(`invalid state name: ${name}`);
+  let raw: string;
   try {
-    return JSON.parse(await fsp.readFile(path.join(dir, name), 'utf8'));
+    raw = await fsp.readFile(path.join(dir, name), 'utf8');
   } catch {
     return null; // missing file
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Unparseable bytes (truncated write, hand edit): NOT the same as missing.
+    // state/ is precious — preserve the bytes before any caller, seeing null,
+    // starts fresh and overwrites the only copy. Content-hashed name + wx keep
+    // repeated reads of the same corrupt file from multiplying backups.
+    let h = 5381;
+    for (let i = 0; i < raw.length; i++) h = ((h * 33) ^ raw.charCodeAt(i)) >>> 0;
+    const backup = `${name.replace(/\.json$/, '')}.corrupt-${h.toString(16)}.json`;
+    try {
+      await fsp.writeFile(path.join(dir, backup), raw, { flag: 'wx' });
+      console.warn(`[bridge] state/${name} is not valid JSON; bytes preserved at state/${backup}`);
+    } catch {
+      /* backup already exists (same bytes) or is unwritable — still degrade */
+    }
+    return null;
   }
 }
 
