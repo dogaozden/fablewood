@@ -1,12 +1,41 @@
 import { useEffect, useState } from 'react';
 import { PhaserGame } from './game/PhaserGame';
 import { getPacks, type PackEntry } from './bridge/client';
+import { music, resumeMusicOnce } from './music/instance';
+import { services } from './game/contracts';
 
 type Tab = 'dashboard' | 'game' | 'library';
 const TABS: Tab[] = ['dashboard', 'game', 'library'];
 
 export function App() {
   const [tab, setTab] = useState<Tab>('game');
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    services.settings
+      .ready()
+      .then(() => {
+        const m = services.settings.get().muted;
+        setMuted(m);
+        music.setMuted(m);
+      })
+      .catch(() => {});
+    const wake = () => void resumeMusicOnce();
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
+    return () => {
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
+    };
+  }, []);
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    music.setMuted(next);
+    void services.settings.set({ muted: next });
+  };
+
   return (
     <div className="app">
       <nav className="tabbar">
@@ -22,6 +51,14 @@ export function App() {
             </button>
           ))}
         </div>
+        <button
+          className="tab mute"
+          aria-label={muted ? 'Unmute music' : 'Mute music'}
+          title={muted ? 'Unmute music' : 'Mute music'}
+          onClick={toggleMute}
+        >
+          {muted ? '♪̸ off' : '♪ on'}
+        </button>
       </nav>
       <main className="pane">
         {tab === 'game' && <PhaserGame />}
