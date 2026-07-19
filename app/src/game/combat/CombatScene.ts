@@ -676,8 +676,8 @@ export class CombatScene extends Phaser.Scene {
 
   private drawMoveRange(): void {
     this.rangeGfx.clear();
-    this.rangeGfx.fillStyle(P.moss, 0.18);
-    this.rangeGfx.lineStyle(1, P.leafHi, 0.5);
+    this.rangeGfx.fillStyle(P.leafHi, 0.24);
+    this.rangeGfx.lineStyle(2, P.leafHi, 0.9);
     for (const co of this.reachable.values()) {
       const p = this.tileToScreen(co);
       this.rangeGfx.fillRect(p.x - CELL / 2 + 2, p.y - CELL / 2 + 2, CELL - 4, CELL - 4);
@@ -689,8 +689,8 @@ export class CombatScene extends Phaser.Scene {
     this.hoverGfx.clear();
     for (const t of this.targetTiles.values()) {
       const p = this.tileToScreen(t);
-      this.hoverGfx.lineStyle(2, P.berry, 0.9).strokeRect(p.x - CELL / 2 + 3, p.y - CELL / 2 + 3, CELL - 6, CELL - 6);
-      this.hoverGfx.fillStyle(P.berry, 0.14).fillRect(p.x - CELL / 2 + 3, p.y - CELL / 2 + 3, CELL - 6, CELL - 6);
+      this.hoverGfx.lineStyle(2.5, P.berry, 1).strokeRect(p.x - CELL / 2 + 3, p.y - CELL / 2 + 3, CELL - 6, CELL - 6);
+      this.hoverGfx.fillStyle(P.berry, 0.26).fillRect(p.x - CELL / 2 + 3, p.y - CELL / 2 + 3, CELL - 6, CELL - 6);
     }
   }
 
@@ -699,7 +699,7 @@ export class CombatScene extends Phaser.Scene {
     this.drawTargets();
     const mark = (co: Coord, col: number) => {
       const p = this.tileToScreen(co);
-      this.hoverGfx.fillStyle(col, 0.3).fillRect(p.x - CELL / 2 + 4, p.y - CELL / 2 + 4, CELL - 8, CELL - 8);
+      this.hoverGfx.fillStyle(col, 0.42).fillRect(p.x - CELL / 2 + 4, p.y - CELL / 2 + 4, CELL - 8, CELL - 8);
     };
     if (this.pendingAction === 'weave') for (const co of crossTiles(tile)) mark(co, P.orchid);
     else if (this.pendingAction === 'sequence') {
