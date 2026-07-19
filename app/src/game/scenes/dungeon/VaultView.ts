@@ -55,6 +55,7 @@ export class VaultView {
     vig.fillRect(W - 40, 0, 40, H);
 
     this.lanterns();
+    this.vaultHall();
     this.dust();
 
     this.headerText = s.add
@@ -98,6 +99,48 @@ export class VaultView {
         ease: 'Sine.inOut',
       });
     }
+  }
+
+  /** A faint vaulted hall behind the node strip — arch ribs, pillars, and a floor
+   * the nodes stand on — so the crawl reads as a lantern-lit path, not floating dots. */
+  private vaultHall(): void {
+    const s = this.scene;
+    const cx = W / 2;
+    const floorY = STRIP_Y + 30;
+    const springY = 172;
+    const halfSpan = 420;
+    const rise = 78;
+    const R = (halfSpan * halfSpan + rise * rise) / (2 * rise);
+    const centerY = springY - rise + R;
+    const aL = Math.atan2(springY - centerY, -halfSpan);
+    const aR = Math.atan2(springY - centerY, halfSpan);
+
+    const g = s.add.graphics().setDepth(2);
+    // receding vault ribs
+    for (let i = 0; i < 3; i++) {
+      g.lineStyle(3, C.duskViolet, 0.18 - i * 0.045);
+      g.beginPath();
+      g.arc(cx, centerY, R - i * 22, aL, aR, false);
+      g.strokePath();
+    }
+    // pillars flanking the strip, each with a warm sconce glow at its base
+    g.fillStyle(C.duskDeep, 0.5);
+    g.fillRect(cx - halfSpan - 12, springY, 24, floorY - springY);
+    g.fillRect(cx + halfSpan - 12, springY, 24, floorY - springY);
+    for (const px of [cx - halfSpan, cx + halfSpan]) {
+      const sconce = s.add.circle(px, floorY - 18, 26, C.amber, 0.14).setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
+      s.tweens.add({ targets: sconce, alpha: { from: 0.08, to: 0.18 }, duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    }
+
+    // keystone spark at the crown (slow flicker)
+    const key = s.add.circle(cx, springY - rise, 6, C.amber, 0.18).setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
+    s.tweens.add({ targets: key, alpha: { from: 0.1, to: 0.24 }, duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+
+    // vault floor the nodes stand on, with a warm lantern-lit lip
+    const floor = s.add.graphics().setDepth(4);
+    floor.fillStyle(C.shadowPlum, 0.55).fillRect(0, floorY, W, H - floorY);
+    floor.fillStyle(C.lanternGold, 0.16).fillRect(0, floorY, W, 2);
+    floor.fillStyle(C.amber, 0.05).fillRect(0, floorY, W, 14); // soft warm wash along the floor edge
   }
 
   private dust(): void {
