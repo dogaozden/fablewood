@@ -27,6 +27,12 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Lane-B painterly NPC stills (hamlet). Loaded on EVERY path so the real art
+    // wins the key before buildTextures() bakes the Lane-A grid (it skips keys
+    // that already exist).
+    this.load.image('char.berry', '/art/berry-portrait.png');
+    this.load.image('char.clerk', '/art/clerk-portrait.png');
+    this.load.image('char.alder', '/art/alder-portrait.png');
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
@@ -36,6 +42,19 @@ export class BootScene extends Phaser.Scene {
     // Real art first: any key registered here wins over scene placeholder bakes
     // (their ensureTextures skip existing keys).
     buildTextures(this);
+
+    // Lane-B stills are single-frame: when a loaded PNG owns a char key (its
+    // texture source is an HTMLImageElement, not a grid-baked canvas), drop the
+    // stale grid-built idle anim — playing it would swap the sprite back to the
+    // old `<key>__sheet` pixel art. HamletScene then falls back to its gentle
+    // breathing-bob tween for these NPCs. If a PNG fails to load, the grid bake
+    // owns the key, the anim survives, and behavior is unchanged.
+    for (const key of ['char.berry', 'char.clerk', 'char.alder']) {
+      if (!this.textures.exists(key)) continue;
+      if (this.textures.get(key).getSourceImage() instanceof HTMLImageElement) {
+        this.anims.remove(`${key}.idle`);
+      }
+    }
 
     // Warm the persistence layer at boot (idempotent; scenes still await ready()
     // before reads). Fire-and-forget so the ready-flag timing stays deterministic.
