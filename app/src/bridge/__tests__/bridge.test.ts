@@ -68,6 +68,33 @@ describe('state read/write', () => {
     expect(fs.readdirSync(tmp).filter((f) => f.startsWith('.tmp-'))).toEqual([]);
   });
 
+  it('backs up an unparseable state file instead of treating it as missing', async () => {
+    // A truncated/hand-mangled srs.json must NOT read as "missing": the store
+    // would start fresh and the next write would clobber the only copy. The
+    // bytes get preserved to <name>.corrupt-*.json before we degrade to null.
+    const mangled = '{"facts": { "f1": {"box": 3, TRUNCATED';
+    fs.writeFileSync(path.join(tmp, 'srs.json'), mangled);
+    expect(await readState(tmp, 'srs.json')).toBeNull(); // still degrades gracefully
+    const backups = fs.readdirSync(tmp).filter((f) => /^srs\.corrupt-[0-9a-f]+\.json$/.test(f));
+    expect(backups).toHaveLength(1);
+    expect(fs.readFileSync(path.join(tmp, backups[0]), 'utf8')).toBe(mangled);
+    // the corrupt original stays in place — only the write path replaces it
+    expect(fs.readFileSync(path.join(tmp, 'srs.json'), 'utf8')).toBe(mangled);
+  });
+
+  it('re-reading the same corrupt file does not multiply backups', async () => {
+    fs.writeFileSync(path.join(tmp, 'save.json'), 'not json at all');
+    await readState(tmp, 'save.json');
+    await readState(tmp, 'save.json'); // e.g. the store's merge-write re-read
+    const backups = fs.readdirSync(tmp).filter((f) => f.includes('.corrupt-'));
+    expect(backups).toHaveLength(1);
+  });
+
+  it('creates no backup for a merely missing file', async () => {
+    expect(await readState(tmp, 'absent.json')).toBeNull();
+    expect(fs.readdirSync(tmp).filter((f) => f.includes('.corrupt-'))).toEqual([]);
+  });
+
   it('rejects path-traversal and separators in names', () => {
     expect(isValidStateName('save.json')).toBe(true);
     expect(isValidStateName('srs-state.json')).toBe(true);
