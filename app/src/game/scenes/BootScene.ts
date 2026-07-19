@@ -30,6 +30,13 @@ export class BootScene extends Phaser.Scene {
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
+    // Lane-B hamlet props (gpt-image-2, gate-passed): a preloaded PNG under the
+    // same key wins over the Lane-A registry bake and the scene placeholders
+    // (both skip keys that already exist). Loaded on EVERY entry path so the
+    // harness/e2e ?scene= jumps render the same art as normal play.
+    this.load.image('prop.wellspring', '/art/wellspring-fountain.png');
+    this.load.image('prop.tree', '/art/tree-canopy-lane-b.png');
+    this.load.image('prop.lantern-post', '/art/lantern-post.png');
   }
 
   create(): void {
