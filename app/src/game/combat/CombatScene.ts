@@ -640,8 +640,16 @@ export class CombatScene extends Phaser.Scene {
     const before = unit.hp;
     unit.hp = Math.max(0, unit.hp - amount);
     if (unit.team === 'party') this.hpLost += before - unit.hp; // actual loss = pooled delta
+    // impact feedback: a warm glow-core hit-flash + scale-punch on the struck sprite,
+    // and camera shake scaled by the damage (capped) so a big Cast lands bigger.
+    const v = this.views.get(unit.id);
+    if (v) {
+      v.sprite.setTintFill(0xfff1c6);
+      this.time.delayedCall(90, () => { if (!this.destroyed) v.sprite.clearTint(); });
+      this.tweens.add({ targets: v.sprite, scale: v.sprite.scale * 1.14, duration: 70, yoyo: true, ease: 'Quad.easeOut' });
+    }
     this.floatText(unit, `−${amount}`, color);
-    this.cameras.main.shake(90, 0.004);
+    this.cameras.main.shake(90, Math.min(0.009, 0.003 + amount * 0.001));
     if (unit.hp <= 0) { unit.alive = false; this.fadeDead(unit); }
     this.drawHpBar(unit);
   }
