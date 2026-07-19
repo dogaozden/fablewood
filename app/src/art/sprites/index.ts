@@ -10,6 +10,8 @@ import { tileGrass, tilePath, tileWater } from './hamletTiles';
 // Fan-out set modules (agents deliver these; the art director reviews the gate + wires here):
 import { hamletProps } from './set-hamlet-props'; // A3 — reviewed PASS: docs/art-reviews/hamlet-props.md
 import { combatSprites } from './set-combat'; // A2 — reviewed PASS: docs/art-reviews/combat-tiles-icons.md
+import { enemySprites } from './set-enemies'; // A1 — reviewed PASS: docs/art-reviews/combat-enemies.md
+import { characterSprites } from './set-characters'; // A4 — reviewed PASS: docs/art-reviews/characters-set.md
 
 export interface SpriteAnim {
   /** global animation key, e.g. 'char.keeper.walk.down' */
@@ -60,6 +62,11 @@ export const SPRITES: readonly SpriteDef[] = [
   ...hamletProps,
   // Combat/Vaults tiles + props + icons (A2) — gate-reviewed + validated (dims/palette/rows).
   ...combatSprites,
+  // Combat enemies (A1) — gate-reviewed + validated; 2-frame idles, scale 3.
+  ...enemySprites,
+  // Companion Mira (18-frame sheet) + NPCs clerk/berry/alder (A4) — gate-reviewed + validated.
+  // char.mira stays scale 1 (16-native) per D2; combat display-scales ×3, bottom-center origin.
+  ...characterSprites,
 ];
 
 /** All base texture keys buildTextures() produces — consumers may check textures.exists(key). */
