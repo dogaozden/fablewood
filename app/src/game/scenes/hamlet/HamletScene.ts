@@ -248,10 +248,13 @@ export class HamletScene extends Phaser.Scene {
           fontFamily: LABEL_FONT,
           fontSize: '15px',
           color: '#fff1c6',
-          stroke: '#2a1d13',
-          strokeThickness: 4,
+          stroke: '#241a14',
+          strokeThickness: 3,
+          backgroundColor: 'rgba(42,29,19,0.62)',
+          padding: { x: 7, y: 3 },
         })
         .setOrigin(0.5, 1)
+        .setShadow(0, 1, '#100b0a', 4, false, true)
         .setAlpha(0);
       this.uiRoot.add(t);
       this.labels.set(loc.id, t);
