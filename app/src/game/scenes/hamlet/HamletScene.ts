@@ -509,10 +509,16 @@ export class HamletScene extends Phaser.Scene {
     await this.dialogue.run(wellspringIntro());
     try {
       const pv = this.provinces.find((p) => p.id === this.packId);
-      // Due queue drives selection (Goal 5): hand the picker due/unseen facts in
-      // priority order, not raw pack order. runEncounter honors req.factIds order.
-      const factIds = services.srs.dueQueue(this.packId, pv?.factIds ?? []);
+      const baseFactIds = pv?.factIds ?? [];
+      const initialDue = services.srs.dueQueue(this.packId, baseFactIds);
       for (let i = 0; i < 3; i++) {
+        // Due queue drives selection (Goal 5), never raw pack order. Recompute each
+        // pass so the burst advances through DISTINCT facts — a fact recorded below
+        // drops out of "due" next pass. If the live queue empties (fewer than three
+        // due), fall back to the initial queue so the burst gracefully repeats due
+        // facts rather than stalling on nothing.
+        const live = services.srs.dueQueue(this.packId, baseFactIds);
+        const factIds = live.length ? live : initialDue.length ? initialDue : baseFactIds;
         const res = await services.runEncounter({
           context: 'drill',
           packId: this.packId,
