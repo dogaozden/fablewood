@@ -75,6 +75,45 @@ export async function writeState(dir: string, name: string, data: unknown): Prom
   await fsp.rename(tmp, path.join(dir, name));
 }
 
+// --- Pack assets (read-only files under packs/<dir>/assets/) ------------------
+
+/**
+ * Resolve a request-supplied relative path against a pack's assets dir, returning
+ * the absolute path only if it stays strictly inside that dir. Rejects `..`
+ * traversal, absolute paths, and anything that escapes the assets root. Returns
+ * null (→ caller sends 400) for anything unsafe.
+ */
+export function safePackAssetPath(assetsRoot: string, relPath: string): string | null {
+  if (!relPath || relPath.includes('\0')) return null;
+  const root = path.resolve(assetsRoot);
+  const full = path.resolve(root, relPath);
+  // must be a file *inside* the assets dir, not the dir itself or a sibling
+  if (full === root) return null;
+  if (!full.startsWith(root + path.sep)) return null;
+  return full;
+}
+
+/** Content-type by extension for served assets (JSON specs, sprite images, …). */
+export function assetContentType(filePath: string): string {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.json':
+      return 'application/json';
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    case '.svg':
+      return 'image/svg+xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
 // --- Vite dev-server plugin --------------------------------------------------
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -101,6 +140,37 @@ export function fablewoodBridge(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? '';
         try {
+          // Pack assets (read-only): GET /api/packs/<id>/assets/<relpath>
+          const assetMatch = url.match(/^\/api\/packs\/([^/?]+)\/assets\/([^?]*)/);
+          if (assetMatch) {
+            if (req.method !== 'GET') {
+              send(res, 405, { error: 'method not allowed' });
+              return;
+            }
+            const packId = decodeURIComponent(assetMatch[1]);
+            const rel = decodeURIComponent(assetMatch[2]);
+            const pack = listPacks(packsDir()).find((p) => p.id === packId);
+            if (!pack) {
+              send(res, 404, { error: 'pack not found' });
+              return;
+            }
+            const assetsRoot = path.join(packsDir(), pack.dir, 'assets');
+            const full = safePackAssetPath(assetsRoot, rel);
+            if (!full) {
+              send(res, 400, { error: 'invalid asset path' });
+              return;
+            }
+            try {
+              const buf = await fsp.readFile(full);
+              res.statusCode = 200;
+              res.setHeader('content-type', assetContentType(full));
+              res.end(buf);
+            } catch {
+              send(res, 404, { error: 'asset not found' });
+            }
+            return;
+          }
+
           if (url === '/api/packs' || url.startsWith('/api/packs?')) {
             send(res, 200, { packs: listPacks(packsDir()) });
             return;

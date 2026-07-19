@@ -1,0 +1,57 @@
+[
+  {
+    "id": "moss.f1",
+    "type": "concept",
+    "statement": "A lantern renews what the dark would unwrite; carry one into every vault.",
+    "detail": "Light is memory made visible. Where the lantern-glow falls, the Fade loosens its grip and forgotten things take shape again.",
+    "source_ref": {
+      "file": "lore/mosslore.md",
+      "loc": "On Lanterns",
+      "quote": "Carry a lantern, and the dark forgets to swallow you."
+    }
+  },
+  {
+    "id": "moss.f2",
+    "type": "rule",
+    "statement": "Name a thing three times and it stays; name it once and the moss takes it back.",
+    "detail": "Recall is a rope thrown across the Fade. One throw frays; three throws hold. The Keepers count under their breath for a reason.",
+    "source_ref": {
+      "file": "lore/mosslore.md",
+      "loc": "The Rule of Three",
+      "quote": "Once is a guess, twice is a hope, thrice is a knot the moss cannot loosen."
+    }
+  },
+  {
+    "id": "moss.f3",
+    "type": "advice",
+    "statement": "The swollen books remember more than they show — read the margins, not the middle.",
+    "detail": "In the Sunken Reading-Room the truest notes are the ones scrawled sideways by frightened hands. The printed page is only what someone wanted kept.",
+    "source_ref": {
+      "file": "lore/mosslore.md",
+      "loc": "Of Marginalia",
+      "quote": "What a book fears to say aloud, it whispers in its margins."
+    }
+  },
+  {
+    "id": "moss.f4",
+    "type": "rule",
+    "statement": "A ward opens only to the prepared: answer its riddle from memory, or the door stays stone.",
+    "detail": "The old wards do not bargain and do not wait. They test what you carry in your head, not what you carry in your pack.",
+    "source_ref": {
+      "file": "lore/mosslore.md",
+      "loc": "The Warded Doors",
+      "quote": "The door asked, and I had no answer, and so the door remained a wall."
+    }
+  },
+  {
+    "id": "moss.f5",
+    "type": "story",
+    "statement": "The Moss-Warden grew around a stolen truth and will trade it back only to one who already half-knows it.",
+    "detail": "It is less a monster than a knot: a great mossy sentinel wound tight about a single fact the Fade tried to eat. Loosen the knot with recall and the truth spills free.",
+    "source_ref": {
+      "file": "lore/mosslore.md",
+      "loc": "The Root-Heart",
+      "quote": "It hoards one truth the way a dragon hoards gold, and guards it just as jealously."
+    }
+  }
+]

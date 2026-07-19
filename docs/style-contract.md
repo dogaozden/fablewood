@@ -157,4 +157,38 @@ PASS at iteration N — all axes ≥ 4. Final asset: <path>. (Lane B: original p
 
 ---
 
-*Contract v1 — derived from `fablewood-mood-v1.png`, 2026-07-19. Reopen only by the art director with a new mood canon.*
+## 8. Engine integration — texture keys, native sizes, scale (binding for sprite producers)
+
+Two render conventions coexist and are reconciled here: **hamlet is 16px-native with a 3× camera zoom; combat is 48px-native (`CELL=48`, 3× baked in, no zoom).** Both display a 16px grid at 3× on screen. **Rule: author every sprite once at 16px-native; `app/src/art/buildTextures.ts` bakes it at `scale` per consuming scene — `scale:1` for hamlet keys, `scale:3` for combat keys** (nearest-neighbor).
+
+**Auto-upgrade path:** each scene's placeholder generator (combat `ensureTextures`, hamlet `ensurePlaceholders`) SKIPS any key that already exists. `buildTextures(this)` runs in `BootScene.create()` before scenes and registers real art under the SAME key → real art wins, zero scene edits. Producing an asset = author grid → gate it (§6) → add to `app/src/art/sprites/index.ts` with `{key, grid, scale}`.
+
+**Hamlet keys** (scale 1; bottom-origin unless noted):
+
+| key | native px | lane | notes |
+|---|---|---|---|
+| `tile.grass` `tile.path` `tile.water` | 16×16 | A tile | no outline, seamless |
+| `prop.tree` | 20×28 | A | |
+| `prop.cottage` | 48×50 | A | big prop |
+| `prop.tavern` | 48×54 | A | acorn sign |
+| `prop.records-office` | 48×50 | A | cool palette |
+| `prop.south-gate` | 48×52 | A | road into the dark |
+| `prop.wellspring` | 46×38 | A | **centred** origin |
+| `prop.lantern-post` | 12×28 | A | |
+| `char.keeper`\* `char.clerk` `char.berry` `char.alder` | 16×22 | A char | bottom-centre; optional walk anims `char.<who>.walk.<down\|up\|left\|right>` |
+| `fx.glow` 64×64 · `fx.spark` 8×8 | — | glow fx | painterly/code ok |
+
+**Combat keys** (scale 3 = 16-src ×3):
+
+| key | native px | lane | notes |
+|---|---|---|---|
+| `char.keeper`\* `char.mira` | 48×48 | A char | |
+| `enemy.wisp` `enemy.wraith` `enemy.construct` `enemy.warden` | 48×48 | A | friendly=round/warm; threats=taller/colder |
+| `tile.vault-floor` `tile.vault-wall` `tile.gold-heap` `tile.lantern` | 48×48 | A tile | |
+| `icon.strike` `icon.weave` `icon.sequence` `icon.cast` `icon.parley` `icon.wait` | 36×36 | A UI | 36px — off the 16-grid; the UI-icon exception |
+
+**\* OPEN (orchestrator decision):** `char.keeper` is requested by BOTH hamlet (16×22) and combat (48×48); one global texture cannot be both sizes. Resolve by unifying on 16-native `char.keeper` (16×22) with combat display-scaling ×3 (unit origin bottom-centre, body overhangs the cell — standard tactics look), OR giving combat a distinct key. Until resolved, do NOT register `char.keeper` globally — it would shrink combat's unit or stretch hamlet's player.
+
+---
+
+*Contract v1 — derived from `fablewood-mood-v1.png`, 2026-07-19 (§8 integration contract added same day). Reopen only by the art director with a new mood canon.*

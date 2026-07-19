@@ -1,0 +1,52 @@
+{
+  "id": "mossy-undercroft",
+  "name": "The Mossy Undercroft",
+  "region": "The Mossy Undercroft",
+  "packId": "dev",
+  "rooms": [
+    {
+      "id": "under-1",
+      "name": "The Dripping Threshold",
+      "blurb": "Lantern-light gutters on wet stone. Something small and half-forgotten skitters back into the moss.",
+      "teaching": ["moss.f1", "moss.f2"],
+      "enemies": [
+        { "archetype": "wisp", "tags": ["moss"], "kinds": ["mcq"] },
+        { "archetype": "wisp", "tags": ["moss"], "kinds": ["mcq"] }
+      ]
+    },
+    {
+      "id": "under-2",
+      "name": "The Sunken Reading-Room",
+      "blurb": "Rows of swollen books moulder in the dark. A damp wraith drifts between the shelves, mouthing pages it can no longer read.",
+      "teaching": ["moss.f3"],
+      "enemies": [
+        { "archetype": "wraith", "tags": ["moss"], "kinds": ["match", "mcq"] },
+        { "archetype": "construct", "tags": ["moss"], "kinds": ["order"] }
+      ]
+    },
+    {
+      "id": "under-3",
+      "name": "The Warded Door",
+      "blurb": "A mossbound door, sealed by an old ward that will not open for the unprepared. Beyond it, the roots go quiet.",
+      "teaching": ["moss.f4"],
+      "enemies": [{ "archetype": "wraith", "tags": ["moss"], "kinds": ["free_recall"] }],
+      "gate": { "encounterId": "moss.gate.recall" }
+    },
+    {
+      "id": "under-boss",
+      "name": "The Root-Heart Hollow",
+      "blurb": "At the rotten heart of the old tree, the Moss-Warden waits — a great mossy sentinel grown tight around a single stolen truth.",
+      "teaching": ["moss.f5"],
+      "enemies": [{ "archetype": "warden", "tags": ["moss"] }],
+      "boss": {
+        "name": "The Moss-Warden",
+        "shields": 3,
+        "phases": [
+          { "branchEncounterId": "moss.boss.p1", "recallTags": ["moss"] },
+          { "branchEncounterId": "moss.boss.p2", "recallTags": ["moss"] },
+          { "branchEncounterId": "moss.boss.p3", "recallTags": ["moss"] }
+        ]
+      }
+    }
+  ]
+}

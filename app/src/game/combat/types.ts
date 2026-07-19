@@ -1,0 +1,101 @@
+/**
+ * Core combat value types — pure data, no Phaser. Everything the logic modules
+ * (grid/initiative/damage/boss/ai) and the scene agree on lives here.
+ */
+import type { EnemyArchetype, EncounterKind, Quality } from '../contracts';
+
+export const GRID_W = 12;
+export const GRID_H = 8;
+export const CELL = 48; // 16px tiles at 3× integer zoom
+
+export type TileType = 'floor' | 'wall' | 'gold' | 'lantern';
+
+export type Team = 'party' | 'enemy';
+export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
+
+export type ActionKind = 'strike' | 'weave' | 'sequence' | 'cast' | 'parley' | 'wait';
+export type Dir = 'up' | 'down' | 'left' | 'right';
+
+export interface Coord {
+  c: number;
+  r: number;
+}
+
+export interface UnitState extends Coord {
+  id: string;
+  name: string;
+  team: Team;
+  kind: UnitKind;
+  hp: number;
+  maxHp: number;
+  move: number;
+  speed: number;
+  alive: boolean;
+  facing: 'left' | 'right';
+  /** enemy melee/ranged damage */
+  attack: number;
+  /** attack reach in tiles (melee 1, wraith 3) */
+  range: number;
+  ranged: boolean;
+  /** can be Parley'd */
+  parley: boolean;
+  /** parley "weaken" stacks here as negative atk; also used for skip */
+  skipNextTurn: boolean;
+  /** boss only */
+  isBoss?: boolean;
+  shields?: number;
+  maxShields?: number;
+}
+
+/** Per-action metadata: hotkey, the encounter kind it fires, reach, tint. */
+export interface ActionMeta {
+  kind: ActionKind;
+  label: string;
+  hotkey: string;
+  encounter: EncounterKind | null;
+  range: number;
+  /** targeting shape */
+  shape: 'single' | 'cross' | 'line' | 'self';
+  tint: number;
+  blurb: string;
+}
+
+export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: ActionMeta } = {
+  strike: {
+    kind: 'strike', label: 'Strike', hotkey: '1', encounter: 'mcq', range: 1,
+    shape: 'single', tint: 0xf7ce6b, blurb: 'A quick blow. (multiple choice)',
+  },
+  weave: {
+    kind: 'weave', label: 'Binding Weave', hotkey: '2', encounter: 'match', range: 2,
+    shape: 'cross', tint: 0x9a6ec8, blurb: 'Cross AoE. (match the pairs)',
+  },
+  sequence: {
+    kind: 'sequence', label: 'Ritual Sequence', hotkey: '3', encounter: 'order', range: 3,
+    shape: 'line', tint: 0x4c6c96, blurb: 'A lance in a line. (put in order)',
+  },
+  cast: {
+    kind: 'cast', label: 'Cast From Memory', hotkey: '4', encounter: 'free_recall', range: 3,
+    shape: 'single', tint: 0xeea23f, blurb: 'The big one — the Clerk judges. (recall)',
+  },
+  parley: {
+    kind: 'parley', label: 'Parley', hotkey: '5', encounter: 'scenario_branch', range: 1,
+    shape: 'single', tint: 0xe07aae, blurb: 'Talk it down. (a branching choice)',
+  },
+  wait: {
+    kind: 'wait', label: 'Wait', hotkey: '6', encounter: null, range: 0,
+    shape: 'self', tint: 0x8a8078, blurb: 'Hold position, end turn.',
+  },
+};
+
+export const DIRS: Record<Dir, Coord> = {
+  up: { c: 0, r: -1 },
+  down: { c: 0, r: 1 },
+  left: { c: -1, r: 0 },
+  right: { c: 1, r: 0 },
+};
+
+export const key = (c: number, r: number): string => `${c},${r}`;
+export const manhattan = (a: Coord, b: Coord): number => Math.abs(a.c - b.c) + Math.abs(a.r - b.r);
+export const inBounds = (c: number, r: number): boolean => c >= 0 && c < GRID_W && r >= 0 && r < GRID_H;
+
+export type { Quality };
