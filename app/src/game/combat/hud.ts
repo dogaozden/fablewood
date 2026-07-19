@@ -116,10 +116,10 @@ export class CombatHud {
     this.banner.removeAll(true);
     const label = this.scene.add.text(0, 0, text, {
       fontFamily: FONT, fontSize: '17px', color: hex(tint), align: 'center',
-    }).setOrigin(0.5);
+    }).setOrigin(0.5).setShadow(0, 2, hex(P.voidBlack), 4);
     const pad = 14;
     const bg = this.scene.add.graphics();
-    bg.fillStyle(P.shadowPlum, 0.82).fillRoundedRect(-label.width / 2 - pad, -16, label.width + pad * 2, 32, 8);
+    bg.fillStyle(P.shadowPlum, 0.9).fillRoundedRect(-label.width / 2 - pad, -16, label.width + pad * 2, 32, 8);
     bg.lineStyle(1, tint, 0.6).strokeRoundedRect(-label.width / 2 - pad, -16, label.width + pad * 2, 32, 8);
     this.banner.add([bg, label]);
     this.scene.tweens.killTweensOf(this.banner);

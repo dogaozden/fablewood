@@ -667,8 +667,8 @@ export class CombatScene extends Phaser.Scene {
     if (this.destroyed) return;
     const p = this.tileToScreen(unit);
     const t = this.add.text(p.x, p.y - 16, text, {
-      fontFamily: 'Georgia, serif', fontSize: '16px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold',
-    }).setOrigin(0.5).setDepth(40).setShadow(0, 2, '#1b1526', 3);
+      fontFamily: 'Georgia, serif', fontSize: '19px', color: '#' + color.toString(16).padStart(6, '0'), fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(40).setStroke('#241a14', 4).setShadow(0, 2, '#100b0a', 4);
     this.tweens.add({ targets: t, y: p.y - 42, alpha: 0, duration: 900, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
   }
 
