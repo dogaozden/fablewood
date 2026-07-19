@@ -195,7 +195,8 @@ export class VaultView {
     const s = this.scene;
     const c = s.add.container(x, y);
     if (s.textures.exists('prop.camp')) {
-      c.add(s.add.image(0, -4, 'prop.camp'));
+      // real art is authored bottom-origin (base/shadow at the foot) — stand it on the node
+      c.add(s.add.image(0, 8, 'prop.camp').setOrigin(0.5, 1));
     } else {
       const glow = s.add.circle(0, 2, 30, C.amber, 0.22).setBlendMode(Phaser.BlendModes.ADD);
       const tent = s.add.triangle(0, 0, -20, 14, 20, 14, 0, -18, C.timber, 1).setStrokeStyle(2, C.bark);
@@ -243,7 +244,15 @@ export class VaultView {
     } else if (state === 'locked') {
       // padlock placeholder (prop.vault-door seam)
       if (s.textures.exists('prop.vault-door')) {
-        c.add(s.add.image(0, 0, 'prop.vault-door').setAlpha(0.7));
+        // real art is bottom-origin (base/shadow at the foot) — sit it on the node,
+        // scaled down from its combat size (72×96) to a map-marker that fits the node
+        c.add(
+          s.add
+            .image(0, r + 6, 'prop.vault-door')
+            .setOrigin(0.5, 1)
+            .setScale((r * 2.1) / 96)
+            .setAlpha(0.85),
+        );
       } else {
         const shackle = s.add.arc(0, -4, 6, 180, 360, false, C.stone, 0).setStrokeStyle(2, C.parchment, 0.7);
         const body = s.add.rectangle(0, 2, 12, 9, C.darkBark, 0.9).setStrokeStyle(1, C.parchment, 0.5);
