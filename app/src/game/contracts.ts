@@ -131,6 +131,36 @@ export interface SaveApi {
   save(patch: Partial<SaveData>): Promise<void>;
 }
 
+// ---------------------------------------------------------------- inventory
+
+export interface InventorySnapshot {
+  gold: number;
+  /** itemId → count (ids from inventory/catalog.ts; state-referenced, never renamed) */
+  stacks: Record<string, number>;
+}
+
+export interface UseResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface InventoryApi {
+  /** resolve cached state from state/inventory.json — call before sync reads */
+  ready(): Promise<void>;
+  getGold(): number;
+  snapshot(): InventorySnapshot;
+  /** add (clamped ≥ 0); resolves to the new total */
+  addGold(d: number): Promise<number>;
+  /** false (and no deduction) if the freshest balance can't afford it */
+  spendGold(cost: number): Promise<boolean>;
+  grantItem(id: string, qty?: number): Promise<void>;
+  /** false (and no change) if not enough are held */
+  removeItem(id: string, qty?: number): Promise<boolean>;
+  countOf(id: string): number;
+  /** field use (heals); trial effects answer {ok:false} until the combat hook lands */
+  useItem(id: string): Promise<UseResult>;
+}
+
 // ---------------------------------------------------------------- service registry
 
 /** minimal fact shape for teaching cards (subset of packs/types Fact) */
@@ -154,6 +184,7 @@ export interface Services {
   srs: SrsApi;
   save: SaveApi;
   settings: SettingsApi;
+  inventory: InventoryApi;
   /** teach-and-test: modal "discovered documents" cards, resolves on dismiss (encounters agent owns UI) */
   showTeaching: (facts: FactLite[]) => Promise<void>;
 }

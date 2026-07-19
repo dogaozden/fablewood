@@ -6,6 +6,7 @@ import { CombatScene } from '../combat/CombatScene';
 // Provider registrations (side-effect installs into services — see contracts.ts):
 import '../encounters/register';
 import '../../srs/register';
+import '../../inventory/register';
 
 // Side-effect import: registering here means new scenes become reachable via
 // ?scene=<key> just by adding one line — the whole test/screenshot harness rides on this.
