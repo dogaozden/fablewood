@@ -509,7 +509,9 @@ export class HamletScene extends Phaser.Scene {
     await this.dialogue.run(wellspringIntro());
     try {
       const pv = this.provinces.find((p) => p.id === this.packId);
-      const factIds = pv?.factIds ?? [];
+      // Due queue drives selection (Goal 5): hand the picker due/unseen facts in
+      // priority order, not raw pack order. runEncounter honors req.factIds order.
+      const factIds = services.srs.dueQueue(this.packId, pv?.factIds ?? []);
       for (let i = 0; i < 3; i++) {
         const res = await services.runEncounter({
           context: 'drill',
