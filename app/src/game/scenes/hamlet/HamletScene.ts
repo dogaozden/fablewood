@@ -103,6 +103,9 @@ export class HamletScene extends Phaser.Scene {
     cam.setZoom(3);
     cam.setDeadzone(46, 32);
     cam.startFollow(this.player, true, 0.12, 0.12);
+    // Bias the view up: the map is only ~44px taller than the viewport, so lifting
+    // the follow point frames the whole clearing (cottage + tavern read on arrival).
+    cam.setFollowOffset(0, 40);
     cam.roundPixels = true;
 
     this.buildUi();
