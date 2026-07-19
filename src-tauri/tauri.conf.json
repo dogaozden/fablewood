@@ -5,7 +5,7 @@
   "identifier": "realm.ledger.fablewood",
   "build": {
     "beforeDevCommand": "npm run dev:native",
-    "devUrl": "http://localhost:5183",
+    "devUrl": "http://localhost:5219",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },

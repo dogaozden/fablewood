@@ -14,7 +14,7 @@
     "e2e": "playwright test",
     "shot": "node scripts/shot.mjs",
     "check:zero-packs": "bash scripts/check-zero-packs.sh",
-    "dev:native": "vite --port 5183 --strictPort",
+    "dev:native": "vite --port 5219 --strictPort",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

@@ -34,11 +34,11 @@ subscription `claude` CLI, resolved from FABLEWOOD_CLAUDE_BIN → PATH →
 ## Running
 
 ```sh
-npm run tauri:dev     # dev: native window against vite on port 5183 (5173 untouched)
+npm run tauri:dev     # dev: native window against vite on port 5219 (5173 untouched)
 npm run tauri:build   # bundle: src-tauri/target/release/bundle/macos/Fablewood.app
 ```
 
-`tauri:dev` starts its own vite on **5183** (`dev:native`), so a live `npm run dev`
+`tauri:dev` starts its own vite on **5219** (`dev:native`), so a live `npm run dev`
 session on 5173 is never disturbed. Even in dev mode, state/packs/judge go through
 the Rust commands (the webview has Tauri internals), so what you test in `tauri:dev`
 is what the bundled app does.
