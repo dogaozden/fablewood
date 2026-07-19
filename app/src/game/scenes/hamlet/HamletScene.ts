@@ -192,14 +192,22 @@ export class HamletScene extends Phaser.Scene {
     for (const d of defs) {
       const npc = this.add.sprite(d.x, d.y, d.key).setOrigin(0.5, 1).setDepth(d.y);
       this.worldGroup.add(npc);
-      this.tweens.add({
-        targets: npc,
-        y: d.y - 1.5,
-        duration: 900 + Math.random() * 400,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.inOut',
-      });
+      const idle = `${d.key}.idle`;
+      if (this.anims.exists(idle)) {
+        // real art: play the shipped 2-frame idle loop (offset start so NPCs don't sync)
+        npc.play(idle);
+        npc.anims.setProgress(Math.random());
+      } else {
+        // placeholder art has no idle sheet — keep a gentle breathing bob
+        this.tweens.add({
+          targets: npc,
+          y: d.y - 1.5,
+          duration: 900 + Math.random() * 400,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.inOut',
+        });
+      }
     }
   }
 
