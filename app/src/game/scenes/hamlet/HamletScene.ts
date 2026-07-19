@@ -9,6 +9,7 @@ import { markReady } from '../../ready';
 import { services } from '../../contracts';
 import { getPacks } from '../../../bridge/client';
 import { DialogueBox } from '../../dialogue';
+import { music } from '../../../music/instance';
 import { hex, C } from './palette';
 import { ensurePlaceholders } from './textures';
 import { pickInteraction, facingVec, type Vec2 } from './interaction';
@@ -120,6 +121,13 @@ export class HamletScene extends Phaser.Scene {
     });
 
     void this.bootstrap();
+
+    // Hamlet leitmotif — fire-and-forget; the shell handles gesture-resume + mute.
+    try {
+      music.play('hamlet');
+    } catch {
+      /* audio is optional; never let it block the scene */
+    }
 
     markReady({ scene: 'hamlet', title: 'FABLEWOOD', seed: this.seed });
   }
