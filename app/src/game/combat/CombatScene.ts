@@ -164,7 +164,9 @@ export class CombatScene extends Phaser.Scene {
     this.wireInput();
 
     // Battle leitmotif (fire-and-forget; the shell handles gesture-resume + mute).
-    try { music.play('battle'); } catch { /* audio context may be locked pre-gesture */ }
+    // Boss rooms open on the Vault-Warden sting (one-shot, ~11s + ring-out into held
+    // silence while his shields stand); the battle loop returns at the first phase parley.
+    try { music.play(this.launch.room.boss ? 'warden' : 'battle'); } catch { /* audio context may be locked pre-gesture */ }
 
     // markReady MUST fire at the end of create() or shots/e2e hang.
     markReady({ scene: 'combat', title: 'FABLEWOOD', seed: this.launch.seed });
@@ -663,6 +665,10 @@ export class CombatScene extends Phaser.Scene {
       if (end) this.resolveBattle(end);
       else this.advanceTurn();
     });
+
+    // The sting has said its piece — bring the battle loop back under the fight.
+    // 'battle' loops, so repeat phase calls no-op; an unfinished ring-out tears down cleanly.
+    try { music.play('battle'); } catch { /* audio optional */ }
   }
 
   private syncBoss(): void {
