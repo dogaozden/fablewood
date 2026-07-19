@@ -151,22 +151,22 @@ export class HamletScene extends Phaser.Scene {
       .image(11 * TILE, 7 * TILE, 'fx.glow')
       .setBlendMode(Phaser.BlendModes.ADD)
       .setDepth(-850)
-      .setAlpha(0.28)
-      .setScale(2.6);
+      .setAlpha(0.13)
+      .setScale(2.4);
     this.worldGroup.add(plaza);
-    this.tweens.add({ targets: plaza, alpha: 0.36, scale: 2.8, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.tweens.add({ targets: plaza, alpha: 0.18, scale: 2.55, duration: 2600, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
 
     this.map.lanterns.forEach((l, i) => {
       const img = this.add
         .image(l.x, l.y, 'fx.glow')
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(-800)
-        .setAlpha(0.5)
+        .setAlpha(0.4)
         .setScale(1.1);
       this.worldGroup.add(img);
       this.tweens.add({
         targets: img,
-        alpha: 0.66,
+        alpha: 0.52,
         scale: 1.25,
         duration: 1300 + i * 130,
         yoyo: true,
