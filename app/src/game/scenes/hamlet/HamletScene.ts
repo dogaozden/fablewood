@@ -187,7 +187,7 @@ export class HamletScene extends Phaser.Scene {
     const defs: { key: string; x: number; y: number }[] = [
       { key: 'char.berry', x: 245, y: 76 },
       { key: 'char.clerk', x: 44, y: 180 },
-      { key: 'char.alder', x: 236, y: 198 },
+      { key: 'char.alder', x: 224, y: 202 },
     ];
     for (const d of defs) {
       const npc = this.add.sprite(d.x, d.y, d.key).setOrigin(0.5, 1).setDepth(d.y);
