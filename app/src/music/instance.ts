@@ -14,6 +14,13 @@ export async function resumeMusicOnce(): Promise<void> {
   resumed = true;
   try {
     await music.resume();
+    // A play() issued before the gesture ran against a suspended context — restart
+    // the current motif so it audibly begins now (scenes call play() in create()).
+    const cur = music.current();
+    if (cur) {
+      music.stop();
+      music.play(cur);
+    }
   } catch {
     resumed = false; // context still locked — allow a later gesture to retry
   }
