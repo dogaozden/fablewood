@@ -231,9 +231,10 @@ export class DungeonScene extends Phaser.Scene {
   private async onCamp(opts: { persist?: boolean } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
+    const before = services.save.get().hp;
     await services.save.save({ hp: PARTY_MAX_HP, scene: 'vaults', dungeon: this.progress });
     this.refreshStatus();
-    await this.view.showCampCard(opts.persist ? 'persist' : 'wait');
+    await this.view.showCampCard(opts.persist ? 'persist' : 'wait', { before, after: PARTY_MAX_HP });
     this.busy = false;
   }
 

@@ -403,15 +403,22 @@ export class VaultView {
     return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Close' : 'Descend ▸');
   }
 
-  showCampCard(mode: CardMode = 'wait'): Promise<void> {
+  showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {
     const s = this.scene;
     const w = 480;
-    const h = 224;
+    const h = 232;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
-    const top = (H - h) / 2 + 34;
+    const top = (H - h) / 2 + 32;
     cont.add(s.add.text(cx, top, 'The Camp at the Vault-Mouth', { fontFamily: 'Georgia, serif', fontSize: '22px', color: hex(C.darkBark), fontStyle: 'bold' }).setOrigin(0.5));
-    cont.add(s.add.text(cx, top + 44, 'Lanterns trimmed, wounds bound, the ledger set by the fire.\nThe party rests, and is restored to full.', { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 70 }, lineSpacing: 5 }).setOrigin(0.5, 0));
+    cont.add(s.add.text(cx, top + 42, 'Lanterns trimmed, wounds bound, the ledger set by the fire.', { fontFamily: 'Georgia, serif', fontSize: '15px', color: hex(C.bark), align: 'center', wordWrap: { width: w - 70 } }).setOrigin(0.5, 0));
+    // concrete heal feedback — show the mend, not a generic line
+    const healLine = !heal
+      ? 'The party rests, and is restored to full.'
+      : heal.before < heal.after
+        ? `The hearth mends you — ${heal.before} → ${heal.after} HP.`
+        : `The hearth is warm; your party is already whole — ${heal.after}/${heal.after} HP.`;
+    cont.add(s.add.text(cx, top + 76, healLine, { fontFamily: 'Georgia, serif', fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
     return this.finishCard(cont, h, mode, 'Onward ▸');
   }
 
