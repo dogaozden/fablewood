@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { markReady } from '../ready';
+import { services } from '../contracts';
 
 const PALETTE = [0xf4c67a, 0xe98a5b, 0x8ecae6, 0xa7d17a, 0xc792ea, 0xffd6a5];
 
@@ -19,6 +20,14 @@ export class BootScene extends Phaser.Scene {
   }
 
   create(): void {
+    // Warm the persistence layer at boot (idempotent; scenes still await ready()
+    // before reads). Fire-and-forget so the ready-flag timing stays deterministic.
+    void Promise.all([
+      services.srs.ready(),
+      services.save.ready(),
+      services.settings.ready(),
+    ]).catch(() => {});
+
     const { width, height } = this.scale;
     this.cameras.main.setBackgroundColor('#241b2f');
 
