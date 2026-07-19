@@ -414,7 +414,12 @@ export class HamletScene extends Phaser.Scene {
     const anim = `char.keeper.walk.${this.facing}`;
     if (this.anims.exists(anim)) {
       if (this.player.anims.currentAnim?.key !== anim) this.player.play(anim);
+      // ease any leftover bob scale to neutral so the walk sheet isn't stretched
+      this.player.scaleX = Phaser.Math.Linear(this.player.scaleX, 1, 0.3);
+      this.player.scaleY = Phaser.Math.Linear(this.player.scaleY, 1, 0.3);
     } else {
+      // no walk sheet for this facing (left/right) — stop the idle loop and bob
+      if (this.player.anims.isPlaying) this.player.anims.stop();
       this.walkT += dt * 12;
       const s = Math.sin(this.walkT);
       this.player.setScale(1 - s * 0.05, 1 + s * 0.06);
@@ -422,10 +427,18 @@ export class HamletScene extends Phaser.Scene {
   }
 
   private idleAnimate(): void {
-    if (this.player.anims.isPlaying) this.player.anims.stop();
-    const breathe = 1 + Math.sin(this.time.now / 520) * 0.015;
-    this.player.scaleX = Phaser.Math.Linear(this.player.scaleX, 1, 0.2);
-    this.player.scaleY = Phaser.Math.Linear(this.player.scaleY, breathe, 0.2);
+    const idle = 'char.keeper.idle';
+    if (this.anims.exists(idle)) {
+      if (this.player.anims.currentAnim?.key !== idle) this.player.play(idle);
+      // ease residual walk-bob scale back to neutral so idle↔walk never snap-pops
+      this.player.scaleX = Phaser.Math.Linear(this.player.scaleX, 1, 0.25);
+      this.player.scaleY = Phaser.Math.Linear(this.player.scaleY, 1, 0.25);
+    } else {
+      if (this.player.anims.isPlaying) this.player.anims.stop();
+      const breathe = 1 + Math.sin(this.time.now / 520) * 0.015;
+      this.player.scaleX = Phaser.Math.Linear(this.player.scaleX, 1, 0.2);
+      this.player.scaleY = Phaser.Math.Linear(this.player.scaleY, breathe, 0.2);
+    }
   }
 
   private updateLabels(locked: boolean): void {
