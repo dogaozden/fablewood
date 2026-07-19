@@ -49,42 +49,47 @@ const vaultWall: string[] = [
   'bbbbbbbbbbbbbbbb',
 ];
 
+// Sits on the shared vault-floor base (flagstone seams at the edges align with
+// neighbouring tile.vault-floor cells — these are floor-replacement tiles, one
+// image per cell at depth 0, see combat/CombatScene.ts).
 const goldHeap: string[] = [
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDGGDDDDDDDD',
-  'DDDDDGGWGADDDDDD',
-  'DDDDGGAGGAeDDDDD',
-  'DDDGGAGGAGAeDDDD',
-  'DDGWGGAGGAGAeDDD',
-  'DDGAGGAGGAGGAeDD',
+  'zzzzzzzzzzzzzzzz',
+  'zvvvDDDDzvvvDDDD',
+  'zvvDDDDDzvvDDDDD',
+  'zvDDDDDDzvDDDDDD',
+  'zDDDDDDDzDDDDDDD',
+  'zDDDDDGGzDDDDDDD',
+  'zDDDDGGWGADDDDDD',
+  'zDDDGGAGGAeDDDDD',
+  'zzzGGAGGAGAezzzz',
+  'DDGWGGAGGAGAevvv',
+  'DDGAGGAGGAGGAevD',
   'DeGGAGGAGGAAGAeD',
   'DeGAGGAGGAGAGAeD',
   'DEeAGAeGAeGAAeED',
   'DEeeEeeeeeeEeeED',
-  'DDEeDDEeeeDDeEDD',
+  'DDEezDEeeeDDeEDD',
 ];
 
+// Also on the shared vault-floor base (see goldHeap note). The amber pool sits
+// over the flagstone; seams show only at the edges, aligning with neighbours.
 const lantern: string[] = [
-  'DDDDDDDDDDDDDDDD',
-  'DDDDDDDkkDDDDDDD',
-  'DDDDDDkAAkDDDDDD',
-  'DDDDDkKAAKkDDDDD',
-  'DDDDDKGWWGKDDDDD',
-  'DDDDeKWWGGKeDDDD',
-  'DDDDeKGWGGKeDDDD',
-  'DDDeeKGGAGKeeDDD',
-  'DDDeeKGAAGKeeDDD',
-  'DDDDDkKKKKkDDDDD',
-  'DDDDekAAAAkeDDDD',
-  'DDDeeAAAAAAeeDDD',
+  'zzzzzzzzzzzzzzzz',
+  'zvvvDDDkkvvvDDDD',
+  'zvvDDDkAAkvDDDDD',
+  'zvDDDkKAAKkDDDDD',
+  'zDDDDKGWWGKDDDDD',
+  'zDDDeKWWGGKeDDDD',
+  'zDDDeKGWGGKeDDDD',
+  'zDDeeKGGAGKeeDDD',
+  'zzzeeKGAAGKeezzz',
+  'DDDDzkKKKKkDzvvv',
+  'DDDDekAAAAkezvvD',
+  'DDDeeAAAAAAeevDD',
   'DDEeeeeeeeeeeEDD',
   'DDDEeeeeeeeeEDDD',
-  'DDDDEeeeeeeEDDDD',
-  'DDDDDDEeeEDDDDDD',
+  'DDDDEeeeeeeEzDDD',
+  'DDDDzDEeeEDDzDDD',
 ];
 
 // ---- Props (1px outline-warm, bottom-origin) ----

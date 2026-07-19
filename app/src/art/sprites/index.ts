@@ -9,6 +9,7 @@ import { keeperSheet } from './keeper';
 import { tileGrass, tilePath, tileWater } from './hamletTiles';
 // Fan-out set modules (agents deliver these; the art director reviews the gate + wires here):
 import { hamletProps } from './set-hamlet-props'; // A3 — reviewed PASS: docs/art-reviews/hamlet-props.md
+import { combatSprites } from './set-combat'; // A2 — reviewed PASS: docs/art-reviews/combat-tiles-icons.md
 
 export interface SpriteAnim {
   /** global animation key, e.g. 'char.keeper.walk.down' */
@@ -57,6 +58,8 @@ export const SPRITES: readonly SpriteDef[] = [
   { key: 'tile.water', frames: [tileWater], scale: 1 },
   // Hamlet props (A3) — gate-reviewed + validated (dims/palette/rows) by the art director.
   ...hamletProps,
+  // Combat/Vaults tiles + props + icons (A2) — gate-reviewed + validated (dims/palette/rows).
+  ...combatSprites,
 ];
 
 /** All base texture keys buildTextures() produces — consumers may check textures.exists(key). */
