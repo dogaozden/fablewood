@@ -34,6 +34,17 @@ Build from the report's §3 blocks, in this order:
   beams in #452F1C… no shingle-by-shingle detail"). Pick the ramp deliberately: the
   tavern run drifted light-and-cheery because it named the mid-timber ramp — for the
   moody register, name dark-bark/bark-shadow (#452F1C/#2A1D13) as the wall family.
+- **CAMERA** — state the projection explicitly or the model picks its own: world props in
+  this game read from a **high-angle top-down three-quarter view** (the shipped fountain);
+  "front elevation" is correct only for building facades. A perspective mismatch
+  disqualifies an otherwise-good sprite (2026-07-20 fountain field test: both candidates
+  came out side-view and lost on that alone).
+- **Detail rationing scales with size.** The hard-limits block is for LARGE dense
+  subjects (48px buildings — where it won decisively). For small organic props
+  (20×28 trees, 12×28 lanterns) keep 3–4 texture/cluster zones and moderate limits —
+  over-rationed small props flatten into generic mobile-game shapes and LOSE to
+  well-downscaled painterly versions (2026-07-20 plaza field test: shipped Lane-B
+  tree/lantern beat all template regenerations).
 - **BG** — "single flat solid {KEY} background, no scenery/shadows/gradients/text."
   KEY = magenta `#FF00FF` when the subject contains ANY green or foliage; green
   `#00FF00` only for green-free subjects.
@@ -54,6 +65,14 @@ codex exec -C "$WORKDIR" -s workspace-write --skip-git-repo-check \
   anchors; the SCALE + RATIONING blocks carry the discipline alone (verified: they do).
 - Name gpt-image-2 explicitly or Codex falls back to a weaker default.
 - ~1 min per image; set timeout ≥5 min. Verify the PNG exists AND look at it.
+- **Point `-C` at a FRESH, EMPTY directory** containing nothing but what the run needs —
+  with workspace-write the codex agent may "helpfully" modify sibling files (observed:
+  it grid-snapped neighboring raws unasked). Its images ALWAYS land in
+  `~/.codex/generated_images/<uuid>/` first; the workspace file is a copy its agent
+  makes, so if a run dies mid-flight, salvage from there.
+- **Run codex calls sequentially in the foreground.** Parallel `codex exec` children die
+  with their parent shell/turn — a backgrounded agent firing three in parallel lost one
+  generation and its own report (2026-07-20).
 - **Quota: image turns burn the ChatGPT plan 3–5× faster than text. Max 3 attempts
   per asset; retry only structural failures (wrong subject, scenery bg, painterly
   mush), never taste — taste iterations happen in the next generation batch.**
