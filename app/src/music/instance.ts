@@ -3,6 +3,7 @@
  * 'vaults') / music.stop(); 'warden' is the one-shot boss sting. The shell wires
  * the first-gesture resume + mute persistence.
  */
+import * as Tone from 'tone';
 import { createPlayer } from './index';
 
 export const music = createPlayer();
@@ -13,12 +14,18 @@ if (import.meta.env.DEV) {
   (globalThis as unknown as { __fwMusic?: typeof music }).__fwMusic = music;
 }
 
-let resumed = false;
-
-/** Idempotent: resume the audio context on the first real user gesture. */
+/**
+ * Resume the audio context on a real user gesture. Re-checks the ACTUAL AudioContext
+ * state on every call (instead of a one-shot flag) so it recovers from EVERY
+ * suspension, not just the first — e.g. the tab is backgrounded a second time, or the
+ * OS changes audio routes mid-session. No-ops once already running (so a gesture
+ * during normal play never restarts the current motif), and never attempts a resume
+ * before the first real gesture: both call sites (BootScene's title-screen `enter()`,
+ * App.tsx's persistent window pointerdown/keydown listeners) only invoke this from an
+ * actual gesture handler, and the context starts 'suspended' until one arrives.
+ */
 export async function resumeMusicOnce(): Promise<void> {
-  if (resumed) return;
-  resumed = true;
+  if (Tone.getContext().state === 'running') return;
   try {
     await music.resume();
     // A play() issued before the gesture ran against a suspended context — restart
@@ -29,6 +36,6 @@ export async function resumeMusicOnce(): Promise<void> {
       music.play(cur);
     }
   } catch {
-    resumed = false; // context still locked — allow a later gesture to retry
+    /* context still locked — a later gesture will retry (state stays non-running) */
   }
 }

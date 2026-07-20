@@ -5,7 +5,7 @@
  * NEVER hangs on the judge.
  */
 import type { Judge, JudgeVerdict } from '../game/contracts';
-import { stubJudge } from './stub';
+import { stubJudge, AWAY_LINE } from './stub';
 import { isTauri } from '../bridge/native';
 import { nativeJudge } from './native';
 
@@ -69,7 +69,11 @@ export const judge: Judge = async ({ prompt, answer, rubric }) => {
     if (isVerdict(data)) return noteLastGrade(data, Date.now() - t0, 'http');
     throw new Error('malformed verdict');
   } catch {
-    const v = stubJudge({ prompt, answer, rubric });
+    // Bridge unreachable, non-ok, or gave back garbage — grade fairly via the same
+    // deterministic stub, but be honest that the Clerk never actually looked (mirrors
+    // native.ts's identical AWAY_LINE fallback, so neither transport can hand back a
+    // normal-looking verdict when the judge was unreachable).
+    const v = { ...stubJudge({ prompt, answer, rubric }), line: AWAY_LINE };
     return noteLastGrade(v, Date.now() - t0, 'client-stub');
   }
 };
