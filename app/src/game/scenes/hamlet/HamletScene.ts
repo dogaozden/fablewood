@@ -562,6 +562,17 @@ export class HamletScene extends Phaser.Scene {
           break;
       }
     } finally {
+      // Crucible v0 #1 (softlock): the physical E/Space press that closes a dialogue
+      // (DialogueBox's own raw keydown listener, dialogue/DialogueBox.ts:130) ALSO
+      // sets Phaser's keyE/keySpace `_justDown` flag on this scene's polled Key
+      // objects — and updatePromptAndInteract() never calls JustDown() while locked,
+      // so that flag goes unconsumed. The instant `busy` clears below, the very next
+      // update() would read it as a brand-new press and call enter() again, silently
+      // reopening whatever just closed. resetKeys() (same fix already used by
+      // doFactor()/openSatchel() for their own overlays) clears it here — the single
+      // choke point every enter()-routed path (cottage/tavern/records/wellspring/
+      // gate/factor) funnels through on close.
+      this.input.keyboard!.resetKeys();
       this.busy = false;
     }
   }
