@@ -181,7 +181,7 @@ export const SPELLBOOK: Record<SpellId, SpellDef> = {
   // ---- Binding (match) — threads and true pairings; knots that hold ----
   weave: {
     id: 'weave', art: 'binding', tier: 1,
-    label: 'Binding Weave', blurb: 'Cross AoE. (match the pairs)',
+    label: 'Binding Weave', blurb: 'A cross of binding light. (match the pairs)',
     glowCost: 0, range: 2, shape: 'cross',
     effects: {
       q1: fx({ hits: 2, aoeHit: 2 }),
@@ -485,4 +485,15 @@ export function resolveSpell(def: SpellDef, quality: Quality, opts: ResolveSpell
 
   ops.push({ op: 'banner', text: def.banner[slot] });
   return ops;
+}
+
+/**
+ * The three tiers of one Art, sorted (T1,T2,T3) — the tier flyout's row source (§12.2).
+ * Not in the team lead's literal bullet list, but a small, obviously-needed complement to
+ * ARTS/SPELLBOOK for the wiring layer (the flyout needs "this Art's 3 spells, in tier
+ * order" far more often than "this Art's encounter kind"); flagged in the handoff report
+ * as beyond the literal ask in case it's unwanted, same spirit as ARTS itself above.
+ */
+export function spellsForArt(art: ArtId): SpellDef[] {
+  return (Object.values(SPELLBOOK) as SpellDef[]).filter((s) => s.art === art).sort((a, b) => a.tier - b.tier);
 }

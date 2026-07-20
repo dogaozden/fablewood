@@ -15,6 +15,9 @@ import { RENDERERS } from './kinds';
 export interface EncounterCtx {
   context: EncounterRequest['context'];
   judge: Judge;
+  /** §12.4 — T2/T3 spell casts pass their label through here for the eyebrow's action slot
+   *  ("✦ Cinder-Rebuke · Multiple Choice"); T1 casts pass nothing (shipped eyebrows unchanged). */
+  flair?: string;
 }
 
 export interface Overlay {
@@ -22,8 +25,9 @@ export interface Overlay {
   panel: HTMLDivElement;
   body: HTMLDivElement;
   footer: HTMLDivElement;
-  /** eyebrow (action name + glyph) + prompt + rule; omit prompt for teaching. */
-  setHeader(kindKey: string, prompt?: string): void;
+  /** eyebrow (action name + glyph) + prompt + rule; omit prompt for teaching. `flair` (§12.4)
+   *  replaces the default action-kind name in the eyebrow ("Cinder-Rebuke" instead of "Smite"). */
+  setHeader(kindKey: string, prompt?: string, flair?: string): void;
   /** register a keydown handler (several may coexist; all fire). */
   onKey(fn: (e: KeyboardEvent) => void): void;
   /** animate out, remove, restore prior focus. */
@@ -138,12 +142,12 @@ function buildOverlay(): Overlay {
     panel,
     body,
     footer,
-    setHeader(kindKey, prompt) {
+    setHeader(kindKey, prompt, flair) {
       const a = ACTIONS[kindKey] ?? ACTIONS.mcq;
       const parts: Array<Node | string> = [
         el('div', { class: 'fw-eyebrow' }, [
           el('span', { class: 'fw-glyph', 'aria-hidden': 'true', text: a.glyph }),
-          el('span', { text: a.action }),
+          el('span', { text: flair ?? a.action }),
           el('span', { class: 'fw-kindname', text: `· ${a.kind}` }),
         ]),
       ];
@@ -179,7 +183,7 @@ export function presentEncounter(
 ): Promise<EncounterResult> {
   return new Promise((resolve) => {
     const o = buildOverlay();
-    o.setHeader(encounter.kind, encounter.prompt);
+    o.setHeader(encounter.kind, encounter.prompt, ctx.flair);
 
     const finish = async (result: EncounterResult) => {
       await o.close();

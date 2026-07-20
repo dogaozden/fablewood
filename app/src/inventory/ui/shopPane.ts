@@ -7,7 +7,6 @@ import { services } from '../../game/contracts';
 import { CATALOG, RARITY_META, shopStock, type ItemDef } from '../catalog';
 import { sellPrice } from '../economy';
 import { iconUrl } from '../icons';
-import { store } from '../register';
 import { el, openPane } from './dom';
 
 /** Short buyer-facing description of what an item does (shop-only presentation, not catalog data). */
@@ -16,6 +15,8 @@ function effectLabel(item: ItemDef): string {
   switch (e.kind) {
     case 'heal':
       return e.amount >= 999 ? 'Restores to full vigor' : `Restores ${e.amount} vigor`;
+    case 'glow':
+      return `Grants ${e.amount} glow in battle`;
     case 'reveal_option':
       return 'Strikes one wrong answer in a trial';
     case 'retry_cast':
@@ -74,7 +75,7 @@ export function openShopPane(): Promise<void> {
           onClick: async () => {
             // Atomic (crucible #6): one store.mutate() write does gold AND the item
             // together, so a reload can never land between "gold spent" and "item granted".
-            const ok = await store.buy(item.id, item.value);
+            const ok = await services.inventory.buy(item.id, item.value);
             if (!ok) {
               showBanner(false, "You can't afford that yet.");
               return;
@@ -109,7 +110,7 @@ export function openShopPane(): Promise<void> {
           onClick: async () => {
             // Atomic (crucible #6): one store.mutate() write removes the item AND credits
             // gold together — the sell-side mirror of buy() above.
-            const sold = await store.sell(item.id, price);
+            const sold = await services.inventory.sell(item.id, price);
             if (!sold) {
               showBanner(false, "You don't have one of those.");
               return;

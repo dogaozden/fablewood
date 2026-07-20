@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { resolveAction } from '../damage';
 import { computeHit } from '../status';
-import { SPELLBOOK, resolveSpell, qualitySlot, type SpellId } from '../spells';
+import { SPELLBOOK, resolveSpell, qualitySlot, spellsForArt, type SpellId } from '../spells';
+import type { ArtId } from '../spells';
 
 const SPELL_IDS = Object.keys(SPELLBOOK) as SpellId[];
 
@@ -52,6 +53,27 @@ describe('SPELLBOOK — table snapshot (§7, freezes the numbers)', () => {
   it('bossRider strip-shield is flagged on exactly the three Attestation spells (§9)', () => {
     const flagged = SPELL_IDS.filter((id) => SPELLBOOK[id].bossRider === 'strip-shield').sort();
     expect(flagged).toEqual(['attested-ward', 'cast', 'verbatim-decree'].sort());
+  });
+});
+
+describe('spellsForArt (§12.2 — the tier flyout row source)', () => {
+  const ARTS_LIST: ArtId[] = ['kindling', 'binding', 'ritecraft', 'attestation', 'courtcraft'];
+
+  it('every Art returns exactly 3 spells, sorted tier 1,2,3', () => {
+    for (const art of ARTS_LIST) {
+      const spells = spellsForArt(art);
+      expect(spells).toHaveLength(3);
+      expect(spells.map((s) => s.tier)).toEqual([1, 2, 3]);
+      for (const s of spells) expect(s.art).toBe(art);
+    }
+  });
+
+  it("kindling's tiers are exactly smite / cinder-rebuke / lanternfall, in that order", () => {
+    expect(spellsForArt('kindling').map((s) => s.id)).toEqual(['smite', 'cinder-rebuke', 'lanternfall']);
+  });
+
+  it("courtcraft's tiers are exactly parley / heartening-word / injunction, in that order", () => {
+    expect(spellsForArt('courtcraft').map((s) => s.id)).toEqual(['parley', 'heartening-word', 'injunction']);
   });
 });
 

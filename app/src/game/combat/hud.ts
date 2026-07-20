@@ -8,6 +8,7 @@ import Phaser from 'phaser';
 import { P, hex } from './palette';
 import { ACTIONS, type ActionKind, type UnitState } from './types';
 import { ICON_KEYS } from './textures';
+import { GLOW_CAP } from './arts';
 
 const FONT = 'Georgia, serif';
 const W = 960;
@@ -28,6 +29,25 @@ export interface PartyStatus {
   graceAvailable: boolean;
   miraBonusActive: boolean;
   streak: number;
+  /** §12.3 — party-shared Glow pips (0..GLOW_CAP), additive to the existing status shape. */
+  glow: number;
+}
+
+/** §12.2 — one row of the tier flyout. */
+export interface TierRow {
+  tier: 1 | 2 | 3;
+  label: string;
+  /** 'free' for tier 1, else '◈N' */
+  costText: string;
+  enabled: boolean;
+  reason?: string;
+}
+
+/** §12.2 — the Overglow toggle row (offered only when rank≥2 and ≥1 pip is available). */
+export interface OverglowRow {
+  enabled: boolean;
+  on: boolean;
+  reason?: string;
 }
 
 export class CombatHud {
@@ -43,6 +63,10 @@ export class CombatHud {
   private panelText: Phaser.GameObjects.Text;
   private graceDot: Phaser.GameObjects.Arc;
   private streakIcon: Phaser.GameObjects.Image | null = null;
+  private rankText: Phaser.GameObjects.Text;
+  private glowPips: Phaser.GameObjects.Graphics;
+  private lastGlowPips = -1;
+  private flyout: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, roomName: string) {
     this.scene = scene;
@@ -51,17 +75,23 @@ export class CombatHud {
     this.toast = scene.add.container(W / 2, 210).setDepth(80).setAlpha(0);
     this.veil = scene.add.container(0, 0).setDepth(70).setVisible(false);
     this.menu = scene.add.container(0, 502).setDepth(55).setVisible(false);
+    this.flyout = scene.add.container(0, 502).setDepth(56).setVisible(false);
     this.panel = scene.add.container(8, 66).setDepth(50);
 
     scene.add.text(12, 8, roomName.toUpperCase(), {
       fontFamily: FONT, fontSize: '13px', color: hex(P.parchment),
+    }).setDepth(50);
+    // §12.3 — the Rank line, directly under the room name (the retention hook rendered visible).
+    this.rankText = scene.add.text(12, 24, '', {
+      fontFamily: FONT, fontSize: '11px', color: hex(P.lanternGold),
     }).setDepth(50);
 
     // party panel frame (bg is re-sized to fit content in updateParty)
     this.panelBg = scene.add.graphics();
     this.panelText = scene.add.text(12, 10, '', { fontFamily: FONT, fontSize: '13px', color: hex(P.parchment), lineSpacing: 5 });
     this.graceDot = scene.add.circle(160, 128, 5, P.lanternGold);
-    this.panel.add([this.panelBg, this.panelText, this.graceDot]);
+    this.glowPips = scene.add.graphics();
+    this.panel.add([this.panelBg, this.panelText, this.graceDot, this.glowPips]);
     // A2's real hearth-flame beside the streak (the "flame = streak" motif). Guarded:
     // absent in a texture-less boot; the text still reads the count either way.
     if (scene.textures.exists('icon.streak')) {
@@ -77,6 +107,15 @@ export class CombatHud {
     }).setOrigin(0.5);
     this.veil.add([vg, vt]);
     this.scene.tweens.add({ targets: vt, alpha: { from: 0.5, to: 1 }, duration: 700, yoyo: true, repeat: -1 });
+  }
+
+  // ---- rank line (§12.3) -------------------------------------------------
+
+  /** `welded4` (facts at box≥4) feeds the pre-rank-3 carrot; ignored once rank 3 is reached. */
+  setRankLine(rank: 1 | 2 | 3, welded4: number): void {
+    const roman = rank === 1 ? 'I' : rank === 2 ? 'II' : 'III';
+    const carrot = rank < 3 ? ` — ${welded4}/8 welded toward Rank III` : '';
+    this.rankText.setText(`Keeper's Rank ${roman}${carrot}`);
   }
 
   // ---- turn strip -------------------------------------------------------
@@ -211,16 +250,119 @@ export class CombatHud {
     const lh = this.panelText.height / lines.length;
     this.graceDot.setFillStyle(status.graceAvailable ? P.lanternGold : P.stoneGrey)
       .setPosition(160, 10 + (lines.length - 0.5) * lh);
+    const si = lines.findIndex((l) => l.startsWith('Hearth'));
     if (this.streakIcon) {
-      const si = lines.findIndex((l) => l.startsWith('Hearth'));
       this.streakIcon.setVisible(status.streak > 0).setPosition(88, 10 + (si + 0.5) * lh);
     }
+
+    // §12.3 — 3 diamond Glow pips beside the streak line: lantern-gold filled / shadow-plum
+    // empty, +pulse on GAIN only (never on spend, so it reads as "you earned this").
+    const py = 10 + (si + 0.5) * lh;
+    const pipR = 5;
+    const pipGap = 4;
+    const startX = 122;
+    this.glowPips.clear();
+    for (let i = 0; i < GLOW_CAP; i++) {
+      const px = startX + i * (pipR * 2 + pipGap);
+      const filled = i < status.glow;
+      diamond(this.glowPips, px, py, pipR, filled ? P.lanternGold : P.shadowPlum, true);
+      diamond(this.glowPips, px, py, pipR, P.outline, false);
+    }
+    if (status.glow > this.lastGlowPips && this.lastGlowPips >= 0) {
+      this.scene.tweens.killTweensOf(this.glowPips);
+      this.glowPips.setScale(1.5);
+      this.scene.tweens.add({ targets: this.glowPips, scale: 1, duration: 260, ease: 'Back.easeOut' });
+    }
+    this.lastGlowPips = status.glow;
   }
 
   /** Debug: the party panel's current raw text (e2e-only — verifies the sidebar reflects
    *  live hp rather than a stale snapshot, e.g. crucible #10's enemy-turn refresh gap). */
   partyPanelText(): string {
     return this.panelText.text;
+  }
+
+  // ---- tier flyout (§12.2, Rank 2+) ---------------------------------------
+
+  /** Recomputes an action button's screen-space centre X from the same items+width math
+   *  showActionMenu uses above — lets the tier flyout anchor itself above the pressed Art's
+   *  button without showActionMenu needing to expose any new state. */
+  getActionButtonX(items: ActionItem[], action: ActionKind): number {
+    const gap = 6;
+    const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
+    const total = items.length * bw + (items.length - 1) * gap;
+    let x = W / 2 - total / 2;
+    for (const item of items) {
+      if (item.action === action) return x + bw / 2;
+      x += bw + gap;
+    }
+    return W / 2;
+  }
+
+  /** Phaser-drawn (container, like showActionMenu) — NOT a DOM pane, so it never quiets the
+   *  keyboard. One row per unlocked tier + an optional Overglow toggle row. */
+  showTierFlyout(
+    anchorX: number,
+    rows: TierRow[],
+    overglow: OverglowRow | null,
+    onPickTier: (tier: 1 | 2 | 3) => void,
+    onToggleOverglow: () => void,
+  ): void {
+    this.flyout.removeAll(true);
+    const rowH = 28;
+    const rowW = 196;
+    const n = rows.length + (overglow ? 1 : 0);
+    const totalH = n * rowH + 12;
+    const top = -totalH - 14;
+
+    const bg = this.scene.add.graphics();
+    bg.fillStyle(P.shadowPlum, 0.97).fillRoundedRect(-rowW / 2, top, rowW, totalH, 8);
+    bg.lineStyle(2, P.bark, 1).strokeRoundedRect(-rowW / 2, top, rowW, totalH, 8);
+    this.flyout.add(bg);
+
+    let y = top + 6;
+    const addRow = (keyLabel: string, text: string, trailing: string, enabled: boolean, on: boolean, onClick: () => void): void => {
+      const cy = y + rowH / 2;
+      const row = this.scene.add.container(0, cy);
+      const rbg = this.scene.add.graphics();
+      const draw = (hovered: boolean): void => {
+        rbg.clear();
+        if (!enabled) return;
+        rbg.fillStyle(on ? P.bark : hovered ? P.darkBark : P.shadowPlum, on ? 1 : 0.85)
+          .fillRoundedRect(-rowW / 2 + 4, -rowH / 2 + 2, rowW - 8, rowH - 4, 5);
+        if (on) rbg.lineStyle(1.5, P.lanternGold, 0.9).strokeRoundedRect(-rowW / 2 + 4, -rowH / 2 + 2, rowW - 8, rowH - 4, 5);
+      };
+      draw(false);
+      const label = this.scene.add.text(-rowW / 2 + 10, -9, `[${keyLabel}] ${text}`, {
+        fontFamily: FONT, fontSize: '11px', color: hex(enabled ? P.parchment : P.stoneGrey),
+      });
+      const trail = this.scene.add.text(rowW / 2 - 10, -9, trailing, {
+        fontFamily: FONT, fontSize: '9px', color: hex(enabled ? P.lanternGold : P.stoneGrey),
+      }).setOrigin(1, 0);
+      row.add([rbg, label, trail]);
+      if (enabled) {
+        row.setInteractive(new Phaser.Geom.Rectangle(-rowW / 2, -rowH / 2, rowW, rowH), Phaser.Geom.Rectangle.Contains);
+        row.on('pointerover', () => draw(true));
+        row.on('pointerout', () => draw(false));
+        row.on('pointerdown', onClick);
+      }
+      this.flyout.add(row);
+      y += rowH;
+    };
+
+    for (const row of rows) {
+      addRow(String(row.tier), row.label, row.enabled ? row.costText : (row.reason ?? row.costText), row.enabled, false, () => onPickTier(row.tier));
+    }
+    if (overglow) {
+      addRow('o', 'Overglow +1', overglow.enabled ? '◈1' : (overglow.reason ?? '◈1'), overglow.enabled, overglow.on, onToggleOverglow);
+    }
+
+    this.flyout.setPosition(anchorX, 502);
+    this.flyout.setVisible(true);
+  }
+
+  hideTierFlyout(): void {
+    this.flyout.setVisible(false);
   }
 }
 
@@ -252,4 +394,12 @@ function bar(u: UnitState): string {
   const n = 6;
   const filled = Math.round((u.hp / u.maxHp) * n);
   return '▰'.repeat(filled) + '▱'.repeat(n - filled);
+}
+
+/** A small diamond (rotated square) at (x,y) — the Glow pip glyph (§12.3). `fill:true` fills
+ *  with `color`; `fill:false` strokes the outline in `color` instead (paired calls draw one pip). */
+function diamond(g: Phaser.GameObjects.Graphics, x: number, y: number, r: number, color: number, fill: boolean): void {
+  const pts = [{ x, y: y - r }, { x: x + r, y }, { x, y: y + r }, { x: x - r, y }];
+  if (fill) g.fillStyle(color, 1).fillPoints(pts, true);
+  else g.lineStyle(1, color, 1).strokePoints(pts, true);
 }

@@ -11,6 +11,7 @@ export type ItemType = 'consumable' | 'tool' | 'trinket' | 'relic';
 
 export type ItemEffect =
   | { kind: 'heal'; amount: number } // amount HP; 999 = "restore to full"
+  | { kind: 'glow'; amount: number } // combat-only Glow grant (magic-combat-depth §11.1)
   | { kind: 'reveal_option' } // trial aid (deferred): strike one false MCQ option
   | { kind: 'retry_cast' } // trial aid (deferred): retry a failed cast (combat outcome only)
   | { kind: 'streak_shield' } // trial aid (deferred): hold the streak through one stumble
@@ -27,8 +28,9 @@ export interface ItemDef {
   value: number;
   /** key into ICONS (inventory/icons.ts) — same as id by convention */
   icon: string;
-  /** where the item can be used; derives from effect but kept explicit for the UI */
-  use: 'field' | 'trial' | null;
+  /** where the item can be used; derives from effect but kept explicit for the UI.
+   *  'combat' (magic-combat-depth §11.1) — usable only through the in-battle Satchel. */
+  use: 'field' | 'trial' | 'combat' | null;
   sellable: boolean;
 }
 
@@ -68,7 +70,7 @@ const item = (
   flavor,
   value,
   icon: id,
-  use: effect.kind === 'heal' ? 'field' : effect.kind === 'none' ? null : 'trial',
+  use: effect.kind === 'heal' ? 'field' : effect.kind === 'glow' ? 'combat' : effect.kind === 'none' ? null : 'trial',
   sellable: type === 'trinket',
 });
 
@@ -81,6 +83,11 @@ export const CATALOG: readonly ItemDef[] = [
     'Bottled hearthlight — drink deep and the ache recedes.'),
   item('wardancers-restorative', "Wardancer's Restorative", 'rare', 'consumable', { kind: 'heal', amount: 999 }, 90,
     "Full vigor, distilled from a Warden's mercy."),
+  // -- glow (combat-only; the Five Arts' Glow economy, magic-combat-depth §11.1) --
+  item('wick-tallow', 'Wick-Tallow', 'common', 'consumable', { kind: 'glow', amount: 1 }, 25,
+    'Render of old lantern-tallow — the wick drinks it greedily.'),
+  item('lantern-brand', 'Lantern-Brand', 'rare', 'consumable', { kind: 'glow', amount: 2 }, 70,
+    "A splint from the First Lantern's own fire, banked in wax."),
   // -- tools (trial-only encounter aids; usable hook is deferred to combat) --
   item('scriveners-hint', "Scrivener's Hint", 'common', 'tool', { kind: 'reveal_option' }, 25,
     'A margin-note that strikes one false answer from the page.'),

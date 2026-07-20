@@ -51,7 +51,7 @@ services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> 
   }
   const reskinned = reskin(chosen, req.seed);
   const facts = factsFor(chosen.fact_ids, sourcePack);
-  return presentEncounter(reskinned, facts, { context: req.context, judge: services.judge });
+  return presentEncounter(reskinned, facts, { context: req.context, judge: services.judge, flair: req.flair });
 };
 
 services.showTeaching = (facts: FactLite[]): Promise<void> => presentTeaching(facts);

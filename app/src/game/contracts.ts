@@ -17,6 +17,8 @@ export interface EncounterRequest {
   factIds?: string[];
   /** force a specific encounter (boss phases, parley gates) */
   encounterId?: string;
+  /** spell title for the overlay eyebrow ("✦ Cinder-Rebuke · Multiple Choice") — T2+ casts only */
+  flair?: string;
   packId: string;
   seed: number;
 }
@@ -129,6 +131,11 @@ export interface SaveData {
   dungeon?: { roomIndex: number; cleared: string[] };
   hp: number;
   streak: number;
+  /** chosen retinue for the next crawl; absent = 'mira'. Primitive on purpose — the save
+   *  merge is shallow one-level; nested objects clobber on partial writes. */
+  companion?: 'mira' | 'alder';
+  /** held Wellspring boon (e.g. 'trimmed-wick'), consumed at battle create(); absent/null = none */
+  boon?: string | null;
   lastPlayed: string;
 }
 
@@ -166,6 +173,10 @@ export interface InventoryApi {
   countOf(id: string): number;
   /** field use (heals); trial effects answer {ok:false} until the combat hook lands */
   useItem(id: string): Promise<UseResult>;
+  /** atomic purchase: gold check + deduct + grant in ONE store write; false (no write) if unaffordable */
+  buy(id: string, cost: number, qty?: number): Promise<boolean>;
+  /** atomic sale: held check + remove + credit in ONE store write; false (no write) if not enough held */
+  sell(id: string, price: number, qty?: number): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------- service registry

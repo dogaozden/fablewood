@@ -10,11 +10,12 @@ import { services } from '../game/contracts';
 import { InventoryStore } from './store';
 import { useItem } from './consume';
 
-// Exported so shopPane.ts can reach the atomic buy()/sell() (store.ts) directly — those
-// aren't part of the InventoryApi contract surface below (contracts.ts is off-limits to
-// this slice), but they must run against this SAME singleton instance so their writes
-// serialize correctly through its one writeChain (store.ts's mutate()).
-export const store = new InventoryStore();
+// Phase 2 (magic-combat-depth §13): buy/sell are now part of the InventoryApi contract
+// surface (contracts.ts), so the store singleton no longer needs to be exported for
+// shopPane.ts to reach them directly — it goes through services.inventory like every
+// other consumer. Kept module-private; every write still serializes through its one
+// writeChain (store.ts's mutate()) since services.inventory delegates to this same instance.
+const store = new InventoryStore();
 
 services.inventory = {
   ready: () => store.ready(),
@@ -28,4 +29,6 @@ services.inventory = {
   removeItem: (id, qty) => store.remove(id, qty),
   countOf: (id) => store.countOf(id),
   useItem: (id) => useItem(store, id),
+  buy: (id, cost, qty) => store.buy(id, cost, qty),
+  sell: (id, price, qty) => store.sell(id, price, qty),
 };

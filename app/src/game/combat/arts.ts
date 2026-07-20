@@ -121,6 +121,20 @@ export function dueRenewalSurge(resolvedQuality: Quality, factIds: string[], due
 }
 
 /**
+ * Disambiguates `services.srs.dueQueue`'s result for `dueRenewalSurge`'s "at cast time"
+ * snapshot: dueQueue returns seen-and-due ids FIRST, then ALSO appends every unseen id
+ * (prereq-gated) — seen-but-not-due ids are the only ones actually excluded
+ * (leitner.ts's dueQueue: "seen & not due → excluded"). §5.1's "renewing a DUE fact" means
+ * the seen-and-due subset specifically, not "any fact worth reviewing including ones never
+ * seen" — and `boxOf` (0 = unseen, 1-5 = seen) is exactly the tool that tells them apart:
+ * a returned id is seen-and-due iff its box is > 0 (an unseen id always reports box 0).
+ * No new SrsApi surface needed; not in the literal ask, flagged same as spellsForArt/ARTS.
+ */
+export function seenDueIds(dueQueueResult: string[], boxOf: (id: string) => number): Set<string> {
+  return new Set(dueQueueResult.filter((id) => boxOf(id) > 0));
+}
+
+/**
  * §5.5 the weld edge: +1 primary damage when EVERY involved fact's box (captured BEFORE
  * record() mutates it — trap 14, same capture-before-record duty as dueRenewalSurge) is ≥4.
  * An empty list never welds — there is nothing mastered to reward, so vacuous truth does not
