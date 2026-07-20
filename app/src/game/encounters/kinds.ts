@@ -57,7 +57,7 @@ function continueButton(resolve: Resolve, result: EncounterResult): HTMLButtonEl
   return el('button', {
     class: 'fw-btn fw-btn-primary',
     type: 'button',
-    text: 'Continue',
+    text: 'Onward ▸',
     onclick: () => resolve(result),
   });
 }
@@ -209,13 +209,29 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
 
 // --- scenario_branch · Parley ------------------------------------------------
 
-const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
+/**
+ * BUG #4 (crucible sev3): a forced boss phase opens with a ~1.2-1.4s non-interactive
+ * reveal cutscene (CombatScene.showBossReveal) *before* this overlay ever mounts. The
+ * onKey handler below used to arm the instant renderScenario ran — a full frame before
+ * focus (the requestAnimationFrame cards[0]?.focus() below) ever settled inside the
+ * overlay — so a hotkey mashed continuously through the cutscene could land right after
+ * mount and commit branch 1 before the player had any chance to read it. Arm choice
+ * activation only after a short delay, and ONLY for the forced boss phase (the one
+ * caller that opens with `context: 'boss'`, CombatScene.openBossPhase) — the dev harness
+ * and a normal player-chosen Parley (`context: 'parley'`/'drill') keep resolving on the
+ * very first press, so no friction is added to a real, deliberate answer.
+ */
+const BOSS_PARLEY_ARM_MS = 400;
+
+const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
   const branches = enc.branches ?? [];
   const cards: HTMLButtonElement[] = [];
   let answered = false;
+  let armed = ctx.context !== 'boss';
+  if (!armed) setTimeout(() => { armed = true; }, BOSS_PARLEY_ARM_MS);
 
   const choose = (idx: number) => {
-    if (answered) return;
+    if (answered || !armed) return;
     answered = true;
     const b = branches[idx];
     const tag = b.correct === true ? 'good' : b.correct === false ? 'bad' : 'neutral';
@@ -378,8 +394,8 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     cont.focus();
   };
 
-  const leftCol = el('div', { class: 'fw-col' }, [el('div', { class: 'fw-colhead', text: 'Moss' })]);
-  const rightCol = el('div', { class: 'fw-col' }, [el('div', { class: 'fw-colhead', text: 'Gift' })]);
+  const leftCol = el('div', { class: 'fw-col' }, [el('div', { class: 'fw-colhead', text: 'Claim' })]);
+  const rightCol = el('div', { class: 'fw-col' }, [el('div', { class: 'fw-colhead', text: 'True Name' })]);
   left.forEach((label, i) => {
     const b = el('button', { class: 'fw-chip', type: 'button', onclick: () => clickLeft(i) }, [label]);
     leftBtns.push(b);

@@ -57,6 +57,11 @@ test.describe('encounter overlay — all kinds', () => {
 
   test('match (Binding Weave): all pairs correct → pass verdict', async ({ page }) => {
     await openOverlay(page, 'match');
+    // register-audit CRITICAL: the column headers are engine chrome, not dev-fixture content —
+    // every real pack's Binding Weave encounter renders under these same two labels, so they
+    // must be domain-neutral, never this fixture's own 'Moss'/'Gift' vocabulary.
+    await expect(page.locator('.fw-colhead').nth(0)).toHaveText('Claim');
+    await expect(page.locator('.fw-colhead').nth(1)).toHaveText('True Name');
     const pair = async (left: string, right: string) => {
       await page.locator('.fw-chip', { hasText: left }).click();
       await page.locator('.fw-chip', { hasText: right }).click();
@@ -83,6 +88,31 @@ test.describe('encounter overlay — all kinds', () => {
     }
     await page.getByRole('button', { name: 'Seal the Sequence' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
+  });
+
+  // Crucible finding #12 (sev2, input-mangler): the panel is a tabIndex=-1 "programmatic
+  // keyboard host" (styles.ts) — the browser's default click-to-focus delegates a stray click
+  // on any INERT content (no focusable target of its own, e.g. the teach block below) to that
+  // panel, stealing focus off whatever control held it. The shared Continue/Onward button relies
+  // entirely on being the focused element for Enter/Space to activate it (kinds.ts's
+  // continueButton has no key handler of its own) — so that stray click silently killed
+  // keyboard dismissal (a mouse click on the button itself still worked).
+  test('overlay: a stray click on inert content must not defocus Onward (Enter still advances)', async ({ page }) => {
+    await openOverlay(page, 'mcq');
+    await page.locator('.fw-opt', { hasText: 'It never glows' }).click(); // miss on purpose
+    await expect(page.locator('.fw-verdict.fail')).toBeVisible();
+
+    // T2 consistency rename: every sibling button uses a directional verb + ▸.
+    const cont = page.getByRole('button', { name: 'Onward ▸' });
+    await expect(cont, 'the shared Continue/Onward button auto-focuses on a miss').toBeFocused();
+
+    await page.locator('.fw-teach').click(); // the stray click — inert, non-interactive content
+
+    await page.keyboard.press('Enter');
+    await expect(
+      page.locator('.fw-overlay'),
+      'Enter still dismisses the overlay after the stray click',
+    ).toHaveCount(0, { timeout: 5_000 });
   });
 
   test('teaching (discovered documents): pages through and closes', async ({ page }) => {

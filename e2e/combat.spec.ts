@@ -56,7 +56,7 @@ async function answerCast(page: Page): Promise<void> {
     'Economics and control are the two things that matter in a term sheet. Economics is the investor return in a liquidity event and the terms that drive it; control is the mechanisms letting investors direct or veto company decisions.',
   );
   await page.getByRole('button', { name: 'Cast' }).click();
-  const cont = page.getByRole('button', { name: 'Continue' });
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
   await cont.waitFor({ state: 'visible', timeout: 15_000 });
   await cont.click();
 }
@@ -160,4 +160,76 @@ test('Satchel in battle: using a potion heals the pool and consumes it from the 
 
   const inv = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
   expect(inv?.stacks?.['embermend-draught'] ?? 0, 'exactly one potion was consumed from the persistent store').toBe(1);
+});
+
+/** True exactly while CombatScene's boss-phase-opening portrait reveal is on screen (e2e-only debug read). */
+async function bossRevealActive(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { bossRevealActive?(): boolean } | undefined;
+    return !!s?.bossRevealActive?.();
+  });
+}
+
+// Crucible finding #4 (sev3, input-mangler): mashing a hotkey through the ~1.2-1.4s
+// Vault-Warden reveal cutscene (CombatScene.showBossReveal) used to commit an unread Parley
+// branch the instant the scenario_branch overlay mounted — kinds.ts's renderScenario armed
+// its onKey handler synchronously at mount, a full frame before focus ever settled inside
+// the overlay (overlay.ts's rAF-deferred panel/card focus). Canonical repro:
+// /?scene=combat&seed=7&boss=1, mash '1' continuously through the reveal. This drives the
+// same shape and proves the branch stays unresolved until the overlay has had a moment to
+// be read, while confirming a deliberate press still works once it has (no permanent lockout).
+//
+// The mash loop is throttled to ~25 presses/s (real repeated key taps), not an unbounded
+// tight loop: a delay-free loop floods Chrome's input pipeline (1000+/s), starving the
+// page's own rAF/timer processing so Phaser's tweens and delayedCalls never advance and the
+// reveal itself never completes — a test artifact, not a reproduction of human mashing.
+test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick before the overlay is ready', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7&boss=1');
+  await waitReady(page, 'combat');
+
+  let mashing = true;
+  const mashLoop = (async () => {
+    while (mashing) {
+      await page.keyboard.press('1').catch(() => {});
+      await page.waitForTimeout(40);
+    }
+  })();
+
+  try {
+    // Confirm this repro actually hits the reveal cutscene it depends on (a boss room opens
+    // phase 0 automatically — CombatScene sets pendingBossPhase at creation).
+    const start = Date.now();
+    let sawReveal = false;
+    while (Date.now() - start < 10_000) {
+      if (await bossRevealActive(page)) { sawReveal = true; break; }
+      if (await page.locator('.fw-overlay').count()) break; // reveal may already have finished
+      await page.waitForTimeout(30);
+    }
+
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await expect(page.locator('.fw-eyebrow'), 'the forced boss phase opens a Parley (scenario_branch)').toContainText('Parley');
+    expect(sawReveal, 'the Vault-Warden reveal cutscene actually played (this bug is scoped to it)').toBe(true);
+
+    // Still well inside the overlay's arming window — mashing continues throughout — no
+    // branch may have resolved yet.
+    await page.waitForTimeout(200);
+    const opts = page.locator('.fw-opt');
+    await expect(opts.first()).toBeVisible();
+    const disabled = await opts.evaluateAll((els) => els.some((e) => (e as HTMLButtonElement).disabled));
+    expect(disabled, 'a mashed hotkey must not resolve a branch before the overlay is interactively ready').toBe(false);
+  } finally {
+    mashing = false;
+    await mashLoop;
+  }
+
+  // The guard only delays, never breaks, activation: once settled, a press still picks a
+  // branch normally.
+  await page.waitForTimeout(400);
+  await page.keyboard.press('1');
+  await expect(
+    page.locator('.fw-verdict'),
+    'a deliberate press after the overlay settles still resolves the branch',
+  ).toBeVisible({ timeout: 5_000 });
 });
