@@ -33,6 +33,7 @@ export function PhaserGame() {
       type: Phaser.AUTO,
       parent,
       backgroundColor: '#241b2f',
+      pixelArt: true,
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
