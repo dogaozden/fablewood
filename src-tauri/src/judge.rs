@@ -8,6 +8,28 @@
 //!
 //! A Finder-launched .app has a minimal PATH, so the binary is resolved through a
 //! candidate list rather than trusting `claude` to be on PATH (docs/tauri.md).
+//!
+//! **Native/web parity gap (queue item 7, 2026-07-20):** the web path
+//! (app/vite-judge-plugin.ts + app/judge-worker.ts) now keeps a small pool of
+//! pre-spawned `claude -p --input-format stream-json --output-format stream-json`
+//! processes idle between grades, so a warm grade skips the CLI boot cost this
+//! command still pays on every call. This command deliberately stays on the
+//! per-call spawn below rather than mirroring that pool: doing so needs an async
+//! NDJSON line-reader over the child's stdout, a pool/health-check/auto-restart
+//! manager equivalent to app/src/judge/warm-pool.ts, and Tauri-managed state
+//! threaded into this command's signature (today it is stateless — prompt in,
+//! Result out) — a materially larger, riskier change than a "clean bounded"
+//! edit, and out of scope here per the hard rule against destabilizing Tauri.
+//! Recommended approach if this is picked up later: spawn the same
+//! `--input-format stream-json --output-format stream-json --no-session-persistence`
+//! process from `judge_grade`, hold a `tokio::sync::Mutex<Vec<WarmEntry>>` in
+//! Tauri's managed state (registered in `main.rs`/`lib.rs`), read stdout with
+//! `tokio::io::BufReader::lines()` looking for the terminal `{"type":"result",...}`
+//! event (see judge-worker.ts's parse-worker-line.ts for the exact shape), and
+//! keep the same single-use-per-process isolation policy — reuse across turns
+//! would leak conversation history the same way it would on the web side.
+//! Until then, native grades keep today's ~7–13s-per-call latency; the fallback
+//! contract (Err → deterministic stub + "away from his desk") is unchanged.
 
 use serde::Serialize;
 use std::env;

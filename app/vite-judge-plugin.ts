@@ -7,17 +7,23 @@
  * through the vite.config.ts import instead — mirroring app/src/bridge/plugin.ts.
  *
  *   JUDGE_MODE=stub → deterministic heuristic (e2e + offline).
- *   otherwise       → spawn `claude -p … --model haiku`, 15s cap, STRICT-JSON out.
+ *   otherwise       → 3-tier chain: warm worker pool (./judge-worker.ts — skips the CLI
+ *                      boot cost when a pre-spawned spare is ready; see judge-worker.ts
+ *                      for real measured latencies) → this file's own per-call
+ *                      `claude -p … --model haiku` spawn (unchanged, 20s cap) →
+ *                      heuristic. STRICT-JSON out at every tier.
  *
- * The game must never hang on the Clerk: spawn error / timeout / unparseable output all
- * fall back to the stub's verdict with the "away from his desk" line — and every
- * fallback logs its layer + latency here, so "why did the Clerk fail" is answerable.
+ * The game must never hang on the Clerk: spawn error / timeout / unparseable output at
+ * any tier fall back to the next, ending at the stub's verdict with the "away from his
+ * desk" line — and every fallback logs its layer + latency here, so "why did the Clerk
+ * fail" is answerable.
  */
 import type { Plugin, ViteDevServer } from 'vite';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
 import { stubJudge, AWAY_LINE, type JudgeArgs } from './src/judge/stub';
 import type { JudgeVerdict } from './src/game/contracts';
+import { gradeWithWarmWorker } from './judge-worker';
 
 // Measured 2026-07-19: with the user's MCP servers loading, a haiku one-shot ran
 // 17–26s; with MCP disabled, 7–13s from an idle shell and a few seconds worse when
@@ -126,19 +132,37 @@ function runClaude(prompt: string): Promise<string> {
 
 async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
   if (process.env.JUDGE_MODE === 'stub') return stubJudge(args);
+  const prompt = buildPrompt(args);
+
+  // Tier 1: warm worker pool — kills the per-call CLI boot on repeat grades.
   const t0 = Date.now();
   try {
-    const raw = await runClaude(buildPrompt(args));
+    const raw = await gradeWithWarmWorker(prompt);
     const parsed = parseVerdict(raw);
     if (parsed) {
-      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t0}ms`);
+      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t0}ms (warm)`);
       return parsed;
     }
-    console.warn(`[clerk] fallback: unparseable output after ${Date.now() - t0}ms → ${raw.slice(0, 80)}`);
+    console.warn(`[clerk] warm worker fallback: unparseable output after ${Date.now() - t0}ms → ${raw.slice(0, 80)}`);
   } catch (e) {
-    console.warn(`[clerk] fallback: ${(e as Error).message} after ${Date.now() - t0}ms`);
+    console.warn(`[clerk] warm worker fallback: ${(e as Error).message} after ${Date.now() - t0}ms`);
   }
-  // keep a fair grade (stub verdict) but tell the player the Clerk was away
+
+  // Tier 2: the original per-call spawn, unchanged — same safety net as before.
+  const t1 = Date.now();
+  try {
+    const raw = await runClaude(prompt);
+    const parsed = parseVerdict(raw);
+    if (parsed) {
+      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t1}ms (spawn fallback)`);
+      return parsed;
+    }
+    console.warn(`[clerk] fallback: unparseable output after ${Date.now() - t1}ms → ${raw.slice(0, 80)}`);
+  } catch (e) {
+    console.warn(`[clerk] fallback: ${(e as Error).message} after ${Date.now() - t1}ms`);
+  }
+
+  // Tier 3: keep a fair grade (stub verdict) but tell the player the Clerk was away
   return { ...stubJudge(args), line: AWAY_LINE };
 }
 
