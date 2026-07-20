@@ -10,12 +10,15 @@ import { P } from './palette';
 import { CELL } from './types';
 
 const ICON = 36;
+const CHIP = 18; // 6px-native status-chip glyphs at 3× (docs/design/magic-combat-depth.md §3/§12.3)
 
 export const TILE_KEYS = {
   floor: 'tile.vault-floor',
   wall: 'tile.vault-wall',
   gold: 'tile.gold-heap',
   lantern: 'tile.lantern',
+  brazier: 'tile.brazier',
+  mist: 'tile.mist',
 } as const;
 
 export const UNIT_KEYS: Record<string, string> = {
@@ -38,11 +41,47 @@ export const ICON_KEYS: Record<string, string> = {
   wait: 'icon.wait',
 };
 
+/**
+ * The 8 condition ids (combat/status.ts §3). Kept as a LOCAL literal union here,
+ * not imported, so this placeholder-bake module carries zero build dependency on
+ * the sibling-owned status.ts — the two are structurally identical string unions,
+ * so a real `StatusId` value indexes straight into CHIP_KEYS with no cast needed.
+ */
+export type StatusGlyphId =
+  | 'kindled'
+  | 'bound'
+  | 'dimmed'
+  | 'warded'
+  | 'inked'
+  | 'emboldened'
+  | 'weakened'
+  | 'staggered';
+
+/**
+ * Status→texture-key manifest (docs/design/magic-combat-depth.md §3 chip column,
+ * §12.3 chips UX). The wiring agent binds each StatusInstance.id straight to
+ * `CHIP_KEYS[id]` for the HUD chip row under a unit's HP bar — no key-guessing.
+ * Keys follow the same `<category>.<name>` convention as TILE_KEYS/UNIT_KEYS/
+ * ICON_KEYS above.
+ */
+export const CHIP_KEYS: Record<StatusGlyphId, string> = {
+  kindled: 'status.kindled',
+  bound: 'status.bound',
+  dimmed: 'status.dimmed',
+  warded: 'status.warded',
+  inked: 'status.inked',
+  emboldened: 'status.emboldened',
+  weakened: 'status.weakened',
+  staggered: 'status.staggered',
+};
+
 export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, TILE_KEYS.floor, CELL, CELL, drawFloor);
   bake(scene, TILE_KEYS.wall, CELL, CELL, drawWall);
   bake(scene, TILE_KEYS.gold, CELL, CELL, drawGold);
   bake(scene, TILE_KEYS.lantern, CELL, CELL, drawLantern);
+  bake(scene, TILE_KEYS.brazier, CELL, CELL, drawBrazier);
+  bake(scene, TILE_KEYS.mist, CELL, CELL, drawMist);
 
   bake(scene, UNIT_KEYS.keeper, CELL, CELL, (g) => drawKeeper(g));
   bake(scene, UNIT_KEYS.mira, CELL, CELL, (g) => drawMira(g));
@@ -59,6 +98,15 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.parley, ICON, ICON, drawIconParley);
   bake(scene, ICON_KEYS.satchel, ICON, ICON, drawIconSatchel);
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
+
+  bake(scene, CHIP_KEYS.kindled, CHIP, CHIP, drawChipKindled);
+  bake(scene, CHIP_KEYS.bound, CHIP, CHIP, drawChipBound);
+  bake(scene, CHIP_KEYS.dimmed, CHIP, CHIP, drawChipDimmed);
+  bake(scene, CHIP_KEYS.warded, CHIP, CHIP, drawChipWarded);
+  bake(scene, CHIP_KEYS.inked, CHIP, CHIP, drawChipInked);
+  bake(scene, CHIP_KEYS.emboldened, CHIP, CHIP, drawChipEmboldened);
+  bake(scene, CHIP_KEYS.weakened, CHIP, CHIP, drawChipWeakened);
+  bake(scene, CHIP_KEYS.staggered, CHIP, CHIP, drawChipStaggered);
 }
 
 function bake(
@@ -111,6 +159,54 @@ function drawLantern(g: Phaser.GameObjects.Graphics): void {
   g.fillRoundedRect(CELL / 2 - 7, 12, 14, 20, 4).strokeRoundedRect(CELL / 2 - 7, 12, 14, 20, 4);
   g.fillStyle(P.glowCore, 1).fillRoundedRect(CELL / 2 - 4, 16, 8, 12, 3);
   g.fillStyle(P.ember, 1).fillRect(CELL / 2 - 5, 31, 10, 3);
+}
+
+/** Brazier (§4.4): the cold/waiting counterpart to the lantern above — same
+ *  vertical placement (so lighting it into `tile.lantern` mid-battle doesn't
+ *  jump), but a shallow WIDE open bowl on a stand (iter1 fix: a tall enclosed
+ *  housing read as a sealed box/gadget, not a fire basin — wider-than-tall
+ *  with a visible open coal bed is the silhouette that actually reads
+ *  "brazier"), cold iron instead of amber, and dark coals instead of a glowing
+ *  core. A few dim ember flecks (low alpha, never a glow halo) hint "this can
+ *  be lit" without it reading as already-lit. */
+function drawBrazier(g: Phaser.GameObjects.Graphics): void {
+  drawFloor(g);
+  const cx = CELL / 2;
+  // short iron stem + foot — grounded, not hanging (a basin, not the lantern's hook)
+  g.lineStyle(1, P.outline, 1).fillStyle(P.darkBark, 1);
+  g.fillRect(cx - 2, 30, 4, 8).strokeRect(cx - 2, 30, 4, 8);
+  g.fillStyle(P.stoneGrey, 1).fillRect(cx - 8, 37, 16, 3);
+  g.lineStyle(1, P.outline, 1).strokeRect(cx - 8, 37, 16, 3);
+  // wide shallow bowl (open top, wider than tall — the brazier's own silhouette,
+  // not the lantern's tall enclosed housing)
+  g.lineStyle(2, P.outline, 1).fillStyle(P.stoneGrey, 1);
+  g.fillEllipse(cx, 26, 26, 13).strokeEllipse(cx, 26, 26, 13);
+  // open coal bed (seen from above), dark and cold
+  g.fillStyle(P.darkBark, 1).fillEllipse(cx, 22, 20, 8);
+  g.lineStyle(1, P.outline, 1).strokeEllipse(cx, 22, 20, 8);
+  g.fillStyle(P.barkShadow, 1).fillEllipse(cx, 22, 14, 5); // coal mound
+  // dim ember flecks — cold and dull, but hint it can catch
+  g.fillStyle(P.deepEmber, 0.5).fillCircle(cx - 3, 21, 1.8);
+  g.fillStyle(P.deepEmber, 0.4).fillCircle(cx + 3, 23, 1.5);
+  g.fillStyle(P.ember, 0.3).fillCircle(cx, 20, 1.3);
+}
+
+/** Mist (§4.4): soft veiling over the floor language — must read "vision
+ *  blocked here", not "wall here", so it's low-alpha dusk/water washes (never a
+ *  flat opaque fill) layered over the SAME floor base every other passable tile
+ *  uses, letting the flagstone show through like something you could still
+ *  walk into. */
+function drawMist(g: Phaser.GameObjects.Graphics): void {
+  drawFloor(g);
+  const cx = CELL / 2;
+  const cy = CELL / 2;
+  // whole-tile wash first (iter1 fix: 3 isolated blobs left visible floor gaps
+  // and hard seams between them — this unifies the veil without going opaque)
+  g.fillStyle(P.duskMauve, 0.1).fillRoundedRect(1, 1, CELL - 2, CELL - 2, 6);
+  g.fillStyle(P.duskMauve, 0.22).fillEllipse(cx - 8, cy + 4, 30, 18);
+  g.fillStyle(P.waterLight, 0.2).fillEllipse(cx + 9, cy - 5, 26, 16);
+  g.fillStyle(P.parchment, 0.14).fillEllipse(cx, cy, 34, 14);
+  g.fillStyle(P.glowCore, 0.12).fillEllipse(cx - 3, cy - 2, 14, 5); // a faint wisp catching light
 }
 
 // ---- units (friendly = rounded/bottom-heavy; threats = taller/colder) -----
@@ -310,4 +406,124 @@ function star(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rad: numbe
     pts.reduce<Phaser.Geom.Point[]>((acc, _v, i) => (i % 2 === 0 ? [...acc, new Phaser.Geom.Point(pts[i], pts[i + 1])] : acc), []),
     true,
   );
+}
+
+// ---- status chips (§3/§12.3) --------------------------------------------
+// 8 tiny condition glyphs, up to 3 shown under a unit's HP bar. At CHIP (18px =
+// 6px-native ×3) there's no room for shaded vector curves to read cleanly, so
+// every glyph is authored on an explicit 6×6 logical-pixel grid (CHIP_UNIT=3px
+// per cell) and drawn as exact axis-aligned blocks — crisp "3-5 pixels of
+// gesture", never fuzzy antialiased edges. One dominant status color each
+// (spec §3's chip column) so the row scans by color+silhouette at a glance.
+
+const CHIP_UNIT = CHIP / 6;
+
+/** Fill one logical cell (or a gw×gh block of cells) on the 6×6 glyph grid. */
+function chipBlock(
+  g: Phaser.GameObjects.Graphics,
+  gx: number,
+  gy: number,
+  gw: number,
+  gh: number,
+  color: number,
+  alpha = 1,
+): void {
+  g.fillStyle(color, alpha).fillRect(gx * CHIP_UNIT, gy * CHIP_UNIT, gw * CHIP_UNIT, gh * CHIP_UNIT);
+}
+
+/** Kindled — ember ▲: a rising, wide-based triangle (kindling catching). */
+function drawChipKindled(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 2, 1, 1, 1, P.ember);
+  chipBlock(g, 1, 2, 3, 1, P.ember);
+}
+
+/** Bound — orchid ⌗: a square knot/ring (tied, not crushed). iter1 fix: a 3×3
+ *  footprint with a 1-cell hole read as a near-solid square (8/9 cells
+ *  filled) — widened to 4×4 with a proper 2×2 hole so the ring actually reads
+ *  as hollow. */
+function drawChipBound(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 1, 1, 4, 1, P.orchid);
+  chipBlock(g, 1, 2, 1, 1, P.orchid);
+  chipBlock(g, 4, 2, 1, 1, P.orchid);
+  chipBlock(g, 1, 3, 1, 1, P.orchid);
+  chipBlock(g, 4, 3, 1, 1, P.orchid);
+  chipBlock(g, 1, 4, 4, 1, P.orchid);
+}
+
+/** Dimmed — dusk-violet ◗: a small solid rounded blob (a shrunken, dim
+ *  light). iter1 fix: a stacked 1-3-1 "diamond" is geometrically identical to
+ *  a plus-sign at this resolution (no true diagonal edge) and collided with
+ *  Emboldened/Weakened's also-broken cross shapes — this is a squat solid
+ *  blob with no protruding arms, unambiguous next to the arrows/rings. */
+function drawChipDimmed(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 2, 1, 2, 1, P.duskViolet);
+  chipBlock(g, 1, 2, 4, 2, P.duskViolet);
+  chipBlock(g, 2, 4, 2, 1, P.duskViolet);
+}
+
+/** Warded — water-blue ◈: a larger HOLLOW diamond ring (a ward/shield rune) —
+ *  filled-vs-hollow and size both separate it from Dimmed's small solid one. */
+function drawChipWarded(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 2, 1, 2, 1, P.waterBlue);
+  chipBlock(g, 1, 2, 1, 1, P.waterBlue);
+  chipBlock(g, 4, 2, 1, 1, P.waterBlue);
+  chipBlock(g, 1, 3, 1, 1, P.waterBlue);
+  chipBlock(g, 4, 3, 1, 1, P.waterBlue);
+  chipBlock(g, 2, 4, 2, 1, P.waterBlue);
+}
+
+/** Inked — ink-dark ✎: a diagonal quill slash. Its status color IS
+ *  outline-warm, which would vanish on the dusk floor alone, so a 1px
+ *  parchment rim (4-direction offset underdraw, then the true shape on top)
+ *  is baked in per the brief — "light outline so it reads on dark ground". */
+function drawChipInked(g: Phaser.GameObjects.Graphics): void {
+  const cells: Array<[number, number]> = [
+    [1, 0],
+    [2, 1],
+    [3, 2],
+    [4, 3],
+    [4, 4],
+  ];
+  const put = (dx: number, dy: number, color: number): void => {
+    g.fillStyle(color, 1);
+    for (const [gx, gy] of cells) g.fillRect(gx * CHIP_UNIT + dx, gy * CHIP_UNIT + dy, CHIP_UNIT, CHIP_UNIT);
+  };
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) put(dx, dy, P.parchment);
+  put(0, 0, P.outline);
+}
+
+/** Emboldened — moss ↑: an up arrow — tip + two diagonally-stepped wing cells
+ *  (the Inked-slash technique: single-cell diagonal steps read as an angled
+ *  chevron) + a 2-cell stem below. iter1 fix: the wings previously filled
+ *  the FULL row including the tip's own column, so tip+wings+stem formed one
+ *  unbroken vertical line crossed by one unbroken horizontal bar — a plain
+ *  plus-sign, indistinguishable from Weakened/Dimmed. Leaving the tip's
+ *  column empty at the wing row breaks the cross and reads as a proper
+ *  arrowhead. */
+function drawChipEmboldened(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 2, 1, 1, 1, P.moss); // tip
+  chipBlock(g, 1, 2, 1, 1, P.moss); // left wing
+  chipBlock(g, 3, 2, 1, 1, P.moss); // right wing
+  chipBlock(g, 2, 3, 1, 1, P.moss); // stem
+  chipBlock(g, 2, 4, 1, 1, P.moss); // stem
+}
+
+/** Weakened — stone-grey ↓: a down arrow, the exact vertical mirror of
+ *  Emboldened's fixed chevron (shaft-then-head vs head-then-shaft) — the
+ *  +1/−1 pairing reads as opposites. */
+function drawChipWeakened(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 2, 1, 1, 1, P.stoneGrey); // stem
+  chipBlock(g, 2, 2, 1, 1, P.stoneGrey); // stem
+  chipBlock(g, 1, 3, 1, 1, P.stoneGrey); // left wing
+  chipBlock(g, 3, 3, 1, 1, P.stoneGrey); // right wing
+  chipBlock(g, 2, 4, 1, 1, P.stoneGrey); // tip
+}
+
+/** Staggered — dusk-peach ✱: a 5-point sparkle/asterisk (seeing stars, skip a turn). */
+function drawChipStaggered(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 1, 1, 1, 1, P.duskPeach);
+  chipBlock(g, 3, 1, 1, 1, P.duskPeach);
+  chipBlock(g, 2, 2, 1, 1, P.duskPeach);
+  chipBlock(g, 1, 3, 1, 1, P.duskPeach);
+  chipBlock(g, 3, 3, 1, 1, P.duskPeach);
 }
