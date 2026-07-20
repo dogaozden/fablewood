@@ -262,5 +262,15 @@ declare global {
     __FABLEWOOD_READY?: boolean;
     __FABLEWOOD_STATE?: { scene?: string; title?: string; seed?: number };
     __FABLEWOOD_GAME?: unknown;
+    /** Dev/e2e-only warp hook installed by HamletScene (absent in production builds). */
+    __fwWarp?: (locationId: string) => boolean;
   }
+}
+
+/** Warp the hamlet Keeper next to a location's door (dev/e2e-only hook — instant,
+ *  flake-proof setup positioning). Returns false if the hook or the location is
+ *  missing. NOT for the full-chain spec: that one spec's South Gate approach stays
+ *  100% real keyboard input on purpose; this is for OTHER specs' setup. */
+export async function warpHamletTo(page: Page, locationId: string): Promise<boolean> {
+  return page.evaluate((id) => window.__fwWarp?.(id) ?? false, locationId);
 }

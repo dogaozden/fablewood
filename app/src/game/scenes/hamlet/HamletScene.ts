@@ -122,9 +122,25 @@ export class HamletScene extends Phaser.Scene {
     cam.ignore(this.uiRoot);
     this.uiCam.ignore(this.worldGroup.getChildren());
 
+    // Dev/e2e-only warp hook: teleports the Keeper next to a location's door (same
+    // spot `?demo=near-<id>` parks at below) without walking. For OTHER e2e specs'
+    // setup only — the one full-chain spec keeps its 100% real-input South Gate
+    // walk on purpose. Stripped from production builds by the `import.meta.env.DEV`
+    // guard, same idiom as the `?overlay=` dev harness in encounters/register.ts.
+    if (import.meta.env.DEV) {
+      window.__fwWarp = (id: string): boolean => {
+        const loc = this.map.locations.find((l) => l.id === id);
+        if (!loc) return false;
+        this.placePlayer(loc.door.x, loc.door.y + 2);
+        this.facing = 'up';
+        return true;
+      };
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       void this.persist();
       this.dialogue.destroy();
+      if (import.meta.env.DEV) delete window.__fwWarp;
     });
 
     void this.bootstrap();

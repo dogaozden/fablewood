@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, holdKey, tapKey, hamletPlayer, waitHamletPlayer, readState } from './helpers';
+import { waitReady, tapKey, waitHamletPlayer, warpHamletTo, readState } from './helpers';
 
 const EV = 'screenshots';
 
@@ -42,25 +42,14 @@ test('SRS: Wellspring drill records facts to state/ and persists across reload',
   await waitReady(page, 'hamlet');
   await waitHamletPlayer(page);
 
-  // approach + open the Wellspring (door 168,136; player spawns right beside it, facing up to interact)
-  for (let i = 0; i < 22; i++) {
-    const p = await hamletPlayer(page);
-    if (!p) {
-      await page.waitForTimeout(150);
-      continue;
-    }
-    if (p.dialogueOpen || (await page.locator('.fw-overlay').count())) break;
-    const dx = 168 - p.x;
-    const dy = 136 - p.y;
-    if (Math.abs(dx) <= 10 && Math.abs(dy) <= 12) {
-      if (p.facing !== 'up') await holdKey(page, 'ArrowUp', 110);
-      await tapKey(page, 'e');
-      await page.waitForTimeout(220);
-    } else {
-      if (Math.abs(dx) > 10) await holdKey(page, dx > 0 ? 'ArrowRight' : 'ArrowLeft', 100);
-      if (Math.abs(dy) > 10) await holdKey(page, dy > 0 ? 'ArrowDown' : 'ArrowUp', 100);
-    }
-  }
+  // Setup-only: warp next to the Wellspring door instead of walking there with real
+  // input (dev/e2e-only hook — see HamletScene's window.__fwWarp gate). This spec is
+  // about the drill/SRS mechanics, not hamlet navigation — that real-input proof lives
+  // in chain.spec.ts's South Gate walk, which this hook deliberately never touches.
+  const warped = await warpHamletTo(page, 'wellspring');
+  expect(warped, 'dev warp hook parked the Keeper at the Wellspring').toBe(true);
+  await tapKey(page, 'e'); // open the Wellspring intro (real keypress)
+  await page.waitForTimeout(220);
 
   // advance the intro dialogue until the first drill encounter opens
   for (let k = 0; k < 12; k++) {
