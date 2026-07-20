@@ -1,0 +1,27 @@
+# FABLEWOOD warm-32 — canonical palette from docs/style-contract.md (ramp order preserved)
+# Subset indices per family (0-based, file order):
+# glow 0-4 · green 5-9 · brown 10-14 · dusk 15-19 · water 20-22 · neutral 23-25 · accent 26-28 · dark 29-31
+
+# Glow: glow-core, lantern-gold, amber, ember, deep-ember
+#FFF1C6 #F7CE6B #EEA23F #D2792C #A65420
+
+# Green: leaf-highlight, moss, leaf-green, forest-green, deep-forest
+#A8C44E #7C9C46 #588234 #37602A #21401C
+
+# Brown: timber-light, timber, bark, dark-bark, bark-shadow
+#B47E46 #8C5C34 #684628 #452F1C #2A1D13
+
+# Dusk: dusk-deep, dusk-violet, dusk-mauve, dusk-rose, dusk-peach
+#34265A #6A4A8C #9E5E96 #CE7A8C #EEA67E
+
+# Water: water-light, water-blue, water-deep
+#9EBAD4 #4C6C96 #29405E
+
+# Neutral: parchment, path-stone, stone-grey
+#EBD9B2 #C6A476 #8A8078
+
+# Accent: blossom-pink, orchid, berry-red
+#E07AAE #9A6EC8 #C4443E
+
+# Dark: outline-warm, shadow-plum, void-black
+#241A14 #1B1526 #100B0A
