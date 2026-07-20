@@ -1,7 +1,27 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState, waitForState } from './helpers';
 
 type Save = { scene?: string; hp?: number; dungeon?: { roomIndex: number; cleared: string[] } };
+
+// Restoring the snapshot with a bare PUT races the live scene's own persist writes
+// (vaults persists on entry; last-writer-wins on disk) — under full-suite load the
+// app's write can land AFTER the restore and poison the next spec's boot target.
+// Quiesce the page first, then put-and-verify until the file actually holds the
+// snapshot's scene pointer.
+async function restoreSave(page: Page, snapshot: Save | undefined): Promise<void> {
+  const data = snapshot ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
+  await page.goto('about:blank'); // kill the app context — no more scene writes
+  for (let i = 0; i < 5; i++) {
+    await page.request.put('/api/state/save.json', { data });
+    await new Promise((r) => setTimeout(r, 150));
+    const now = (await page.request
+      .get('/api/state/save.json')
+      .then((r) => r.json())
+      .catch(() => undefined)) as Save | undefined;
+    if (now?.scene === data.scene) return;
+  }
+  throw new Error('restoreSave: save.json never settled on the restored snapshot');
+}
 
 // Regression for crucible finding #14: a hard reload with no ?scene= URL override always
 // hard-coded to the hamlet, ignoring the saved scene pointer (BootScene.ts's enter() used
@@ -43,9 +63,7 @@ test('hard reload resumes the saved scene pointer (vaults), not a hard-coded ham
     expect(await currentScene(page)).toBe('vaults');
   } finally {
     // Leave shared e2e state exactly as found (or a safe default if there was none yet).
-    await page.request.put('/api/state/save.json', {
-      data: before ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
-    });
+    await restoreSave(page, before);
   }
 });
 
@@ -68,8 +86,6 @@ test('hard reload with no saved scene pointer still defaults to the hamlet', asy
     await waitReady(page, 'hamlet');
     expect(await currentScene(page)).toBe('hamlet');
   } finally {
-    await page.request.put('/api/state/save.json', {
-      data: before ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
-    });
+    await restoreSave(page, before);
   }
 });

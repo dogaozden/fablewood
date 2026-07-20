@@ -20,6 +20,13 @@ const EV = 'screenshots';
 test('full chain: boot → hamlet → gate → vaults → room → teaching → combat → save/reload', async ({ page }) => {
   test.setTimeout(150_000); // headroom for CI's cold first-compile (~2x local)
 
+  // 0. Own the precondition: boot now resumes save.scene (crucible #14), and the shared
+  // .state-e2e survives across suite runs — a previous run's vaults ending (this very
+  // spec's!) would otherwise redirect our fresh boot. Seed the hamlet default explicitly.
+  await page.request.put('/api/state/save.json', {
+    data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+  });
+
   // 1. boot title screen (plain '/', the true entry). One gesture enters the hamlet.
   await page.goto('/?seed=7');
   await waitReady(page, 'boot');
