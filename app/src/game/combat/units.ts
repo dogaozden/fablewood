@@ -18,7 +18,7 @@ interface StatBlock {
 export const ENEMY_STATS: Record<EnemyArchetype, StatBlock> = {
   wisp: { hp: 2, speed: 3, move: 3, attack: 1, range: 1, ranged: false },
   wraith: { hp: 3, speed: 4, move: 3, attack: 1, range: 3, ranged: true },
-  construct: { hp: 4, speed: 2, move: 2, attack: 2, range: 1, ranged: false },
+  construct: { hp: 5, speed: 2, move: 2, attack: 2, range: 1, ranged: false }, // §8: bruiser must survive one full Weave
   warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false },
 };
 
@@ -44,6 +44,9 @@ function base(partial: Partial<UnitState> & Pick<UnitState, 'id' | 'name' | 'tea
     ranged: false,
     parley: false,
     skipNextTurn: false,
+    statuses: [],
+    oaSpent: false,
+    uniqueSpent: false,
     ...partial,
   };
 }

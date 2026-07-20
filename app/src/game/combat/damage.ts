@@ -17,7 +17,7 @@
  * Mira's mastery bonus (+1) folds into the primary/first-tile hit when she acts and
  * a hit lands. Boss: a passing Cast vs the Warden strips an EXTRA shield.
  */
-import type { ActionKind, Quality } from './types';
+import { manhattan, type ActionKind, type Coord, type Quality, type Team, type UnitState } from './types';
 
 export interface ActionOutcome {
   /** damage to the primary target (Strike/Cast) or the line's first tile / cross centre */
@@ -120,4 +120,21 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
 /** Short label for the turn/HUD, e.g. floating combat text context. */
 export function qualityWord(q: Quality): string {
   return q === 1 ? 'FULL' : q === 0.5 ? 'PARTIAL' : 'MISS';
+}
+
+/**
+ * §4.1 flanking (melee only): a range-1 attack from `attackerPos` on `targetPos` flanks
+ * when the tile directly OPPOSITE the attacker (O = T + (T − A)) holds a living unit of
+ * the ATTACKER's team. Applies to both teams. Spells never flank — callers gate this to
+ * melee sources (Strike, enemy melee, opportunity strikes) only; the range-1 check here
+ * is a defensive backstop, not the primary gate. Route the result through computeHit's
+ * `flank` param (status.ts).
+ */
+export function isFlanked(attackerPos: Coord, targetPos: Coord, attackerTeam: Team, units: UnitState[]): boolean {
+  if (manhattan(attackerPos, targetPos) !== 1) return false;
+  const opposite: Coord = {
+    c: targetPos.c + (targetPos.c - attackerPos.c),
+    r: targetPos.r + (targetPos.r - attackerPos.r),
+  };
+  return units.some((u) => u.alive && u.team === attackerTeam && u.c === opposite.c && u.r === opposite.r);
 }
