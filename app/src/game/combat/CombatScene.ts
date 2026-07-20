@@ -90,6 +90,8 @@ export class CombatScene extends Phaser.Scene {
   private shields = 0;
   private phaseIndex = 0;
   private pendingBossPhase = false;
+  /** non-null exactly while the phase-opening portrait reveal is on screen (e2e/debug read). */
+  private bossReveal: Phaser.GameObjects.Container | null = null;
 
   constructor() {
     super('combat');
@@ -137,6 +139,7 @@ export class CombatScene extends Phaser.Scene {
     this.shields = 0;
     this.phaseIndex = 0;
     this.pendingBossPhase = false;
+    this.bossReveal = null;
 
     this.encSeed = this.launch.seed | 0;
     this.drawBackdrop();
@@ -183,11 +186,31 @@ export class CombatScene extends Phaser.Scene {
 
   // ---- setup ------------------------------------------------------------
 
+  /**
+   * True only for a real Preference Vaults battle launched from the dungeon
+   * (`returnScene: 'vaults'`) — never the packless dev/e2e fixture (`?scene=combat`,
+   * `returnScene: 'boot'`), so the backdrop stays scoped to the province it depicts.
+   */
+  private isVaultsBattle(): boolean {
+    return this.launch.returnScene === 'vaults' && this.textures.exists('backdrop.vaults');
+  }
+
   private drawBackdrop(): void {
     this.cameras.main.setBackgroundColor('#1b1526');
+    const vaultsArt = this.isVaultsBattle();
+    // Very back — behind the tile grid (depth 0) and the dimming gradient below.
+    if (vaultsArt) this.add.image(480, 270, 'backdrop.vaults').setDepth(-1000);
+
     const g = this.add.graphics().setDepth(-10);
-    g.fillGradientStyle(P.duskDeep, P.duskDeep, P.shadowPlum, P.shadowPlum, 1);
-    g.fillRect(0, 0, 960, 540);
+    if (vaultsArt) {
+      // The grid tiles are opaque and already win any contrast fight; this just keeps
+      // the painterly art from overpowering HUD chrome floating in the margins around
+      // the board (the unboxed room-name label, the turn-order strip).
+      g.fillStyle(P.shadowPlum, 0.24).fillRect(0, 0, 960, 540);
+    } else {
+      g.fillGradientStyle(P.duskDeep, P.duskDeep, P.shadowPlum, P.shadowPlum, 1);
+      g.fillRect(0, 0, 960, 540);
+    }
     // soft warm vignette top-left (the lantern key) + cool corners
     g.fillStyle(P.duskViolet, 0.12).fillCircle(300, 140, 260);
     g.fillStyle(P.voidBlack, 0.35).fillRect(0, 500, 960, 40);
@@ -635,6 +658,8 @@ export class CombatScene extends Phaser.Scene {
     this.state = 'resolving';
     const phase = this.launch.room.boss!.phases[i];
     this.hud.showBanner('The Warden proposes his terms…', P.berry);
+    await this.showBossReveal();
+    if (this.destroyed) return;
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
@@ -669,6 +694,63 @@ export class CombatScene extends Phaser.Scene {
     // The sting has said its piece — bring the battle loop back under the fight.
     // 'battle' loops, so repeat phase calls no-op; an unfinished ring-out tears down cleanly.
     try { music.play('battle'); } catch { /* audio optional */ }
+  }
+
+  /**
+   * A brief dramatic beat at the top of every boss phase: the Vault-Warden's portrait
+   * in a bark+gold frame (mirrors the dialogue box's portrait mat) over a dimming scrim,
+   * timed to the "terms" banner and the one-shot Warden sting. Fully torn down (destroyed,
+   * not merely hidden) before the phase's scenario_branch overlay opens — never lingers
+   * into a normal turn. Named-gated (not just "any boss"): the packless dev-vaults
+   * fallback reskins the boss as "The Moss-Warden" (no matching portrait), so this only
+   * fires for the entity the art actually depicts. Resolves once teardown completes.
+   */
+  private showBossReveal(): Promise<void> {
+    const key = 'portrait.vault-warden';
+    const boss = this.boss;
+    if (!boss || boss.name !== 'The Vault-Warden' || !this.textures.exists(key)) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const SIZE = 128;
+      const MAT = 5;
+      const fw = SIZE + MAT * 2;
+      const cx = 480;
+      const cy = 260;
+
+      const scrim = this.add.graphics().setDepth(88).setAlpha(0);
+      scrim.fillStyle(P.voidBlack, 0.4).fillRect(0, 0, 960, 540);
+
+      const frame = this.add.graphics();
+      frame.fillStyle(0x2a1d13, 0.95).fillRoundedRect(-fw / 2, -fw / 2, fw, fw, 10);
+      frame.lineStyle(2, P.lanternGold, 0.95).strokeRoundedRect(-fw / 2, -fw / 2, fw, fw, 10);
+      frame.lineStyle(1, P.parchment, 0.18).strokeRoundedRect(-fw / 2 + 3, -fw / 2 + 3, fw - 6, fw - 6, 8);
+      const img = this.add.image(0, 0, key).setOrigin(0.5);
+      const nameTag = this.add
+        .text(0, fw / 2 + 18, boss.name.toUpperCase(), {
+          fontFamily: 'Georgia, serif', fontSize: '20px', color: '#' + P.lanternGold.toString(16).padStart(6, '0'),
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5)
+        .setShadow(0, 2, '#100b0a', 6);
+
+      const c = this.add.container(cx, cy, [frame, img, nameTag]).setDepth(90).setAlpha(0).setScale(0.9);
+      this.bossReveal = c;
+
+      const teardown = (): void => {
+        c.destroy();
+        scrim.destroy();
+        this.bossReveal = null;
+        resolve();
+      };
+
+      this.tweens.add({ targets: c, alpha: 1, scale: 1, duration: 190, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: scrim, alpha: 1, duration: 190 });
+      this.time.delayedCall(950, () => {
+        if (this.destroyed) { teardown(); return; }
+        this.tweens.add({ targets: [c, scrim], alpha: 0, duration: 220, onComplete: teardown });
+      });
+    });
   }
 
   private syncBoss(): void {
@@ -1010,6 +1092,11 @@ export class CombatScene extends Phaser.Scene {
   /** Force the ?demo autopilot to prefer one action kind (e2e only); null = default order. */
   setPilotPreference(kind: string | null): void {
     this.debugPrefer = (kind as ActionKind) || null;
+  }
+
+  /** True exactly while the boss-phase-opening portrait reveal is on screen (e2e only). */
+  bossRevealActive(): boolean {
+    return this.bossReveal !== null;
   }
 
   combatSnapshot(): {

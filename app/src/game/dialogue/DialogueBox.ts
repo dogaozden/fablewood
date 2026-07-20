@@ -27,6 +27,20 @@ const MAX_ROWS = 3;
 const CHOICE_H = 24;
 const FONT = 'Georgia, "Times New Roman", serif';
 
+// Speaker portrait (128x128 native — no Phaser scale, so nearest/linear filtering never
+// matters). Shown in a bark+gold framed mat in the panel's left column when the speaker
+// has one; the text/choice column shifts right and narrows to make room. `MAX_COLS_PORTRAIT`
+// is MAX_COLS rescaled to the narrower wrap width, so paginate() still fits MAX_ROWS lines.
+const PORTRAIT_SIZE = 128;
+const PORTRAIT_MAT = 4;
+const PORTRAIT_GAP = 14;
+const PORTRAIT_BLOCK = PORTRAIT_SIZE + PORTRAIT_MAT * 2 + PORTRAIT_GAP;
+const TEXT_X = PANEL_X + PAD;
+const TEXT_X_PORTRAIT = TEXT_X + PORTRAIT_BLOCK;
+const WRAP_W = PANEL_W - PAD * 2;
+const WRAP_W_PORTRAIT = WRAP_W - PORTRAIT_BLOCK;
+const MAX_COLS_PORTRAIT = Math.round((MAX_COLS * WRAP_W_PORTRAIT) / WRAP_W);
+
 const CSS = {
   text: '#ebd9b2',
   name: '#fff1c6',
@@ -44,12 +58,15 @@ export class DialogueBox {
   private bodyText: Phaser.GameObjects.Text;
   private hintText: Phaser.GameObjects.Text;
   private choiceTexts: Phaser.GameObjects.Text[] = [];
+  private portraitFrame: Phaser.GameObjects.Graphics;
+  private portraitImage: Phaser.GameObjects.Image;
 
   isOpen = false;
   private pages: string[] = [];
   private pageIdx = 0;
   private choices: DialogueChoice[] = [];
   private selected = 0;
+  private hasPortrait = false;
   private showingChoices = false;
   private typing = false;
   private full = '';
@@ -86,7 +103,27 @@ export class DialogueBox {
       })
       .setOrigin(1, 0.5);
 
-    this.root.add([this.panel, this.nameplate, this.nameText, this.bodyText, this.hintText]);
+    this.portraitFrame = scene.add.graphics();
+    this.drawPortraitFrame();
+    this.portraitFrame.setVisible(false);
+    // texture key is swapped per-run via setTexture() in run() — which does NOT
+    // resize the object, so setDisplaySize() must be re-applied there too, against
+    // the REAL frame each time (calling it here, against '__DEFAULT' (32x32), would
+    // lock in a stale 4x scale that a later setTexture() would inherit unchanged).
+    this.portraitImage = scene.add
+      .image(TEXT_X + PORTRAIT_MAT, PANEL_Y + (PANEL_H - PORTRAIT_SIZE) / 2, '__DEFAULT')
+      .setOrigin(0, 0)
+      .setVisible(false);
+
+    this.root.add([
+      this.panel,
+      this.nameplate,
+      this.nameText,
+      this.portraitFrame,
+      this.portraitImage,
+      this.bodyText,
+      this.hintText,
+    ]);
     this.root.setVisible(false);
     uiParent.add(this.root);
 
@@ -97,7 +134,26 @@ export class DialogueBox {
 
   run(conv: Conversation, instant = false): Promise<string | undefined> {
     this.timer?.remove();
-    this.pages = conv.pages.flatMap((p) => paginate(p, MAX_COLS, MAX_ROWS));
+
+    // Portrait first — it decides the text column's x/width, so pagination and the
+    // choice list below both need to know before they lay out. Absent/missing texture
+    // (e.g. a speaker with no portrait, or a 404'd asset) → identical to today's layout.
+    this.hasPortrait = !!(conv.portrait && this.scene.textures.exists(conv.portrait));
+    this.layoutForPortrait();
+    if (this.hasPortrait) {
+      this.portraitImage
+        .setTexture(conv.portrait!)
+        .setDisplaySize(PORTRAIT_SIZE, PORTRAIT_SIZE)
+        .setVisible(true);
+      this.portraitFrame.setVisible(true);
+    } else {
+      this.portraitImage.setVisible(false);
+      this.portraitFrame.setVisible(false);
+    }
+
+    this.pages = conv.pages.flatMap((p) =>
+      paginate(p, this.hasPortrait ? MAX_COLS_PORTRAIT : MAX_COLS, MAX_ROWS),
+    );
     if (this.pages.length === 0) this.pages = [''];
     this.choices = conv.choices ?? [];
     this.pageIdx = 0;
@@ -118,6 +174,13 @@ export class DialogueBox {
     this.openedAt = this.scene.time.now;
     this.showPage(instant);
     return new Promise((res) => (this.resolver = res));
+  }
+
+  /** Shift/narrow the text column to make room for the portrait mat (or restore full width). */
+  private layoutForPortrait(): void {
+    this.bodyText
+      .setX(this.hasPortrait ? TEXT_X_PORTRAIT : TEXT_X)
+      .setWordWrapWidth(this.hasPortrait ? WRAP_W_PORTRAIT : WRAP_W);
   }
 
   private showPage(instant: boolean): void {
@@ -209,9 +272,10 @@ export class DialogueBox {
     for (const t of this.choiceTexts) t.destroy();
     this.choiceTexts = [];
     const startY = PANEL_Y + PANEL_H - PAD - this.choices.length * CHOICE_H + 6;
+    const x = (this.hasPortrait ? TEXT_X_PORTRAIT : TEXT_X) + 6;
     this.choices.forEach((_c, i) => {
       const t = this.scene.add
-        .text(PANEL_X + PAD + 6, startY + i * CHOICE_H, '', {
+        .text(x, startY + i * CHOICE_H, '', {
           fontFamily: FONT,
           fontSize: '17px',
           color: CSS.choice,
@@ -283,6 +347,19 @@ export class DialogueBox {
     g.fillRoundedRect(x, y, w, h, 6);
     g.lineStyle(2, 0xf7ce6b, 0.95);
     g.strokeRoundedRect(x, y, w, h, 6);
+  }
+
+  /** Fixed-geometry mat + frame behind the portrait slot — same bark/gold hairline
+   *  recipe as drawPanel(), drawn once (its bounds never move; only visibility toggles). */
+  private drawPortraitFrame(): void {
+    const g = this.portraitFrame;
+    const fw = PORTRAIT_SIZE + PORTRAIT_MAT * 2;
+    const fx = TEXT_X;
+    const fy = PANEL_Y + (PANEL_H - fw) / 2;
+    g.clear();
+    g.fillStyle(0x2a1d13, 0.95).fillRoundedRect(fx, fy, fw, fw, 8);
+    g.lineStyle(2, 0xf7ce6b, 0.95).strokeRoundedRect(fx, fy, fw, fw, 8);
+    g.lineStyle(1, 0xebd9b2, 0.16).strokeRoundedRect(fx + 3, fy + 3, fw - 6, fw - 6, 6);
   }
 
   // --------------------------------------------------------------------- input

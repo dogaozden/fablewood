@@ -14,4 +14,7 @@ export interface Conversation {
   speaker?: string;
   pages: string[];
   choices?: DialogueChoice[];
+  /** texture key of the speaker's 128x128 portrait, if one exists (explicit — never
+   *  guessed from `speaker` at runtime). Absent = no portrait, renders as before. */
+  portrait?: string;
 }
