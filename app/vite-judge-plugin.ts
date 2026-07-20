@@ -131,7 +131,10 @@ function runClaude(prompt: string): Promise<string> {
 }
 
 async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
-  if (process.env.JUDGE_MODE === 'stub') return stubJudge(args);
+  if (process.env.JUDGE_MODE === 'stub') {
+    const t0 = Date.now();
+    return { ...stubJudge(args), latencyMs: Date.now() - t0, tier: 'stub-mode' };
+  }
   const prompt = buildPrompt(args);
 
   // Tier 1: warm worker pool — kills the per-call CLI boot on repeat grades.
@@ -140,8 +143,9 @@ async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
     const raw = await gradeWithWarmWorker(prompt);
     const parsed = parseVerdict(raw);
     if (parsed) {
-      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t0}ms (warm)`);
-      return parsed;
+      const latencyMs = Date.now() - t0;
+      console.log(`[clerk] ${parsed.verdict} in ${latencyMs}ms (warm)`);
+      return { ...parsed, latencyMs, tier: 'warm' };
     }
     console.warn(`[clerk] warm worker fallback: unparseable output after ${Date.now() - t0}ms → ${raw.slice(0, 80)}`);
   } catch (e) {
@@ -154,8 +158,9 @@ async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
     const raw = await runClaude(prompt);
     const parsed = parseVerdict(raw);
     if (parsed) {
-      console.log(`[clerk] ${parsed.verdict} in ${Date.now() - t1}ms (spawn fallback)`);
-      return parsed;
+      const latencyMs = Date.now() - t1;
+      console.log(`[clerk] ${parsed.verdict} in ${latencyMs}ms (spawn fallback)`);
+      return { ...parsed, latencyMs, tier: 'spawn' };
     }
     console.warn(`[clerk] fallback: unparseable output after ${Date.now() - t1}ms → ${raw.slice(0, 80)}`);
   } catch (e) {
@@ -163,7 +168,7 @@ async function grade(args: JudgeArgs): Promise<JudgeVerdict> {
   }
 
   // Tier 3: keep a fair grade (stub verdict) but tell the player the Clerk was away
-  return { ...stubJudge(args), line: AWAY_LINE };
+  return { ...stubJudge(args), line: AWAY_LINE, latencyMs: Date.now() - t0, tier: 'away' };
 }
 
 export function fablewoodJudge(): Plugin {

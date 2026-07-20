@@ -28,7 +28,7 @@ const SAVE_FILE = 'save.json';
 const SETTINGS_FILE = 'settings.json';
 
 const DEFAULT_SAVE: SaveData = { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
-const DEFAULT_SETTINGS = { muted: false };
+const DEFAULT_SETTINGS = { muted: false, volume: 100 };
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -205,8 +205,12 @@ export class SaveStore extends ObjectStore<SaveData & Record<string, unknown>> {
   }
 }
 
-export class SettingsStore extends ObjectStore<{ muted: boolean } & Record<string, unknown>> {
+export class SettingsStore extends ObjectStore<{ muted: boolean; volume: number } & Record<string, unknown>> {
   constructor(bridge: Bridge = realBridge) {
-    super(SETTINGS_FILE, DEFAULT_SETTINGS as { muted: boolean } & Record<string, unknown>, bridge);
+    super(
+      SETTINGS_FILE,
+      DEFAULT_SETTINGS as { muted: boolean; volume: number } & Record<string, unknown>,
+      bridge,
+    );
   }
 }

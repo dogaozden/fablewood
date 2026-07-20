@@ -192,6 +192,17 @@ export class MusicPlayer {
     return Tone.getDestination().mute;
   }
 
+  /** Master output volume, 0 (silent) - 100 (full). Independent of mute — this scales
+   *  the linear master Gain node; muting is still the separate Destination.mute flag. */
+  setVolume(percent: number): void {
+    const clamped = Math.min(100, Math.max(0, percent));
+    this.master.gain.value = clamped / 100;
+  }
+
+  getVolume(): number {
+    return Math.round(this.master.gain.value * 100);
+  }
+
   /** Tap the master bus (pre-reverb) for a meter/analyser in dev UIs. */
   connectAnalyser(node: Tone.InputNode): void {
     this.master.connect(node);

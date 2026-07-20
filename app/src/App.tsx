@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { PhaserGame } from './game/PhaserGame';
 import { Dashboard } from './shell/Dashboard';
 import { Library } from './shell/Library';
+import { Settings } from './shell/Settings';
 import { music, resumeMusicOnce } from './music/instance';
 import { services } from './game/contracts';
 
-type Tab = 'dashboard' | 'game' | 'library';
-const TABS: Tab[] = ['dashboard', 'game', 'library'];
+type Tab = 'dashboard' | 'game' | 'library' | 'settings';
+const TABS: Tab[] = ['dashboard', 'game', 'library', 'settings'];
 
 export function App() {
   const [tab, setTab] = useState<Tab>('game');
@@ -16,9 +17,10 @@ export function App() {
     services.settings
       .ready()
       .then(() => {
-        const m = services.settings.get().muted;
-        setMuted(m);
-        music.setMuted(m);
+        const s = services.settings.get();
+        setMuted(s.muted);
+        music.setMuted(s.muted);
+        music.setVolume(s.volume);
       })
       .catch(() => {});
     const wake = () => void resumeMusicOnce();
@@ -48,7 +50,7 @@ export function App() {
               className={t === tab ? 'tab active' : 'tab'}
               onClick={() => setTab(t)}
             >
-              {t[0].toUpperCase() + t.slice(1)}
+              {t === 'settings' ? '⚙ Settings' : t[0].toUpperCase() + t.slice(1)}
             </button>
           ))}
         </div>
@@ -65,6 +67,7 @@ export function App() {
         {tab === 'game' && <PhaserGame />}
         {tab === 'dashboard' && <Dashboard onSetOut={() => setTab('game')} />}
         {tab === 'library' && <Library />}
+        {tab === 'settings' && <Settings muted={muted} onToggleMute={toggleMute} />}
       </main>
     </div>
   );
