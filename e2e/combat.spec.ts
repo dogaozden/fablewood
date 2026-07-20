@@ -113,8 +113,8 @@ test('combat friction: free Strike (no overlay) vs gated Cast (overlay → bigge
   // reading, proving the plugin→client→Settings plumbing works end to end).
   // Checked LAST: switching tabs tears down the combat scene (by design — see
   // overlay-teardown.spec.ts), which would break the Strike assertions above.
-  await page.getByRole('button', { name: /Settings/ }).click();
-  await expect(page.locator('.settings-judge')).toContainText('ms', { timeout: 5000 });
+  await page.getByRole('button', { name: /The Study/ }).click();
+  await expect(page.locator('.settings-judge')).toContainText('grains', { timeout: 5000 });
 });
 
 // Satchel in battle (inventory-handoff §10). No ?demo=1 here — the autopilot would race

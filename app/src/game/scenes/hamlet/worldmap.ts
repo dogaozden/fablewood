@@ -84,8 +84,8 @@ interface Building {
 }
 
 const BUILDINGS: Building[] = [
-  { id: 'cottage', name: "Keeper's Cottage", prompt: 'rest & save', key: 'prop.cottage', c0: 3, r0: 2, w: 3, h: 2, door: [4, 4] },
-  { id: 'tavern', name: 'The Gilded Acorn', prompt: 'talk to Berry', key: 'prop.tavern', c0: 15, r0: 2, w: 3, h: 2, door: [16, 4] },
+  { id: 'cottage', name: "Keeper's Cottage", prompt: 'rest & record', key: 'prop.cottage', c0: 3, r0: 2, w: 3, h: 2, door: [4, 4] },
+  { id: 'tavern', name: 'The Gilded Acorn', prompt: 'call on Berry', key: 'prop.tavern', c0: 15, r0: 2, w: 3, h: 2, door: [16, 4] },
   { id: 'records', name: 'The Records Office', prompt: 'consult the Clerk', key: 'prop.records-office', c0: 2, r0: 9, w: 3, h: 2, door: [3, 11] },
   { id: 'gate', name: 'The South Gate', prompt: 'set out', key: 'prop.south-gate', c0: 14, r0: 10, w: 3, h: 2, door: [15, 12] },
 ];
@@ -175,7 +175,7 @@ export function buildHamlet(): HamletMap {
   locations.push({
     id: 'factor',
     name: 'Mira the Factor',
-    prompt: 'Browse wares',
+    prompt: 'weigh the wares',
     door: tc(18, 9),
     center: { x: 18 * TILE + TILE / 2, y: 8 * TILE + TILE / 2 },
     label: { x: 18 * TILE + TILE / 2, y: 8 * TILE - 12 },

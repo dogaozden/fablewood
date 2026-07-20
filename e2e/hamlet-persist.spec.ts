@@ -27,7 +27,7 @@ test('hamlet persists position when the whole game tears down mid-visit, not jus
 
   // Tear the WHOLE game down without ever switching scenes first (React unmounts
   // PhaserGame -> game.destroy(true) -> hamlet's DESTROY fires; SHUTDOWN never does).
-  await page.getByRole('button', { name: 'Dashboard' }).click();
+  await page.getByRole('button', { name: 'The Ledger' }).click();
   await expect(page.locator('.phaser-root')).toHaveCount(0);
 
   const save = await waitForState<Save>(

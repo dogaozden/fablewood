@@ -30,9 +30,13 @@ type SrsState = { facts?: Record<string, { box?: number; next_due?: number }> };
 
 function until(ms: number): string {
   const s = (ms - Date.now()) / 1000;
-  if (s <= 0) return 'due now';
-  if (s < 86400) return `in ${Math.max(1, Math.floor(s / 3600))} h`;
-  return `in ${Math.floor(s / 86400)} d`;
+  if (s <= 0) return 'ready to cast';
+  if (s < 86400) {
+    const hours = Math.max(1, Math.floor(s / 3600));
+    return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+  }
+  const days = Math.floor(s / 86400);
+  return `in ${days} day${days === 1 ? '' : 's'}`;
 }
 
 function BoxBadge({ box }: { box: number }) {
@@ -44,11 +48,11 @@ function FactRow({ fact, srs }: { fact: Fact; srs: SrsState }) {
   const box = entry?.box ?? Math.max(0, services.srs.boxOf(fact.id));
   const due =
     box === 0
-      ? 'unseen'
+      ? 'uncast'
       : typeof entry?.next_due === 'number'
         ? until(entry.next_due)
-        : 'seen';
-  const dueNow = due === 'due now';
+        : 'cast';
+  const dueNow = due === 'ready to cast';
   return (
     <div className="lib-fact">
       <BoxBadge box={box} />

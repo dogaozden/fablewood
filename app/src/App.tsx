@@ -27,6 +27,14 @@ function loadMusic() {
 
 type Tab = 'dashboard' | 'game' | 'library' | 'settings';
 const TABS: Tab[] = ['dashboard', 'game', 'library', 'settings'];
+// Voice audit T3: displayed tab labels, distinct from the internal Tab ids above
+// (which stay 'dashboard'/'game'/'library'/'settings' — save/e2e/etc. never see these).
+const TAB_LABELS: Record<Tab, string> = {
+  dashboard: 'The Ledger',
+  game: 'Realms',
+  library: 'Library',
+  settings: '⚙ The Study',
+};
 
 export function App() {
   const [tab, setTab] = useState<Tab>('game');
@@ -71,7 +79,7 @@ export function App() {
               className={t === tab ? 'tab active' : 'tab'}
               onClick={() => setTab(t)}
             >
-              {t === 'settings' ? '⚙ Settings' : t[0].toUpperCase() + t.slice(1)}
+              {TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -81,7 +89,7 @@ export function App() {
           title={muted ? 'Unmute music' : 'Mute music'}
           onClick={toggleMute}
         >
-          {muted ? '♪̸ off' : '♪ on'}
+          {muted ? '♪̸ hushed' : '♪ singing'}
         </button>
       </nav>
       <main className="pane">

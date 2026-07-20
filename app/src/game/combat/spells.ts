@@ -190,7 +190,7 @@ export const SPELLBOOK: Record<SpellId, SpellDef> = {
     },
     banner: {
       q1: 'Full — the weave binds all.',
-      q05: 'Partial — primary only.',
+      q05: 'Partial — only the nearest thread binds.',
       q0: 'The weave slips — turn lost.',
     },
   },
@@ -237,7 +237,7 @@ export const SPELLBOOK: Record<SpellId, SpellDef> = {
     },
     banner: {
       q1: 'Full — a three-deep lance.',
-      q05: 'Partial — one-deep.',
+      q05: 'Partial — the lance falls short.',
       q0: 'The lance breaks — turn lost.',
     },
   },
