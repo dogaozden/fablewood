@@ -1,35 +1,27 @@
 //! The Laconic Clerk, native edition — the Rust twin of app/vite-judge-plugin.ts.
 //!
-//! Spawns the same headless `claude -p … --model haiku` (subscription CLI, NO API
-//! key — hard rule) with MCP disabled for the 3x latency win, 20s cap, strict-JSON
-//! parse. On any failure this command returns Err and the frontend
+//! Two-tier fallback chain, mirroring the web judge plugin (queue item 7,
+//! closed 2026-07-20 — this doc comment previously recorded the parity gap;
+//! see judge_pool.rs, warm_pool.rs and parse_worker_line.rs for the port):
+//!   Tier 1: judge_pool::grade_with_warm_worker — a small pool of pre-spawned
+//!           `claude --input-format stream-json --output-format stream-json`
+//!           processes kept idle between grades (Tauri-managed state, see
+//!           main.rs's `.manage(...)`), so a warm grade skips the CLI boot
+//!           cost. Single-use: a pooled process grades exactly once, then
+//!           dies; a replacement is pre-warmed in the background. Falls back
+//!           to an ad-hoc fresh spawn of the same stream-json process if the
+//!           pool is empty or exhausted.
+//!   Tier 2: this file's own per-call `claude -p … --model haiku` spawn
+//!           (below), unchanged — 20s cap, strict-JSON parse. The original
+//!           safety net, kept exactly as it was before tier 1 existed.
+//!
+//! On failure at BOTH tiers this command returns Err and the frontend
 //! (app/src/judge/native.ts) falls back to the deterministic stub with the
 //! "away from his desk" line — the game never hangs on the Clerk.
 //!
 //! A Finder-launched .app has a minimal PATH, so the binary is resolved through a
-//! candidate list rather than trusting `claude` to be on PATH (docs/tauri.md).
-//!
-//! **Native/web parity gap (queue item 7, 2026-07-20):** the web path
-//! (app/vite-judge-plugin.ts + app/judge-worker.ts) now keeps a small pool of
-//! pre-spawned `claude -p --input-format stream-json --output-format stream-json`
-//! processes idle between grades, so a warm grade skips the CLI boot cost this
-//! command still pays on every call. This command deliberately stays on the
-//! per-call spawn below rather than mirroring that pool: doing so needs an async
-//! NDJSON line-reader over the child's stdout, a pool/health-check/auto-restart
-//! manager equivalent to app/src/judge/warm-pool.ts, and Tauri-managed state
-//! threaded into this command's signature (today it is stateless — prompt in,
-//! Result out) — a materially larger, riskier change than a "clean bounded"
-//! edit, and out of scope here per the hard rule against destabilizing Tauri.
-//! Recommended approach if this is picked up later: spawn the same
-//! `--input-format stream-json --output-format stream-json --no-session-persistence`
-//! process from `judge_grade`, hold a `tokio::sync::Mutex<Vec<WarmEntry>>` in
-//! Tauri's managed state (registered in `main.rs`/`lib.rs`), read stdout with
-//! `tokio::io::BufReader::lines()` looking for the terminal `{"type":"result",...}`
-//! event (see judge-worker.ts's parse-worker-line.ts for the exact shape), and
-//! keep the same single-use-per-process isolation policy — reuse across turns
-//! would leak conversation history the same way it would on the web side.
-//! Until then, native grades keep today's ~7–13s-per-call latency; the fallback
-//! contract (Err → deterministic stub + "away from his desk") is unchanged.
+//! candidate list rather than trusting `claude` to be on PATH (docs/tauri.md) —
+//! shared by both tiers via resolve_claude_bin() below.
 
 use serde::Serialize;
 use std::env;
@@ -67,7 +59,9 @@ fn build_prompt(prompt: &str, answer: &str, rubric: &str) -> String {
 }
 
 /// Find the claude CLI: env override → PATH scan → known install locations.
-fn resolve_claude_bin() -> Option<PathBuf> {
+/// `pub(crate)`: also used by judge_pool.rs's tier-1 warm-pool spawn, so both
+/// tiers agree on where "claude" lives.
+pub(crate) fn resolve_claude_bin() -> Option<PathBuf> {
     if let Ok(p) = env::var("FABLEWOOD_CLAUDE_BIN") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
@@ -152,16 +146,38 @@ fn parse_verdict(raw: &str) -> Option<JudgeVerdict> {
 
 #[tauri::command]
 pub async fn judge_grade(
+    pool: tauri::State<'_, crate::judge_pool::ClaudeJudgePool>,
     prompt: String,
     answer: String,
     rubric: String,
 ) -> Result<JudgeVerdict, String> {
+    let full_prompt = build_prompt(&prompt, &answer, &rubric);
+
+    // Tier 1: warm worker pool — skips the per-call CLI boot on a warm hit.
     let t0 = Instant::now();
+    match crate::judge_pool::grade_with_warm_worker(&pool, &full_prompt).await {
+        Ok(raw) => match parse_verdict(&raw) {
+            Some(v) => {
+                println!("[clerk-native] {} in {}ms (warm)", v.verdict, t0.elapsed().as_millis());
+                return Ok(v);
+            }
+            None => {
+                let head: String = raw.chars().take(80).collect();
+                eprintln!(
+                    "[clerk-native] warm fallback: unparseable output after {}ms → {head}",
+                    t0.elapsed().as_millis()
+                );
+            }
+        },
+        Err(e) => eprintln!("[clerk-native] warm fallback: {e} after {}ms", t0.elapsed().as_millis()),
+    }
+
+    // Tier 2: the original per-call spawn, unchanged — same safety net as before.
+    let t1 = Instant::now();
     let bin = resolve_claude_bin().ok_or_else(|| {
         eprintln!("[clerk-native] fallback: claude CLI not found");
         "claude CLI not found (set FABLEWOOD_CLAUDE_BIN)".to_string()
     })?;
-    let full_prompt = build_prompt(&prompt, &answer, &rubric);
 
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.args([
@@ -181,7 +197,7 @@ pub async fn judge_grade(
     let out = tokio::time::timeout(TIMEOUT, cmd.output())
         .await
         .map_err(|_| {
-            eprintln!("[clerk-native] fallback: judge timeout after {}ms", t0.elapsed().as_millis());
+            eprintln!("[clerk-native] fallback: judge timeout after {}ms", t1.elapsed().as_millis());
             "judge timeout".to_string()
         })?
         .map_err(|e| {
@@ -189,7 +205,7 @@ pub async fn judge_grade(
             format!("spawn failed: {e}")
         })?;
 
-    let ms = t0.elapsed().as_millis();
+    let ms = t1.elapsed().as_millis();
     if !out.status.success() {
         let err: String = String::from_utf8_lossy(&out.stderr).chars().take(200).collect();
         eprintln!("[clerk-native] fallback: claude exited {:?} after {ms}ms: {err}", out.status.code());
@@ -198,7 +214,7 @@ pub async fn judge_grade(
     let stdout = String::from_utf8_lossy(&out.stdout);
     match parse_verdict(&stdout) {
         Some(v) => {
-            println!("[clerk-native] {} in {ms}ms", v.verdict);
+            println!("[clerk-native] {} in {ms}ms (spawn fallback)", v.verdict);
             Ok(v)
         }
         None => {
