@@ -155,8 +155,10 @@ async function holdKeyUntilPinned(page: Page, key: string, axis: 'x' | 'y', maxM
 
 /** Wait until the hamlet scene's async bootstrap has loaded the provinces (packs). Read-only
  *  peek, same pattern as hamletPlayer: without it a fast approach can knock on the gate before
- *  Alder has anything to offer (empty-province dialogue has no choice and no warp). */
-async function waitProvincesLoaded(page: Page, timeout = 10_000): Promise<boolean> {
+ *  Alder has anything to offer (empty-province dialogue has no choice and no warp). Also needed
+ *  before the Wellspring interaction: without a loaded packId, doWellspring() takes its
+ *  no-pack branch (wellspringEmpty(), no drill) instead of the real intro. */
+export async function waitProvincesLoaded(page: Page, timeout = 10_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const n = await page.evaluate(() => {

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, tapKey, waitHamletPlayer, warpHamletTo, readState } from './helpers';
+import { waitReady, tapKey, waitHamletPlayer, waitProvincesLoaded, warpHamletTo, readState } from './helpers';
 
 const EV = 'screenshots';
 
@@ -41,6 +41,7 @@ test('SRS: Wellspring drill records facts to state/ and persists across reload',
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');
   await waitHamletPlayer(page);
+  await waitProvincesLoaded(page); // else doWellspring() takes the no-pack branch (no drill)
 
   // Setup-only: warp next to the Wellspring door instead of walking there with real
   // input (dev/e2e-only hook — see HamletScene's window.__fwWarp gate). This spec is

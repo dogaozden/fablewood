@@ -79,6 +79,7 @@ export class HamletScene extends Phaser.Scene {
   private saveAccum = 0;
   private provinces: Province[] = [];
   private packId?: string;
+  private didShutdown = false;
 
   constructor() {
     super('hamlet');
@@ -138,9 +139,24 @@ export class HamletScene extends Phaser.Scene {
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.didShutdown = true;
       void this.persist();
       this.dialogue.destroy();
       if (import.meta.env.DEV) delete window.__fwWarp;
+    });
+
+    // A full Game teardown (PhaserGame.tsx's unmount, e.g. the shell switching away
+    // from the "Game" tab while the Keeper is still in the hamlet) does NOT emit
+    // SHUTDOWN — Phaser's SceneManager.destroy() calls every scene's Systems.destroy()
+    // directly, skipping shutdown() entirely. Without this, the position/scene pointer
+    // was silently lost whenever the whole app closed mid-hamlet-visit instead of via a
+    // scene transition. Guarded: every added scene (even ones that already shut down
+    // earlier, e.g. hamlet -> vaults) gets a DESTROY event on full teardown too, so
+    // without the guard this would replay stale hamlet coordinates over newer progress
+    // made in whatever scene the game was actually destroyed from.
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      if (this.didShutdown) return;
+      void this.persist();
     });
 
     void this.bootstrap();
