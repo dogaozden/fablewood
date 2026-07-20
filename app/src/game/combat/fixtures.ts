@@ -49,6 +49,22 @@ export function fixtureRoom(boss: boolean): DungeonRoom {
   };
 }
 
-export function fixtureLaunch(seed: number, boss: boolean): CombatLaunch {
-  return { packId: FIXTURE_PACK_ID, room: fixtureRoom(boss), seed, returnScene: 'boot' };
+/** §15 Phase 1 — a kit-showcase room: construct (Vault-Slam push) + wraith (Dimming Bolt),
+ *  plus whatever brazier/mist buildLayout rolls for 'dev-kit-showcase' (§4.4 generation is
+ *  seeded per-room, not pinned here — no `terrain` field exists on DungeonRoom this phase).
+ *  Fantasy-generic ids only (trap 13). Selected via ?kit=1 in the packless dev/e2e harness. */
+export function fixtureKitRoom(): DungeonRoom {
+  return {
+    id: 'dev-kit-showcase',
+    name: 'The Kit-Showcase Hollow',
+    blurb: 'A dev fixture — construct and wraith, mist lane and brazier, side by side.',
+    enemies: [
+      { archetype: 'construct', tags: ['moss-warden-terms'], kinds: ['mcq'] },
+      { archetype: 'wraith', tags: ['moss-glow-grace'], kinds: ['match'] },
+    ],
+  };
+}
+
+export function fixtureLaunch(seed: number, boss: boolean, kit = false): CombatLaunch {
+  return { packId: FIXTURE_PACK_ID, room: kit ? fixtureKitRoom() : fixtureRoom(boss), seed, returnScene: 'boot' };
 }

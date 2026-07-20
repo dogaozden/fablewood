@@ -18,20 +18,22 @@ import type { Pack } from '../../packs/types';
 import { getPacks } from '../../bridge/client';
 import {
   GRID_W, GRID_H, CELL, ACTIONS, key, manhattan, type ActionKind, type UnitState, type Coord, type Dir,
+  type TileType,
 } from './types';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles,
-  type Layout, type MoveField,
+  forceMove, blocksSight, hasLineOfFire, type Layout, type MoveField, type ForceMoveBoard,
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
-import { resolveAction } from './damage';
+import { resolveAction, isFlanked } from './damage';
 import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from './boss';
-import { decideEnemy, occupancyExcept } from './ai';
+import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
-import { ensureTextures, TILE_KEYS, UNIT_KEYS } from './textures';
+import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
+import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
 import { CombatHud } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS } from './fixtures';
-import { P } from './palette';
+import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
 import { itemById } from '../../inventory/catalog';
@@ -48,6 +50,8 @@ interface UnitView {
   /** party-only: pulsing danger aura shown when near death */
   danger?: Phaser.GameObjects.Graphics;
   pulse?: Phaser.Tweens.Tween;
+  /** §12.3 — status chip row under the HP bar; destroyed + recreated each drawHpBar call */
+  chips: (Phaser.GameObjects.Image | Phaser.GameObjects.Text)[];
 }
 
 export class CombatScene extends Phaser.Scene {
@@ -83,6 +87,14 @@ export class CombatScene extends Phaser.Scene {
   private debugPrefer: ActionKind | null = null;
   private actionLog: Array<{ action: string; dmg: number; overlay: boolean }> = [];
 
+  // §4 board mechanics (Phase 1 — magic-combat-depth.md)
+  /** tile Image refs so a lit brazier can swap its texture to `tile.lantern` in place. */
+  private tileImages = new Map<string, Phaser.GameObjects.Image>();
+  /** §4.2 — per-turn toggle ('c'): half move, provokes no opportunity strikes. Reset each turn. */
+  private carefulStepOn = false;
+  /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
+  private hoveredStatusUnitId: string | null = null;
+
   // content resolution
   private allFactIds = new Set<string>();
   private tagToIds = new Map<string, string[]>();
@@ -107,7 +119,7 @@ export class CombatScene extends Phaser.Scene {
       this.launch = data as CombatLaunch;
     } else {
       const seed = (data && 'seed' in data && typeof data.seed === 'number') ? data.seed : 1;
-      this.launch = fixtureLaunch(seed, params.get('boss') === '1');
+      this.launch = fixtureLaunch(seed, params.get('boss') === '1', params.get('kit') === '1');
     }
   }
 
@@ -143,6 +155,9 @@ export class CombatScene extends Phaser.Scene {
     this.phaseIndex = 0;
     this.pendingBossPhase = false;
     this.bossReveal = null;
+    this.tileImages.clear();
+    this.carefulStepOn = false;
+    this.hoveredStatusUnitId = null;
 
     this.encSeed = this.launch.seed | 0;
     this.drawBackdrop();
@@ -226,6 +241,7 @@ export class CombatScene extends Phaser.Scene {
         const p = this.tileToScreen({ c, r });
         const img = this.add.image(p.x, p.y, TILE_KEYS[t]).setDepth(0);
         img.setScale(CELL / img.frame.realWidth); // placeholder 48px→×1, 16-native art→×3
+        this.tileImages.set(key(c, r), img); // §4.4 — lets a lit brazier swap to tile.lantern in place
       }
     }
   }
@@ -321,7 +337,7 @@ export class CombatScene extends Phaser.Scene {
       container.add(danger); // under shadow + sprite
     }
     container.add([shadow, sprite, hp]);
-    this.views.set(u.id, { container, sprite, hp, danger, pulse });
+    this.views.set(u.id, { container, sprite, hp, danger, pulse, chips: [] });
     this.drawHpBar(u);
   }
 
@@ -350,7 +366,47 @@ export class CombatScene extends Phaser.Scene {
     const col = u.team === 'party' ? P.moss : P.berry;
     g.fillStyle(col, 1).fillRect(-w / 2, y, w * frac, 5);
     g.lineStyle(1, P.outline, 1).strokeRect(-w / 2, y, w, 5);
+
+    // §3/§12.3 — Warded renders as a thin water-blue underline sized by the remaining pool
+    // (never decays by time, so it stays legible even without a chip-row turns readout).
+    const warded = u.statuses.find((s) => s.id === 'warded');
+    if (warded) {
+      const wardPx = Math.min(w, warded.magnitude * 6);
+      g.fillStyle(P.waterBlue, 0.95).fillRect(-w / 2, y + 6, wardPx, 2);
+    }
+
+    this.drawStatusChips(u, v, y + (warded ? 10 : 7));
     this.updateDanger(u);
+  }
+
+  /** §3/§12.3 — up to 3 status chips (CHIP_KEYS glyphs) under the HP bar, overflow '+'. */
+  private drawStatusChips(u: UnitState, v: UnitView, chipY: number): void {
+    for (const c of v.chips) c.destroy();
+    v.chips = [];
+    if (!u.statuses.length) return;
+    const SIZE = 10;
+    const GAP = 2;
+    const MAX = 3;
+    const shown = u.statuses.slice(0, MAX);
+    const overflow = u.statuses.length > MAX;
+    const n = shown.length + (overflow ? 1 : 0);
+    let cx = -(n * SIZE + (n - 1) * GAP) / 2 + SIZE / 2;
+    for (const s of shown) {
+      const glyphKey = (CHIP_KEYS as Record<string, string>)[s.id];
+      if (glyphKey && this.textures.exists(glyphKey)) {
+        const img = this.add.image(cx, chipY, glyphKey).setDisplaySize(SIZE, SIZE);
+        v.container.add(img);
+        v.chips.push(img);
+      }
+      cx += SIZE + GAP;
+    }
+    if (overflow) {
+      const t = this.add.text(cx - SIZE / 2, chipY - 6, '+', {
+        fontFamily: 'Georgia, serif', fontSize: '11px', color: hex(P.parchment), fontStyle: 'bold',
+      }).setOrigin(0.5);
+      v.container.add(t);
+      v.chips.push(t);
+    }
   }
 
   /** Show the pulsing danger aura when a party unit drops to ≤ 1/3 HP; hide otherwise. */
@@ -415,14 +471,28 @@ export class CombatScene extends Phaser.Scene {
 
     const nxt = nextInOrder(this.order, this.orderIndex, (id) => this.isAlive(id));
     if (!nxt) { this.resolveBattle(this.checkEnd() ?? 'victory'); return; }
+    // §4.2 round boundary (initiative.ts nextInOrder flags a wrap): reset every unit's oaSpent.
+    if (nxt.newRound) { for (const u of this.units) u.oaSpent = false; }
     this.orderIndex = nxt.index;
     const unit = this.unitById(nxt.id)!;
     this.activeId = unit.id;
     this.hud.setActive(unit.id, this.aliveIds());
     this.focusCue(unit);
 
-    if (unit.skipNextTurn) {
-      unit.skipNextTurn = false;
+    // §3 rule 2 — tick order at turn start: (a) Kindled damage via the damageUnit choke point
+    // (may kill); (b) Staggered — consumed, turn ends here before the unit can act. Replaces
+    // the old skipNextTurn read/write block (skipNextTurn itself stays on UnitState one release
+    // for save-less migration ease, but nothing reads/writes it anymore — see also Parley/boss
+    // migration in applyOutcome/openBossPhase).
+    const tick = tickTurnStart(unit);
+    unit.statuses = tick.statuses;
+    let staggered = false;
+    for (const op of tick.ops) {
+      if (op.op === 'damage') this.damageUnit(unit, op.amount, P.ember);
+      else staggered = true;
+    }
+    if (!unit.alive) { this.time.delayedCall(420, () => this.advanceTurn()); return; }
+    if (staggered) {
       this.hud.showBanner(`${unit.name} is staggered — it loses its turn.`, P.duskPeach);
       this.time.delayedCall(650, () => this.advanceTurn());
       return;
@@ -444,13 +514,49 @@ export class CombatScene extends Phaser.Scene {
     this.state = 'playerMove';
     this.moved = false;
     this.pendingAction = null;
-    this.moveField = computeMoveField(unit, unit.move, this.layout.tiles, this.blockedFor(unit.id));
+    this.carefulStepOn = false;
+    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
     this.showMenu(unit);
     this.hud.showBanner(`${unit.name}'s turn — move, then act.`, P.parchment);
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
+  }
+
+  /** §3 Bound/Dimmed (effectiveMove) composed with §4.2 Careful Step's half-move toggle. */
+  private moveBudgetFor(unit: UnitState): number {
+    const eff = effectiveMove(unit.move, unit.statuses);
+    return this.carefulStepOn ? carefulStepMove(eff) : eff;
+  }
+
+  /** §4.2 — 'c' toggles Careful Step while choosing a move: half move (floor, min 1), no
+   *  opportunity strikes provoked. Recomputes the move field/range in place. */
+  private toggleCarefulStep(unit: UnitState): void {
+    if (this.moved) return;
+    this.carefulStepOn = !this.carefulStepOn;
+    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
+    this.reachable.clear();
+    for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
+    this.drawMoveRange();
+    this.hud.showBanner(
+      this.carefulStepOn ? 'Careful Step: half move, no opportunity strikes.' : 'Careful Step off.',
+      this.carefulStepOn ? P.waterLight : P.parchment,
+    );
+  }
+
+  /** §4.4 — free interact: light an adjacent unlit brazier (once per brazier — the tile
+   *  becoming 'lantern' is itself the once-only gate). Glow hook is a NO-OP in Phase 1
+   *  (Phase 2 wires the +1 pip, docs/design/magic-combat-depth.md §5.1). */
+  private tryLightBrazier(unit: UnitState): void {
+    const co = this.layout.braziers.find(
+      (b) => this.layout.tiles[b.r][b.c] === 'brazier' && manhattan(unit, b) === 1,
+    );
+    if (!co) return;
+    this.layout.tiles[co.r][co.c] = 'lantern';
+    const img = this.tileImages.get(key(co.c, co.r));
+    if (img) img.setTexture(TILE_KEYS.lantern);
+    this.hud.showBanner('The brazier catches — a lantern now, for the rest of the battle.', P.lanternGold);
   }
 
   /** Dev autopilot (?demo=1): act if a target is in range, else close in, else wait.
@@ -471,8 +577,16 @@ export class CombatScene extends Phaser.Scene {
       }
     }
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
-    if (enemies.length && !this.moved && this.moveField) {
-      const near = enemies.reduce((b, e) => (manhattan(unit, e) < manhattan(unit, b) ? e : b), enemies[0]);
+    // When a debug preference narrows the order to ONE action kind (e.g. 'parley', which
+    // only .parley-flagged enemies satisfy), approach an enemy that could eventually become a
+    // valid target for THAT action once in range — not just the nearest enemy overall, which
+    // may never satisfy it and strand the pilot circling forever. Generic actions (any enemy
+    // qualifies for strike/smite/weave/sequence/cast) keep the original "nearest enemy" pool.
+    const eligible = (e: UnitState): boolean => (this.debugPrefer === 'parley' ? !!e.parley : true);
+    const pool = enemies.filter(eligible);
+    const approachPool = pool.length ? pool : enemies;
+    if (approachPool.length && !this.moved && this.moveField) {
+      const near = approachPool.reduce((b, e) => (manhattan(unit, e) < manhattan(unit, b) ? e : b), approachPool[0]);
       let best: Coord | null = null;
       let bestD = manhattan(unit, near);
       for (const co of this.reachable.values()) {
@@ -536,8 +650,18 @@ export class CombatScene extends Phaser.Scene {
       case 'cast': return enemies.filter((e) => manhattan(unit, e) <= 3);
       case 'parley': return enemies.filter((e) => e.parley && manhattan(unit, e) <= 1);
       case 'sequence':
-        return enemies.filter((e) => (e.c === unit.c || e.r === unit.r) && manhattan(unit, e) <= 3);
-      default: return [];
+        // §4.4 — mist (and walls) block Ritecraft lines the same way they block LoF;
+        // hasLineOfFire already encodes same-row/col + range + the intervening-tile check.
+        return enemies.filter((e) => hasLineOfFire(unit, e, ACTIONS.sequence.range, this.layout.tiles));
+      case 'satchel':
+      case 'wait':
+        return [];
+      default: {
+        // trap 4 — this switch is touched this phase, so it gets an exhaustiveness check
+        // (full retirement of the silent-default class is Phase 2's SpellDef-driven dispatch).
+        const exhaustive: never = action;
+        return exhaustive;
+      }
     }
   }
 
@@ -553,6 +677,12 @@ export class CombatScene extends Phaser.Scene {
     if (tile.c < unit.c) this.views.get(unit.id)!.sprite.setFlipX(true);
     else if (tile.c > unit.c) this.views.get(unit.id)!.sprite.setFlipX(false);
     unit.c = tile.c; unit.r = tile.r;
+    this.resolveOpportunityStrikes(unit, path, this.carefulStepOn);
+    if (!unit.alive) {
+      // felled by an opportunity strike mid-move (rare, but the fight may be over)
+      this.time.delayedCall(360, () => this.endPlayerTurn());
+      return;
+    }
     this.tweenAlongPath(unit, path, () => {
       if (this.destroyed) return;
       this.state = 'playerMove';
@@ -560,6 +690,34 @@ export class CombatScene extends Phaser.Scene {
       this.hud.showBanner('Moved. Choose an action.', P.parchment);
       if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
     });
+  }
+
+  /**
+   * §4.2 opportunity strikes: for every tile `mover` vacates along `path` (excludes the final
+   * resting tile), any living, non-Staggered opposing unit orthogonally adjacent to that tile
+   * (and who hasn't spent its one this round — oaSpent) deals 1 flat, flank-eligible damage,
+   * resolved before the move's tween starts (so it lands "before the move animation completes").
+   * Careful Step provokes nothing. Pushes never call this (the mover didn't choose to move).
+   */
+  private resolveOpportunityStrikes(mover: UnitState, path: Coord[], carefulStep: boolean): void {
+    if (carefulStep) return;
+    for (const vacated of path.slice(0, -1)) {
+      if (!mover.alive) return;
+      for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
+        if (!mover.alive) break;
+        const flank = isFlanked(striker, mover, striker.team, this.units);
+        const result = computeHit({
+          base: 1, attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
+          flank, overglow: false, weld: false,
+        });
+        mover.statuses = result.targetStatuses;
+        striker.oaSpent = true;
+        if (result.hpDamage > 0) {
+          this.hud.showBanner(`${striker.name} strikes as ${mover.name} withdraws.`, P.berry);
+          this.damageUnit(mover, result.hpDamage, P.berry);
+        }
+      }
+    }
   }
 
   private tweenAlongPath(unit: UnitState, path: Coord[], onDone: () => void): void {
@@ -651,7 +809,11 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private applyOutcome(actor: UnitState, action: ActionKind, tile: Coord, o: ReturnType<typeof resolveAction>, target: UnitState | null): void {
-    if (action === 'strike' || action === 'cast' || action === 'smite') {
+    if (action === 'strike') {
+      // §3 rule 4 / §4.1 — Strike is the one melee player action; it routes through the
+      // computeHit modifier pipeline (flank) instead of a flat subtraction (see meleeHit).
+      if (target && o.hits > 0) this.meleeHit(actor, target, o.hits, ACTIONS.strike.tint);
+    } else if (action === 'cast' || action === 'smite') {
       if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS[action].tint, action);
       if (o.extraShield && target?.isBoss) { this.shields = reduceShields(this.shields, -o.extraShield); this.floatText(target, '−shield', P.waterLight); this.syncBoss(); }
       if (o.fade > 0) this.damageParty(o.fade, actor);
@@ -667,25 +829,61 @@ export class CombatScene extends Phaser.Scene {
     } else if (action === 'sequence') {
       const dir = this.dirTo(actor, tile);
       if (dir) {
-        lineTiles(actor, dir, o.lineDepth).forEach((co, i) => {
+        for (const [i, co] of lineTiles(actor, dir, o.lineDepth).entries()) {
           const e = this.enemyAt(co);
           if (e) this.hitEnemy(e, i === 0 ? o.hits : o.aoeHit, ACTIONS.sequence.tint, action);
-        });
+          // §4.4 — mist (and walls) block Ritecraft lines: the lance can still land on
+          // whatever occupies the blocking tile, but nothing beyond it.
+          if (blocksSight(this.tileTypeOf(co))) break;
+        }
       }
     } else if (action === 'parley') {
-      if (o.weaken && target) { target.skipNextTurn = true; target.attack = Math.max(0, target.attack - 1); this.floatText(target, 'weakened', P.blossom); }
+      // §3.6 migration — Parley-good used to set skipNextTurn + PERMANENTLY decrement attack.
+      // Now: Staggered(1) + Weakened(2) via statuses, so repeated parleys never drift the
+      // target's base attack downward (regression: statuses refresh, they don't stack/sum).
+      if (o.weaken && target) {
+        target.statuses = applyStatus(target, 'staggered', 1);
+        target.statuses = applyStatus(target, 'weakened', 2);
+        this.floatText(target, 'weakened', P.blossom);
+      }
       if (o.partyHit > 0) this.damageParty(o.partyHit, actor);
     }
     if (o.selfChip > 0) this.damageUnit(actor, o.selfChip, P.berry);
+  }
+
+  /** §3 rule 4 / §4.1 — the one melee player action (Strike) routed through computeHit:
+   *  flank via isFlanked; overglow/weld are Phase-2/2.5 concepts, always false this phase. */
+  private meleeHit(attacker: UnitState, target: UnitState, base: number, color: number): void {
+    if (wardenAbsorbs('strike', target.isBoss, this.shields)) {
+      this.floatText(target, 'shielded', P.waterLight);
+      return;
+    }
+    const flank = isFlanked(attacker, target, attacker.team, this.units);
+    const result = computeHit({
+      base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
+      flank, overglow: false, weld: false,
+    });
+    target.statuses = result.targetStatuses;
+    if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
+    else if (result.absorbed > 0) this.floatText(target, 'warded', P.waterBlue);
   }
 
   private endPlayerTurn(): void {
     if (this.destroyed) return;
     this.state = 'resolving';
     this.hud.hideActionMenu();
+    const unit = this.unitById(this.activeId);
+    if (unit) this.endTurnDecay(unit);
     const end = this.checkEnd();
     if (end) { this.resolveBattle(end); return; }
     this.advanceTurn();
+  }
+
+  /** §3 rule 3 — decay at the OWNER's turn end: decrement every duration status (Warded
+   *  never decays by time — see status.ts's decayTurnEnd). */
+  private endTurnDecay(unit: UnitState): void {
+    unit.statuses = decayTurnEnd(unit.statuses);
+    this.drawHpBar(unit);
   }
 
   // ---- satchel (inventory-handoff §10) -----------------------------------
@@ -801,7 +999,9 @@ export class CombatScene extends Phaser.Scene {
     const eff = applyBranch(result.branchTag);
     if (eff.shieldDelta) { this.shields = reduceShields(this.shields, eff.shieldDelta); }
     if (eff.wardenHeal) { this.boss.hp = Math.min(this.boss.maxHp, this.boss.hp + eff.wardenHeal); this.floatText(this.boss, `+${eff.wardenHeal}`, P.moss); }
-    if (eff.stagger) this.boss.skipNextTurn = true;
+    // §3 table — "Warden concession (boss.ts:21)" is a Staggered applier same as Parley-good;
+    // migrated off skipNextTurn (nothing reads that field anymore, see advanceTurn).
+    if (eff.stagger) this.boss.statuses = applyStatus(this.boss, 'staggered', 1);
     if (eff.partyDelta < 0) this.damageParty(-eff.partyDelta);
     this.drawHpBar(this.boss);
     this.syncBoss();
@@ -893,7 +1093,11 @@ export class CombatScene extends Phaser.Scene {
     if (!unit.alive) { this.advanceTurn(); return; }
     this.state = 'enemy';
     const party = this.units.filter((u) => u.team === 'party');
-    const intent = decideEnemy(unit, party, this.layout.tiles, occupancyExcept(this.units, unit.id));
+    // §3 Bound/Dimmed feed the AI's OWN move budget without editing ai.ts: hand decideEnemy a
+    // shallow clone whose `.move` is already the effective value (ai.ts stays pure/untouched).
+    const effMove = effectiveMove(unit.move, unit.statuses);
+    const selfForAi = effMove === unit.move ? unit : { ...unit, move: effMove };
+    const intent = decideEnemy(selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id));
 
     const doAttack = () => {
       if (this.destroyed) return;
@@ -901,23 +1105,33 @@ export class CombatScene extends Phaser.Scene {
         const tgt = this.unitById(intent.attackTargetId);
         if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
       }
+      this.endTurnDecay(unit);
       this.time.delayedCall(460, () => this.advanceTurn());
     };
 
     if (intent.moveTo) {
-      const field = computeMoveField(unit, unit.move, this.layout.tiles, this.blockedFor(unit.id));
+      const field = computeMoveField(unit, effMove, this.layout.tiles, this.blockedFor(unit.id));
       const path = pathTo(field, intent.moveTo);
       const v = this.views.get(unit.id)!;
       if (intent.moveTo.c < unit.c) v.sprite.setFlipX(false);
       else if (intent.moveTo.c > unit.c) v.sprite.setFlipX(true);
       unit.c = intent.moveTo.c; unit.r = intent.moveTo.r;
-      if (path && path.length >= 2) this.tweenAlongPath(unit, path, doAttack);
-      else doAttack();
+      if (path && path.length >= 2) {
+        this.resolveOpportunityStrikes(unit, path, intent.carefulStep);
+        if (!unit.alive) { this.time.delayedCall(360, () => this.advanceTurn()); return; }
+        this.tweenAlongPath(unit, path, doAttack);
+      } else doAttack();
     } else {
       this.time.delayedCall(200, doAttack);
     }
   }
 
+  /**
+   * §8 enemy kits, on the same BoardOp-style primitives spells use: wraith hits apply
+   * Dimmed(1) (the kite that slows pursuit); construct hits push 1 via grid.forceMove, +1
+   * bump damage when the destination is blocked (wall/OOB/occupied — no domino pushes).
+   * Routes through computeHit like every melee hit (§4.1 flank; ranged wraith never flanks).
+   */
   private enemyStrike(attacker: UnitState, target: UnitState): void {
     if (this.destroyed) return;
     if (attacker.ranged) {
@@ -931,8 +1145,41 @@ export class CombatScene extends Phaser.Scene {
       const dy = Math.sign(target.r - attacker.r) * 8;
       this.tweens.add({ targets: v.container, x: v.container.x + dx, y: v.container.y + dy, duration: 90, yoyo: true });
     }
-    this.damageUnit(target, attacker.attack, P.berry);
-    this.hud.showBanner(`${attacker.name} strikes ${target.name} (−${attacker.attack}).`, P.berry);
+
+    const flank = !attacker.ranged && isFlanked(attacker, target, attacker.team, this.units);
+    let bumpBonus = 0;
+    if (attacker.kind === 'construct') {
+      const dir = this.dirTo(attacker, target);
+      if (dir) {
+        const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
+        const res = forceMove(target, dir, board);
+        if (res.moved) {
+          target.c = res.to.c; target.r = res.to.r;
+          const v = this.views.get(target.id);
+          if (v) {
+            const p = this.tileToScreen(target);
+            v.container.setDepth(10 + target.r);
+            this.tweens.add({ targets: v.container, x: p.x, y: p.y, duration: 140 });
+          }
+        } else if (res.bump) {
+          bumpBonus = 1;
+        }
+      }
+    }
+
+    const result = computeHit({
+      base: attacker.attack + bumpBonus,
+      attackerStatuses: attacker.statuses,
+      targetStatuses: target.statuses,
+      flank, overglow: false, weld: false,
+    });
+    target.statuses = result.targetStatuses;
+    if (attacker.kind === 'wraith' && result.hpDamage > 0) {
+      target.statuses = applyStatus(target, 'dimmed', 1);
+    }
+    if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, P.berry);
+    if (bumpBonus > 0) this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
+    this.hud.showBanner(`${attacker.name} strikes ${target.name} (−${result.hpDamage}).`, P.berry);
   }
 
   /**
@@ -984,7 +1231,9 @@ export class CombatScene extends Phaser.Scene {
     }
     this.floatText(unit, `−${amount}`, color);
     this.cameras.main.shake(90, Math.min(0.009, 0.003 + amount * 0.001));
-    if (unit.hp <= 0) { unit.alive = false; this.fadeDead(unit); }
+    // trap 11 — clear statuses on death (kindled ticks can kill); the danger-pulse aura is
+    // already retired by updateDanger below since u.alive gates it.
+    if (unit.hp <= 0) { unit.alive = false; unit.statuses = []; this.fadeDead(unit); }
     this.drawHpBar(unit);
   }
 
@@ -1087,10 +1336,30 @@ export class CombatScene extends Phaser.Scene {
       }
     });
 
+    // §12.3 — hovering ANY unit (either team, any time) with active statuses shows a one-line
+    // banner ("Bound 1 · Inked 2"). A separate listener from the move/target one above (which
+    // early-returns outside the active party unit's own turn) so this works regardless of
+    // whose turn it is; debounced on the hovered unit id so it doesn't retrigger every pixel.
+    this.input.on(Phaser.Input.Events.POINTER_MOVE, (pt: Phaser.Input.Pointer) => {
+      const tile = this.screenToTile(pt.x, pt.y);
+      const unit = tile ? this.unitAt(tile) : undefined;
+      const id = unit && unit.statuses.length ? unit.id : null;
+      if (id === this.hoveredStatusUnitId) return;
+      this.hoveredStatusUnitId = id;
+      if (unit && id) {
+        const line = unit.statuses
+          .map((s) => `${STATUS_DEFS[s.id].label} ${s.id === 'warded' ? s.magnitude : s.turnsLeft}`)
+          .join(' · ');
+        this.hud.showBanner(`${unit.name} — ${line}`, STATUS_DEFS[unit.statuses[0].id].tint);
+      }
+    });
+
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
       const unit = this.unitById(this.activeId);
       if (!unit || unit.team !== 'party') return;
       if (e.key === 'Escape' && this.state === 'playerTarget') { this.cancelTargeting(unit); return; }
+      if (e.key === 'e' && this.state === 'playerMove') { this.tryLightBrazier(unit); return; }
+      if (e.key === 'c' && this.state === 'playerMove' && !this.moved) { this.toggleCarefulStep(unit); return; }
       if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
       const action = (Object.keys(ACTIONS) as ActionKind[]).find((a) => ACTIONS[a].hotkey === e.key);
       if (action) this.onPickAction(unit, action);
@@ -1192,6 +1461,11 @@ export class CombatScene extends Phaser.Scene {
     return this.units.find((u) => u.alive && u.team === 'enemy' && u.c === co.c && u.r === co.r) ?? null;
   }
 
+  /** Any LIVING unit (either team) standing on a tile — used by the status hover-line. */
+  private unitAt(co: Coord): UnitState | undefined {
+    return this.units.find((u) => u.alive && u.c === co.c && u.r === co.r);
+  }
+
   private tileTypeOf(co: Coord) {
     return this.layout.tiles[co.r]?.[co.c];
   }
@@ -1224,15 +1498,60 @@ export class CombatScene extends Phaser.Scene {
   }
 
   combatSnapshot(): {
-    state: string; activeTeam: string | null; enemyHp: number; partyHp: number;
+    state: string; activeTeam: string | null; activeId: string; enemyHp: number; partyHp: number;
     log: Array<{ action: string; dmg: number; overlay: boolean }>;
   } {
     return {
       state: this.state,
       activeTeam: this.unitById(this.activeId)?.team ?? null,
+      activeId: this.activeId,
       enemyHp: this.enemyHpSum(),
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
     };
+  }
+
+  /** Debug: full per-unit snapshot (position, hp, attack, statuses) — e2e-only. Lets Phase 1's
+   *  board mechanics (Bound-blocks-move, no-permanent-attack-drift, computeHit modifiers) be
+   *  asserted directly without needing Phase 2's spellcasting UI to reach them. */
+  unitDebug(id: string): {
+    c: number; r: number; alive: boolean; hp: number; maxHp: number; attack: number;
+    statuses: Array<{ id: string; turnsLeft: number; magnitude: number }>;
+  } | null {
+    const u = this.unitById(id);
+    if (!u) return null;
+    return {
+      c: u.c, r: u.r, alive: u.alive, hp: u.hp, maxHp: u.maxHp, attack: u.attack,
+      statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
+    };
+  }
+
+  /** Debug: apply a status directly, bypassing spellcasting (e2e-only — Phase 2 wires real
+   *  casts; this exercises Phase 1's board mechanics, e.g. Bound blocking a move, without it). */
+  debugApplyStatus(id: string, statusId: StatusId, turns: number, magnitude = 1): void {
+    const u = this.unitById(id);
+    if (!u) return;
+    u.statuses = applyStatus(u, statusId, turns, magnitude);
+    this.drawHpBar(u);
+  }
+
+  /** Debug: teleport a living unit (e2e-only test setup — e.g. arranging a wall-adjacent
+   *  position to test forced-movement bump deterministically, the same spirit as other combat
+   *  e2e specs seeding save/inventory state directly rather than fighting to a precondition). */
+  debugSetPos(id: string, c: number, r: number): void {
+    const u = this.unitById(id);
+    if (!u || !u.alive) return;
+    u.c = c; u.r = r;
+    const v = this.views.get(id);
+    if (v) {
+      const p = this.tileToScreen(u);
+      v.container.setPosition(p.x, p.y).setDepth(10 + r);
+    }
+  }
+
+  /** Debug: current layout — tiles grid + brazier/mist coords (e2e-only; screenshots and the
+   *  brazier-interact / mist-lane assertions need to locate these without guessing seeds). */
+  layoutDebug(): { tiles: TileType[][]; braziers: Coord[]; mist: Coord[] } {
+    return { tiles: this.layout.tiles, braziers: this.layout.braziers, mist: this.layout.mist };
   }
 }
