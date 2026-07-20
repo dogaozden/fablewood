@@ -5,6 +5,7 @@ import {
   blocksSight, forceMove, type TileGrid, type ForceMoveBoard,
 } from '../grid';
 import { resolveAction, isFlanked } from '../damage';
+import { SPELLBOOK, resolveSpell } from '../spells';
 import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from '../boss';
 import { decideEnemy, occupancyExcept, opportunityStrikers, carefulStepMove } from '../ai';
 import { makeKeeper, makeMira, makeEnemy, ENEMY_STATS } from '../units';
@@ -482,6 +483,60 @@ describe('unit factories — Phase 1 stat/field changes', () => {
       expect(u.statuses).toEqual([]);
       expect(u.oaSpent).toBe(false);
       expect(u.uniqueSpent).toBe(false);
+    }
+  });
+});
+
+describe('adapter equivalence — resolveAction over resolveSpell (Phase 2 §2)', () => {
+  const T1 = [
+    ['smite', 'smite'],
+    ['weave', 'weave'],
+    ['sequence', 'sequence'],
+    ['cast', 'cast'],
+  ] as const;
+
+  it('resolveAction reproduces the SPELLBOOK numbers exactly for the four damage-bearing T1 spells × 3 qualities', () => {
+    for (const [action, id] of T1) {
+      for (const quality of [1, 0.5, 0] as const) {
+        const slot = quality === 1 ? 'q1' : quality === 0.5 ? 'q05' : 'q0';
+        const effect = SPELLBOOK[id].effects[slot];
+        const outcome = resolveAction(action, quality);
+        expect(outcome.hits, `${action} q${quality} hits`).toBe(effect.hits);
+        expect(outcome.lineDepth, `${action} q${quality} lineDepth`).toBe(effect.lineDepth);
+        expect(outcome.fade, `${action} q${quality} fade`).toBe(effect.fade);
+      }
+    }
+  });
+
+  it('resolveAction and a direct resolveSpell call agree on the primary-hit AMOUNT (same computeHit pipeline, no live statuses)', () => {
+    for (const [action, id] of T1) {
+      for (const quality of [1, 0.5, 0] as const) {
+        const outcome = resolveAction(action, quality);
+        const ops = resolveSpell(SPELLBOOK[id], quality, { primaryTargetId: 't' });
+        const dmg = ops.find((o) => o.op === 'damage' && o.targetId === 't');
+        expect(outcome.hits).toBe(dmg ? (dmg as { amount: number }).amount : 0);
+      }
+    }
+  });
+
+  it("Mira's bonus folds identically through the adapter as it did before (landed hit only, never a whiff)", () => {
+    expect(resolveAction('smite', 1, { miraBonus: 1 }).hits).toBe(4);
+    expect(resolveAction('smite', 0, { miraBonus: 1 }).hits).toBe(0);
+    expect(resolveAction('sequence', 1, { miraBonus: 1 }).hits).toBe(3);
+  });
+
+  it("Cast's extraShield still derives from vsBoss+quality (now via SpellDef.bossRider, same shipped result)", () => {
+    expect(resolveAction('cast', 1, { vsBoss: true }).extraShield).toBe(1);
+    expect(resolveAction('cast', 0.5, { vsBoss: true }).extraShield).toBe(0);
+    expect(resolveAction('cast', 1, { vsBoss: false }).extraShield).toBe(0);
+  });
+
+  it('Parley: branchTag still drives the outcome regardless of the passed quality argument (legacy quirk preserved)', () => {
+    for (const [branchTag, slot] of [['good', 'q1'], ['bad', 'q0'], ['neutral', 'q05']] as const) {
+      const effect = SPELLBOOK.parley.effects[slot];
+      const outcome = resolveAction('parley', 1, { branchTag });
+      expect(outcome.weaken).toBe(effect.weaken === true);
+      expect(outcome.partyHit).toBe(effect.partyHit);
     }
   });
 });

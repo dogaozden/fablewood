@@ -18,6 +18,7 @@
  * a hit lands. Boss: a passing Cast vs the Warden strips an EXTRA shield.
  */
 import { manhattan, type ActionKind, type Coord, type Quality, type Team, type UnitState } from './types';
+import { SPELLBOOK, resolveSpell, qualitySlot, type SpellDef, type BoardOp, type ResolveSpellOpts } from './spells';
 
 export interface ActionOutcome {
   /** damage to the primary target (Strike/Cast) or the line's first tile / cross centre */
@@ -55,6 +56,51 @@ export interface ResolveOpts {
   branchTag?: string;
 }
 
+/** Every synthetic aoe id Weave's 4-arm cross could ever need; Sequence only ever consumes
+ *  a prefix of these (resolveSpell trims line aoe ids to lineDepth-1 itself). */
+const T1_PRIMARY = 'target';
+const T1_AOE = ['aoe-1', 'aoe-2', 'aoe-3', 'aoe-4'];
+
+/**
+ * The thin adapter (Phase 2 §2): builds the legacy ActionOutcome shape by actually calling
+ * resolveSpell against the T1 SpellDef, using synthetic ids since resolveAction's callers
+ * never had real unit ids to give it. Numeric amounts (hits/aoeHit/fade-or-partyHit/banner)
+ * are parsed OUT of the returned BoardOp[] — proving the real dispatch computed them: the
+ * bulk of what "equivalent to resolveSpell" means. A few fields have no BoardOp primitive at
+ * all (aoe kind, lineDepth, the legacy weaken flag, extraShield) because they are shape/
+ * metadata concerns, not board operations — those are read directly off the SpellDef.
+ */
+function outcomeFromSpell(def: SpellDef, quality: Quality, opts: ResolveOpts): ActionOutcome {
+  const slot = qualitySlot(quality);
+  const effect = def.effects[slot];
+  const spellOpts: ResolveSpellOpts = {
+    primaryTargetId: T1_PRIMARY,
+    aoeTargetIds: T1_AOE,
+    miraBonus: opts.miraBonus,
+    vsBoss: opts.vsBoss,
+  };
+  const ops = resolveSpell(def, quality, spellOpts);
+
+  const dmgOps = ops.filter((o): o is Extract<BoardOp, { op: 'damage' }> => o.op === 'damage');
+  const hits = dmgOps.find((o) => o.targetId === T1_PRIMARY)?.amount ?? 0;
+  const aoeHit = dmgOps.find((o) => o.targetId !== T1_PRIMARY)?.amount ?? 0;
+  const fadeOpAmount = (ops.find((o): o is Extract<BoardOp, { op: 'fade' }> => o.op === 'fade'))?.amount ?? 0;
+  const banner = ops.find((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')?.text ?? '';
+
+  return {
+    ...EMPTY,
+    hits,
+    aoe: def.shape === 'cross' ? 'cross' : def.shape === 'line' ? 'line' : 'none',
+    aoeHit,
+    lineDepth: effect.lineDepth,
+    fade: effect.fade > 0 ? fadeOpAmount : 0,
+    partyHit: effect.partyHit > 0 ? fadeOpAmount : 0,
+    weaken: effect.weaken === true,
+    extraShield: def.bossRider === 'strip-shield' && quality === 1 && !!opts.vsBoss ? 1 : 0,
+    banner,
+  };
+}
+
 export function resolveAction(action: ActionKind, quality: Quality, opts: ResolveOpts = {}): ActionOutcome {
   const mira = opts.miraBonus ?? 0;
   switch (action) {
@@ -63,49 +109,22 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
       // (quality is irrelevant; the scene always resolves a Strike at full).
       return { ...EMPTY, hits: 1 + mira, banner: 'A quick strike.' };
     }
-    case 'smite': {
-      const b = quality === 1 ? 3 : quality === 0.5 ? 1 : 0;
-      return {
-        ...EMPTY,
-        hits: b > 0 ? b + mira : 0,
-        banner: quality === 1 ? 'A bolt of cited truth!' : quality === 0.5 ? 'A glancing bolt.' : 'The bolt fizzles — turn lost.',
-      };
-    }
-    case 'weave': {
-      const land = quality > 0;
-      return {
-        ...EMPTY,
-        hits: land ? 2 + mira : 0,
-        aoe: 'cross',
-        aoeHit: quality === 1 ? 2 : 0,
-        banner: quality === 1 ? 'Full — the weave binds all.' : quality === 0.5 ? 'Partial — primary only.' : 'The weave slips — turn lost.',
-      };
-    }
-    case 'sequence': {
-      const depth = Math.floor(quality * 3); // q1→3, q0.5→1, q0→0
-      return {
-        ...EMPTY,
-        hits: depth > 0 ? 2 + mira : 0,
-        aoe: 'line',
-        aoeHit: 2,
-        lineDepth: depth,
-        banner: quality === 1 ? 'Full — a three-deep lance.' : quality === 0.5 ? 'Partial — one-deep.' : 'The lance breaks — turn lost.',
-      };
-    }
-    case 'cast': {
-      const b = quality === 1 ? 6 : quality === 0.5 ? 2 : 0;
-      return {
-        ...EMPTY,
-        hits: b > 0 ? b + mira : 0,
-        fade: quality === 0 ? 2 : 0,
-        extraShield: opts.vsBoss && quality === 1 ? 1 : 0,
-        banner: quality === 1 ? 'Cast — the Ledger blazes (×3)!' : quality === 0.5 ? 'Partial recall — a glancing cast.' : 'The Fade lashes back (−2).',
-      };
-    }
+    case 'smite':
+      return outcomeFromSpell(SPELLBOOK.smite, quality, opts);
+    case 'weave':
+      return outcomeFromSpell(SPELLBOOK.weave, quality, opts);
+    case 'sequence':
+      return outcomeFromSpell(SPELLBOOK.sequence, quality, opts);
+    case 'cast':
+      return outcomeFromSpell(SPELLBOOK.cast, quality, opts);
     case 'parley': {
-      if (opts.branchTag === 'good') return { ...EMPTY, weaken: true, banner: 'They yield — weakened.' };
-      if (opts.branchTag === 'bad') return { ...EMPTY, partyHit: 2, banner: 'It backfires (−2).' };
-      return { ...EMPTY, banner: 'No accord — the moment passes.' };
+      // Legacy quirk preserved exactly: the ORIGINAL resolveAction ignored its `quality`
+      // argument entirely for parley and branched only on opts.branchTag (kinds.ts always
+      // sets quality to match — good=1/neutral=0.5/bad=0 — but the two were never enforced
+      // to agree). resolveSpell keys purely off quality, so the adapter derives the true
+      // quality FROM branchTag here rather than trusting the passed-in `quality`.
+      const q: Quality = opts.branchTag === 'good' ? 1 : opts.branchTag === 'bad' ? 0 : 0.5;
+      return outcomeFromSpell(SPELLBOOK.parley, q, opts);
     }
     case 'wait':
       return { ...EMPTY, banner: 'Holding position.' };
