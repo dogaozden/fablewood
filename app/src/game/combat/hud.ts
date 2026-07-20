@@ -199,8 +199,8 @@ export class CombatHud {
     const lines: string[] = ['THE RETINUE'];
     if (keeper) lines.push(`Keeper  ${bar(keeper)} ${keeper.hp}/${keeper.maxHp}`);
     if (mira) lines.push(`Mira    ${bar(mira)} ${mira.hp}/${mira.maxHp}`);
-    lines.push(status.miraBonusActive ? 'Mira: ATK +1 (mastery)' : 'Mira: no bonus yet');
-    lines.push(`Streak: ${status.streak}`);
+    lines.push(status.miraBonusActive ? 'Mira: fighting fiercer (mastery)' : 'Mira: no bonus yet');
+    lines.push(`Hearth: ${status.streak}`);
     lines.push(`Lantern grace: ${status.graceAvailable ? 'ready' : 'spent'}`);
     this.panelText.setText(lines.join('\n'));
 
@@ -212,9 +212,15 @@ export class CombatHud {
     this.graceDot.setFillStyle(status.graceAvailable ? P.lanternGold : P.stoneGrey)
       .setPosition(160, 10 + (lines.length - 0.5) * lh);
     if (this.streakIcon) {
-      const si = lines.findIndex((l) => l.startsWith('Streak'));
+      const si = lines.findIndex((l) => l.startsWith('Hearth'));
       this.streakIcon.setVisible(status.streak > 0).setPosition(88, 10 + (si + 0.5) * lh);
     }
+  }
+
+  /** Debug: the party panel's current raw text (e2e-only — verifies the sidebar reflects
+   *  live hp rather than a stale snapshot, e.g. crucible #10's enemy-turn refresh gap). */
+  partyPanelText(): string {
+    return this.panelText.text;
   }
 }
 

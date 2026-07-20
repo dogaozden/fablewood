@@ -15,7 +15,8 @@ import {
   services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
 } from '../contracts';
 import type { Pack } from '../../packs/types';
-import { getPacks } from '../../bridge/client';
+import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
+import { candidateDungeonFiles, isDungeonSpec } from '../scenes/dungeon/specResolve';
 import {
   GRID_W, GRID_H, CELL, ACTIONS, key, manhattan, type ActionKind, type UnitState, type Coord, type Dir,
   type TileType,
@@ -32,7 +33,7 @@ import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
 import { CombatHud } from './hud';
-import { fixtureLaunch, FIXTURE_FACTS } from './fixtures';
+import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
@@ -52,6 +53,20 @@ interface UnitView {
   pulse?: Phaser.Tweens.Tween;
   /** §12.3 — status chip row under the HP bar; destroyed + recreated each drawHpBar call */
   chips: (Phaser.GameObjects.Image | Phaser.GameObjects.Text)[];
+}
+
+/**
+ * Split the saved pooled HP (0-16) proportionally onto Keeper (max 10) / Mira (max 6).
+ * Keeper's share rounds UP; Mira's is the exact remainder — this guarantees
+ * `keeper + mira === pool` for every integer pool in [0,16]. (crucible #9: the previous
+ * formula clamped each unit's share to a per-unit `Math.max(1, …)` floor independently,
+ * which over-credited +1 total whenever the saved pool was exactly 1 or 2 — both units
+ * got bumped to a minimum of 1 even though only one HP existed to share between them.)
+ */
+export function splitPooledHp(pool: number): { keeper: number; mira: number } {
+  const clamped = Math.max(0, Math.min(16, pool));
+  const keeper = Math.min(10, Math.ceil((clamped * 10) / 16));
+  return { keeper, mira: clamped - keeper };
 }
 
 export class CombatScene extends Phaser.Scene {
@@ -280,19 +295,19 @@ export class CombatScene extends Phaser.Scene {
   private applyPoolHp(): void {
     let pool = 16;
     try { pool = services.save.get()?.hp ?? 16; } catch { /* offline → full */ }
-    pool = Math.max(0, Math.min(16, pool));
+    const { keeper: keeperShare, mira: miraShare } = splitPooledHp(pool);
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
     if (keeper) {
       const wasDead = !keeper.alive;
-      keeper.hp = pool > 0 ? Math.max(1, Math.min(10, Math.ceil((pool * 10) / 16))) : 0;
+      keeper.hp = keeperShare;
       keeper.alive = keeper.hp > 0;
       if (wasDead && keeper.alive) this.reviveView(keeper);
       this.drawHpBar(keeper);
     }
     if (mira) {
       const wasDead = !mira.alive;
-      mira.hp = pool > 0 ? Math.max(1, Math.min(6, Math.floor((pool * 6) / 16))) : 0;
+      mira.hp = miraShare;
       mira.alive = mira.hp > 0;
       if (wasDead && mira.alive) this.reviveView(mira);
       this.drawHpBar(mira);
@@ -451,9 +466,44 @@ export class CombatScene extends Phaser.Scene {
             this.tagToIds.set(t, arr);
           }
         }
+      } else if (this.launch.packId === FIXTURE_PACK_ID && this.launch.room.boss && packs.length) {
+        // crucible #11 — the standalone dev/e2e boss fixture forces a packId/phase ids
+        // ('dev-boss-phase-N') that exist in no installed pack, so encounters/engine.ts's
+        // pick() silently fell back to the same generic candidate for every phase (its own
+        // packId lookup misses too, defaults to packs[0], the forced encounterId misses,
+        // the factIds miss — landing on candidates[0] regardless of which phase asked).
+        // When a real pack IS installed, route this fixture's boss through THAT pack's own
+        // authored phases (packId + branchEncounterId together, so pick()'s forced-id match
+        // resolves exactly) — the regular trash-mob enemies stay fantasy-generic either way,
+        // only the boss's phases (and the packId used to resolve them) are swapped in.
+        await this.routeFixtureBossToInstalledPack(packs);
       }
     } catch { /* static build has no bridge */ }
     if (this.allFactIds.size === 0) for (const id of FIXTURE_FACTS) this.allFactIds.add(id);
+  }
+
+  /** crucible #11 — see loadContent's call site. Best-effort: tries every installed pack's
+   *  own dungeon spec for a room with a boss; any failure just leaves the fixture's
+   *  placeholder phases in place (today's pre-fix, packless-dev-safe behavior). */
+  private async routeFixtureBossToInstalledPack(packs: PackEntry[]): Promise<void> {
+    for (const entry of packs) {
+      const pack = entry.pack as Pack;
+      for (const file of candidateDungeonFiles(pack)) {
+        const res = await getPackAsset(entry.id, file);
+        if (!res) continue;
+        const json = await res.json().catch(() => null);
+        if (!isDungeonSpec(json)) continue;
+        const bossRoom = json.rooms.find((r) => r.boss);
+        if (bossRoom?.boss) {
+          this.launch = {
+            ...this.launch,
+            packId: entry.id,
+            room: { ...this.launch.room, boss: { ...this.launch.room.boss!, phases: bossRoom.boss.phases } },
+          };
+          return;
+        }
+      }
+    }
   }
 
   // ---- turn loop --------------------------------------------------------
@@ -953,6 +1003,14 @@ export class CombatScene extends Phaser.Scene {
     }
 
     try { await services.save.save({ hp: livePool }); } catch { /* offline */ }
+    // crucible #3 — the write above re-anchors save.hp to the CURRENT live pool (this
+    // instant, before or after the heal amount itself lands makes no difference: nothing
+    // else touches the pool in between). hpLost is a running total since battle start, so
+    // without this reset, DungeonScene's end-of-battle applyHp(-hpLost) would subtract the
+    // pre-heal damage a SECOND time from a base that already reflects it having happened —
+    // resetting here makes hpLost count only damage since THIS sync, whichever way the
+    // useItem call below resolves (this write already landed either way).
+    this.hpLost = 0;
     let res: UseResult;
     try { res = await services.inventory.useItem(id); }
     catch { res = { ok: false, message: 'The satchel would not open.' }; }
@@ -1235,6 +1293,11 @@ export class CombatScene extends Phaser.Scene {
     // already retired by updateDanger below since u.alive gates it.
     if (unit.hp <= 0) { unit.alive = false; unit.statuses = []; this.fadeDead(unit); }
     this.drawHpBar(unit);
+    // crucible #10 — damageUnit is the ONE choke point every hp change funnels through
+    // (enemy strikes, opportunity strikes, status ticks, self-chip); refreshParty here
+    // (rather than only at scattered call sites) keeps the sidebar honest through the
+    // enemy's own turn too, so a fainted ally can never still read "healthy" on it.
+    if (unit.team === 'party') this.refreshParty();
   }
 
   private damageParty(amount: number, prefer?: UnitState): void {
@@ -1250,6 +1313,13 @@ export class CombatScene extends Phaser.Scene {
     if (this.destroyed) return;
     const v = this.views.get(unit.id);
     if (!v) return;
+    // crucible #16 — a corpse's depth otherwise freezes at its death row (10 + r, same
+    // scheme living units use), so a later-arriving living unit on the same row ties and
+    // can lose the draw order to the corpse (fadeDead never runs again for this unit, so
+    // whatever depth it gets here is permanent). `r + 6` stays under every same-row living
+    // unit's `10 + r` (6 < 10, for any r) while staying above tiles/rangeGfx/hoverGfx
+    // (depths 0/4/5) so the corpse never vanishes under the floor or a move highlight.
+    v.container.setDepth(unit.r + 6);
     this.tweens.add({ targets: v.container, alpha: 0.18, scaleX: 0.8, scaleY: 0.8, angle: unit.team === 'enemy' ? 12 : -8, duration: 340 });
     this.hud.setActive(this.activeId, this.aliveIds());
   }
@@ -1305,7 +1375,10 @@ export class CombatScene extends Phaser.Scene {
       if (!unit || unit.team !== 'party') return;
       const tile = this.screenToTile(pt.x, pt.y);
       if (!tile) return;
-      if (this.state === 'playerMove' && !this.moved && this.reachable.has(key(tile.c, tile.r))) {
+      // crucible #13 — right-click must be inert during movement (it already is during
+      // targeting, one branch down: it cancels there). Without this guard any pointer
+      // button on a reachable tile spent the turn's move, same as a deliberate left-click.
+      if (this.state === 'playerMove' && !this.moved && !pt.rightButtonDown() && this.reachable.has(key(tile.c, tile.r))) {
         this.movePlayerTo(unit, tile);
       } else if (this.state === 'playerTarget' && this.pendingAction) {
         if (pt.rightButtonDown()) { this.cancelTargeting(unit); return; }
@@ -1410,8 +1483,16 @@ export class CombatScene extends Phaser.Scene {
 
     if (outcome === 'victory') {
       this.hud.showToast('The vault opens — Victory!', P.lanternGold);
-      this.hud.showBanner('Loot secured. Streak climbs.', P.moss);
-      void this.bumpStreak();
+      this.hud.showBanner('Loot secured. Hearth streak climbs.', P.moss);
+      // crucible #5 — the streak bump used to persist here immediately (fire-and-forget,
+      // independent of hp/loot), while hp/loot only ever settle later when the return
+      // scene resumes and recovers the pending outcome (game-event + registry PENDING_KEY
+      // — the combatOutcome handed to scene.start below is a decoy nothing reads: init()
+      // only destructures seed/packId). A hard reload in the 1600ms gap below kept the
+      // early streak write but lost the never-reached settlement — free, no-risk progress.
+      // The streak bump now travels through that SAME pending-outcome channel (see
+      // DungeonScene.resolveCombat) so a reload here loses (or keeps) all three — streak,
+      // loot, hp — together, never just one.
       this.cameras.main.flash(280, 247, 206, 107);
     } else {
       this.hud.showToast('The Fade closes in…', P.duskRose);
@@ -1429,14 +1510,6 @@ export class CombatScene extends Phaser.Scene {
       const back = this.launch.returnScene;
       if (back && this.scene.get(back)) this.scene.start(back, { seed: this.launch.seed, combatOutcome: payload });
     });
-  }
-
-  private async bumpStreak(): Promise<void> {
-    try {
-      const cur = services.save.get();
-      await services.save.save({ streak: (cur?.streak ?? 0) + 1 });
-      this.refreshParty();
-    } catch { /* no save bridge offline */ }
   }
 
   // ---- small helpers ----------------------------------------------------
@@ -1497,6 +1570,19 @@ export class CombatScene extends Phaser.Scene {
     return this.bossReveal !== null;
   }
 
+  /** Debug: the HUD's party-panel raw text (e2e-only — crucible #10: proves the sidebar
+   *  reflects live hp rather than a stale pre-damage snapshot). */
+  hudPartyText(): string {
+    return this.hud.partyPanelText();
+  }
+
+  /** Debug: the encounterId the most recently resolved encounter answered against
+   *  (e2e-only — crucible #11: proves a boss phase resolved the pack's own authored
+   *  encounter rather than encounters/engine.ts's generic candidates[0] fallback). */
+  lastEncounterId(): string | null {
+    return this.results.length ? this.results[this.results.length - 1].encounterId : null;
+  }
+
   combatSnapshot(): {
     state: string; activeTeam: string | null; activeId: string; enemyHp: number; partyHp: number;
     log: Array<{ action: string; dmg: number; overlay: boolean }>;
@@ -1516,12 +1602,16 @@ export class CombatScene extends Phaser.Scene {
    *  asserted directly without needing Phase 2's spellcasting UI to reach them. */
   unitDebug(id: string): {
     c: number; r: number; alive: boolean; hp: number; maxHp: number; attack: number;
+    /** the unit view container's current render depth (e2e-only — crucible #16: proves a
+     *  corpse's frozen depth always stays below a same-row living unit's). */
+    depth: number;
     statuses: Array<{ id: string; turnsLeft: number; magnitude: number }>;
   } | null {
     const u = this.unitById(id);
     if (!u) return null;
     return {
       c: u.c, r: u.r, alive: u.alive, hp: u.hp, maxHp: u.maxHp, attack: u.attack,
+      depth: this.views.get(id)?.container.depth ?? 0,
       statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
     };
   }

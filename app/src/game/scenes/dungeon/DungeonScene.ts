@@ -176,7 +176,7 @@ export class DungeonScene extends Phaser.Scene {
     }
     if (!spec) {
       throw new Error(
-        `no dungeon spec found in pack "${this.packId}" (looked for ${files.join(', ')})`,
+        `The archive holds no charted map for "${this.packId}" — its vaults remain unmarked.`,
       );
     }
     this.spec = spec;
@@ -268,6 +268,21 @@ export class DungeonScene extends Phaser.Scene {
   private async enterRoom(index: number, opts: { mode?: 'card' | 'drive' } = {}): Promise<void> {
     if (this.busy) return;
     this.busy = true;
+
+    // crucible #7 — re-entering a room (and thus combat) at 0 pooled HP used to skip the
+    // turn engine straight into an unwinnable instant defeat (checkEnd sees no living party
+    // unit before the player can ever act). The dungeon already treats 0 HP as "the Fade
+    // closes in" everywhere else it can happen mid-crawl (runGate's HP-exhausted branch,
+    // resolveCombat's retreat branch below) — refusing to launch at all is the least-
+    // surprising fit for that established rule, rather than inventing a never-seen
+    // "clamp to a minimum viable spawn" behavior inside combat.
+    if (services.save.get().hp <= 0) {
+      this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
+      await this.wait(1000);
+      this.scene.start('hamlet', { seed: this.seed });
+      return;
+    }
+
     const room = this.spec.rooms[index];
     const facts = this.teachingFacts(room);
 
@@ -352,7 +367,14 @@ export class DungeonScene extends Phaser.Scene {
 
     // normal / gate room cleared → mark, persist, unlock next, loot (inventory-handoff §4)
     this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
-    await services.save.save({ dungeon: this.progress });
+    // crucible #5 — the hearth streak used to bump independently inside CombatScene the
+    // instant victory was declared (persisted well before this resume-only settlement could
+    // ever run), so a reload in that gap kept the streak but lost this room's progress/loot.
+    // Bumping it HERE instead — in the same save call as dungeon progress, only reachable
+    // once the pending outcome has actually been recovered — means a reload before this
+    // point loses (or a completed run keeps) the streak together with everything else.
+    const streak = services.save.get().streak + 1;
+    await services.save.save({ dungeon: this.progress, streak });
     this.drawMap();
     this.refreshStatus();
     await this.grantRoomLoot(room);
@@ -370,8 +392,8 @@ export class DungeonScene extends Phaser.Scene {
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
     this.view.lootToast(
       trinketName
-        ? `${room.name} falls quiet. +${loot.gold} gold, and a ${trinketName} glints in the dust.`
-        : `${room.name} falls quiet. +${loot.gold} gold.`,
+        ? `${room.name} falls quiet. +${loot.gold} coin, and a ${trinketName} glints in the dust.`
+        : `${room.name} falls quiet. +${loot.gold} coin.`,
     );
   }
 
@@ -396,7 +418,7 @@ export class DungeonScene extends Phaser.Scene {
       }
       await this.applyHp(-GATE_FAIL_HP);
       this.refreshStatus();
-      this.view.toast(`The door holds fast. (-${GATE_FAIL_HP})`, 'warn');
+      this.view.toast(`The door holds fast. (-${GATE_FAIL_HP} HP)`, 'warn');
       if (services.save.get().hp <= 0) {
         this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
         await this.wait(1000);
@@ -422,8 +444,8 @@ export class DungeonScene extends Phaser.Scene {
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
     const lootLine = trinketName
-      ? ` The Warden yields ${loot.gold} gold, their signet, and a ${trinketName}.`
-      : ` The Warden yields ${loot.gold} gold and their signet.`;
+      ? ` The Warden yields ${loot.gold} coin, their signet, and a ${trinketName}.`
+      : ` The Warden yields ${loot.gold} coin and their signet.`;
 
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
     await this.view.vaultOpensBeat(reward + lootLine, streak);
