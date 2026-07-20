@@ -1,11 +1,21 @@
 import type { PackEntry, PacksResponse } from './types';
+import {
+  isTauri,
+  nativeGetPacks,
+  nativeGetPackAsset,
+  nativeGetState,
+  nativePutState,
+} from './native';
 
 export type { PackEntry, PacksResponse };
 
 // All calls degrade gracefully: in a static build (no dev bridge) the fetches fail
 // and we return empty/absent data so the engine still renders.
+// Under the Tauri desktop shell the same calls route to Rust commands instead
+// (./native.ts) — selected per call, so web dev mode is untouched.
 
 export async function getPacks(): Promise<PacksResponse> {
+  if (isTauri()) return nativeGetPacks();
   try {
     const res = await fetch('/api/packs');
     if (!res.ok) return { packs: [] };
@@ -22,6 +32,7 @@ export async function getPacks(): Promise<PacksResponse> {
  * path is rejected. Path segments are individually encoded so subdirs survive.
  */
 export async function getPackAsset(packId: string, relPath: string): Promise<Response | null> {
+  if (isTauri()) return nativeGetPackAsset(packId, relPath);
   try {
     const rel = relPath
       .split('/')
@@ -37,6 +48,7 @@ export async function getPackAsset(packId: string, relPath: string): Promise<Res
 }
 
 export async function getState<T = unknown>(name: string): Promise<T | null> {
+  if (isTauri()) return nativeGetState<T>(name);
   try {
     const res = await fetch(`/api/state/${encodeURIComponent(name)}`);
     if (!res.ok) return null;
@@ -47,6 +59,7 @@ export async function getState<T = unknown>(name: string): Promise<T | null> {
 }
 
 export async function putState(name: string, data: unknown): Promise<boolean> {
+  if (isTauri()) return nativePutState(name, data);
   try {
     const res = await fetch(`/api/state/${encodeURIComponent(name)}`, {
       method: 'PUT',
