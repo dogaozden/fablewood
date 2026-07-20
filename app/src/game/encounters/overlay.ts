@@ -88,6 +88,25 @@ function buildOverlay(): Overlay {
     for (const h of handlers) h(e);
   });
 
+  /**
+   * BUG #12 (crucible sev2): the panel is a programmatic keyboard host (tabIndex=-1,
+   * above) so something inside the overlay always holds focus for the keydown bus above
+   * to receive events. But a stray click on inert content (e.g. kinds.ts's teachBlock)
+   * has no focusable target of its own, so the browser's default click-to-focus
+   * delegates to the nearest focusable ancestor — the panel — stealing focus off
+   * whatever control (typically the Onward/Continue button) held it. Once focus is on
+   * the bare panel, Enter/Space have nothing to activate (a mouse click on the control
+   * itself still works, since that doesn't depend on focus). Suppressing the
+   * mousedown's default for any non-control target keeps focus put, without touching
+   * the click-through behaviour those controls (and drag-to-reorder) still need.
+   */
+  root.addEventListener('mousedown', (e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest('button, input, textarea, select, a[href], [draggable="true"]')) {
+      e.preventDefault();
+    }
+  });
+
   document.body.appendChild(root);
   if (++overlayDepth === 1) quietGameKeyboard(true);
   requestAnimationFrame(() => panel.focus());

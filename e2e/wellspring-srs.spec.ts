@@ -27,7 +27,7 @@ async function answerAnyOverlay(page: Page): Promise<void> {
     await page.locator('.fw-opt').first().click(); // mcq or scenario
   }
   await page.waitForTimeout(300);
-  const cont = page.getByRole('button', { name: 'Continue' });
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
   if (await cont.count()) await cont.click();
   await page.waitForTimeout(250);
 }
