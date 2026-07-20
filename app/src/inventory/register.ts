@@ -10,7 +10,11 @@ import { services } from '../game/contracts';
 import { InventoryStore } from './store';
 import { useItem } from './consume';
 
-const store = new InventoryStore();
+// Exported so shopPane.ts can reach the atomic buy()/sell() (store.ts) directly — those
+// aren't part of the InventoryApi contract surface below (contracts.ts is off-limits to
+// this slice), but they must run against this SAME singleton instance so their writes
+// serialize correctly through its one writeChain (store.ts's mutate()).
+export const store = new InventoryStore();
 
 services.inventory = {
   ready: () => store.ready(),

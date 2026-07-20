@@ -164,6 +164,105 @@ describe('wallet rules — clamped, never negative, spend checks the freshest ba
   });
 });
 
+describe('atomic buy/sell (crucible #6) — gold + item persist in ONE write', () => {
+  it('buy spends gold and grants the item in exactly one persisted write', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready(); // 20 gold, no stacks
+    const putSpy = vi.spyOn(b, 'putState');
+
+    expect(await s.buy('embermend-draught', 12)).toBe(true);
+    expect(putSpy).toHaveBeenCalledTimes(1); // not spendGold() then a separate grant()
+
+    // the single write already carries BOTH changes together — never a gold-only or
+    // item-only intermediate that a reload between two calls could have landed on.
+    const written = putSpy.mock.calls[0][1] as { gold: number; stacks: Record<string, number> };
+    expect(written.gold).toBe(8);
+    expect(written.stacks['embermend-draught']).toBe(1);
+
+    expect(s.getGold()).toBe(8);
+    expect(s.countOf('embermend-draught')).toBe(1);
+    const disk = b.raw('inventory.json') as { gold: number; stacks: Record<string, number> };
+    expect(disk.gold).toBe(8);
+    expect(disk.stacks['embermend-draught']).toBe(1);
+  });
+
+  it('an unaffordable buy writes nothing at all (no gold-spent-but-itemless state)', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready(); // 20 gold
+    const putSpy = vi.spyOn(b, 'putState');
+
+    expect(await s.buy('warden-signet-of-terms', 999)).toBe(false);
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(s.getGold()).toBe(20);
+    expect(s.countOf('warden-signet-of-terms')).toBe(0);
+    expect(b.keys()).toHaveLength(0);
+  });
+
+  it('sell removes the item and credits gold in exactly one persisted write', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', { version: 1, gold: 5, stacks: { 'mossbound-locket': 1 } });
+    const s = new InventoryStore(b);
+    await s.ready();
+    const putSpy = vi.spyOn(b, 'putState');
+
+    expect(await s.sell('mossbound-locket', 7)).toBe(true);
+    expect(putSpy).toHaveBeenCalledTimes(1); // not removeItem() then a separate addGold()
+
+    const written = putSpy.mock.calls[0][1] as { gold: number; stacks: Record<string, number> };
+    expect(written.gold).toBe(12);
+    expect(written.stacks['mossbound-locket']).toBeUndefined(); // last one sold, key dropped
+
+    expect(s.getGold()).toBe(12);
+    expect(s.countOf('mossbound-locket')).toBe(0);
+    const disk = b.raw('inventory.json') as { gold: number; stacks: Record<string, number> };
+    expect(disk.gold).toBe(12);
+    expect(disk.stacks['mossbound-locket']).toBeUndefined();
+  });
+
+  it('selling an item not held writes nothing at all (no gold-credited-but-item-still-gone state)', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready(); // 20 gold, no stacks
+    const putSpy = vi.spyOn(b, 'putState');
+
+    expect(await s.sell('mossbound-locket', 7)).toBe(false);
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(s.getGold()).toBe(20);
+    expect(b.keys()).toHaveLength(0);
+  });
+
+  it('a slow write cannot be observed as a gold-only or item-only partial state (the reload race)', async () => {
+    // Simulates the crucible's exact reload scenario: gold:20, buy a 20g item, and confirm
+    // there is no moment — however long the persist takes — where disk shows gold spent
+    // without the item, or vice versa, because it is ONE write, not two.
+    const b = new FakeBridge();
+    b.seed('inventory.json', { version: 1, gold: 20, stacks: {} });
+    b.writeDelayMs = 20;
+    const s = new InventoryStore(b);
+    await s.ready();
+
+    const buyDone = s.buy('embermend-draught', 20);
+    // Poll disk mid-flight: it must never show a state with gold spent but the item
+    // missing (or the item present but gold unspent) — only the pre-write state, then the
+    // fully-merged post-write state.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 5));
+      const mid = b.raw('inventory.json') as { gold: number; stacks: Record<string, number> } | undefined;
+      if (mid) {
+        const goldSpent = mid.gold === 0;
+        const itemGranted = (mid.stacks['embermend-draught'] ?? 0) > 0;
+        expect(goldSpent).toBe(itemGranted); // both true (post-write) or both false (pre-write) — never split
+      }
+    }
+    expect(await buyDone).toBe(true);
+    const disk = b.raw('inventory.json') as { gold: number; stacks: Record<string, number> };
+    expect(disk.gold).toBe(0);
+    expect(disk.stacks['embermend-draught']).toBe(1);
+  });
+});
+
 describe('corrupt-file recovery — bytes preserved, never silently discarded', () => {
   it('backs up a shape-wrong file to inventory.corrupt-*.json and starts fresh', async () => {
     const b = new FakeBridge();

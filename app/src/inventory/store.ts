@@ -171,6 +171,39 @@ export class InventoryStore {
     });
   }
 
+  /**
+   * Atomic buy (crucible finding #6): deducts gold AND grants the item in the SAME
+   * mutate() call, i.e. one read-merge-write — never spendGold() then a separate grant(),
+   * whose gap a reload could land in and lose the gold without ever granting the item.
+   * false (and no write at all) if the freshest balance can't afford it.
+   */
+  buy(id: string, cost: number, qty = 1): Promise<boolean> {
+    const n = Math.floor(qty);
+    if (n <= 0) return Promise.resolve(false);
+    return this.mutate((cur) => {
+      if (cur.gold < cost) return null;
+      cur.stacks[id] = (cur.stacks[id] ?? 0) + n;
+      return { ...cur, gold: cur.gold - cost };
+    });
+  }
+
+  /**
+   * Atomic sell (crucible finding #6): removes from stacks AND credits gold in the SAME
+   * mutate() call — the sell-side mirror of buy() above. false (and no write at all) if not
+   * enough of the item are held.
+   */
+  sell(id: string, price: number, qty = 1): Promise<boolean> {
+    const n = Math.floor(qty);
+    if (n <= 0) return Promise.resolve(false);
+    return this.mutate((cur) => {
+      const held = cur.stacks[id] ?? 0;
+      if (held < n) return null;
+      if (held === n) delete cur.stacks[id];
+      else cur.stacks[id] = held - n;
+      return { ...cur, gold: cur.gold + price };
+    });
+  }
+
   private warnOnce(): void {
     if (this.warned) return;
     this.warned = true;
