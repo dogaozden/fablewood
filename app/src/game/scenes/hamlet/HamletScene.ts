@@ -360,6 +360,8 @@ export class HamletScene extends Phaser.Scene {
       records: 'records',
       cottage: 'cottage',
       wellspring: 'wellspring',
+      mira: 'factor',
+      factor: 'factor',
     };
     const parkOnly = demo.startsWith('near-');
     const id = alias[parkOnly ? demo.slice(5) : demo];

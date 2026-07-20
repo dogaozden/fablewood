@@ -55,6 +55,16 @@ export class BootScene extends Phaser.Scene {
     this.load.image('char.berry', '/art/berry-portrait.png');
     this.load.image('char.clerk', '/art/clerk-portrait.png');
     this.load.image('char.alder', '/art/alder-portrait.png');
+    // Lane-B 128x128 dialogue/boss portraits (docs/art-reviews/portraits-v1.md, PASSED
+    // iter 2) — distinct from the tiny in-world char.* stills above. Loaded on every
+    // path so DialogueBox (hamlet) and CombatScene's boss reveal (combat) both see them.
+    this.load.image('portrait.berry', '/art/portrait-berry-bramblemaid.png');
+    this.load.image('portrait.clerk', '/art/portrait-laconic-clerk.png');
+    this.load.image('portrait.alder', '/art/portrait-gatewarden-alder.png');
+    this.load.image('portrait.mira', '/art/portrait-mira-the-factor.png');
+    this.load.image('portrait.vault-warden', '/art/portrait-vault-warden.png');
+    // Lane-B combat backdrop for the Preference Vaults (960x540, matches the canvas).
+    this.load.image('backdrop.vaults', '/art/backdrop-preference-vaults.png');
   }
 
   create(): void {

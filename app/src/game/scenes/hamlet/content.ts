@@ -35,7 +35,7 @@ export function berryConv(due: number, streak: number): Conversation {
     pages.push('Kindle a streak out there and watch this old hearth blaze. I do love a good blaze.');
   }
 
-  return { speaker: 'Berry Bramblemaid', pages };
+  return { speaker: 'Berry Bramblemaid', pages, portrait: 'portrait.berry' };
 }
 
 /** The Records Office — the Laconic Clerk. Verdict-brief; SRS made diegetic. */
@@ -52,7 +52,7 @@ export function clerkConv(due: number, lastPlayed: string): Conversation {
   }
 
   pages.push('Renew them, or watch them Fade. Your ledger. Not mine.');
-  return { speaker: 'The Laconic Clerk', pages };
+  return { speaker: 'The Laconic Clerk', pages, portrait: 'portrait.clerk' };
 }
 
 /** The South Gate — Gatewarden Alder. Province select (installed packs). */
@@ -64,6 +64,7 @@ export function alderConv(provinces: Province[]): Conversation {
         'The roads are quiet, Keeper. No province calls for a warden today.',
         'Return when the Ledger has grown, and I will open the gate.',
       ],
+      portrait: 'portrait.alder',
     };
   }
   return {
@@ -76,6 +77,7 @@ export function alderConv(provinces: Province[]): Conversation {
       ...provinces.map((p) => ({ label: p.title, value: p.id })),
       { label: 'Not yet', value: '__cancel__' },
     ],
+    portrait: 'portrait.alder',
   };
 }
 
@@ -83,6 +85,7 @@ export function alderFarewell(): Conversation {
   return {
     speaker: 'Gatewarden Alder',
     pages: ['Then ride well. The Fade fears a Keeper who remembers.'],
+    portrait: 'portrait.alder',
   };
 }
 
@@ -95,6 +98,7 @@ export function factorConv(): Conversation {
       { label: 'Browse wares', value: 'shop' },
       { label: 'Never mind', value: '__cancel__' },
     ],
+    portrait: 'portrait.mira',
   };
 }
 
