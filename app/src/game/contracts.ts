@@ -38,6 +38,13 @@ export type RunEncounter = (req: EncounterRequest) => Promise<EncounterResult>;
 export interface JudgeVerdict {
   verdict: 'pass' | 'partial' | 'fail';
   line: string;
+  /** ms the grading call took (server-measured when the plugin served it; client-
+   *  measured as a fallback for the native/offline-stub paths). Optional: older
+   *  callers that only check verdict/line are unaffected. */
+  latencyMs?: number;
+  /** which layer produced the grade — 'warm' | 'spawn' | 'away' | 'stub-mode' (server
+   *  vite-judge-plugin tiers) or 'native' | 'client-stub' (browser-side fallbacks). */
+  tier?: string;
 }
 export type Judge = (args: { prompt: string; answer: string; rubric: string }) => Promise<JudgeVerdict>;
 
@@ -174,8 +181,8 @@ export interface FactLite {
 
 export interface SettingsApi {
   ready(): Promise<void>;
-  get(): { muted: boolean };
-  set(patch: Partial<{ muted: boolean }>): Promise<void>;
+  get(): { muted: boolean; volume: number };
+  set(patch: Partial<{ muted: boolean; volume: number }>): Promise<void>;
 }
 
 export interface Services {

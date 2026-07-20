@@ -318,3 +318,145 @@
 .box3 { background: var(--lantern); }
 .box4 { background: var(--leaf-hi); }
 .box5 { background: var(--moss); color: var(--parchment); }
+
+/* -------------------------------------------------------- Dashboard additions */
+
+/* Per-domain mastery: one stacked bar per installed pack, segments colored by the
+   same box0-box5 ramp as the Library's badges (one visual language across panes). */
+.dash-domain {
+  margin-bottom: 0.9rem;
+}
+.dash-domain:last-child {
+  margin-bottom: 0;
+}
+.dash-domain-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+.dash-domain-title {
+  color: var(--ink);
+}
+.dash-domain-count {
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.dash-stackbar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(16, 11, 10, 0.6);
+  border: 1px solid var(--border);
+}
+.dash-stackbar > span {
+  display: block;
+  height: 100%;
+}
+
+.dash-forecast {
+  display: flex;
+  gap: 1.3rem;
+  margin: 0.3rem 0 0.1rem;
+}
+.dash-forecast > div {
+  text-align: center;
+}
+.dash-forecast strong {
+  display: block;
+  font-size: 1.9rem;
+  line-height: 1;
+  color: var(--lantern);
+  font-weight: 400;
+}
+.dash-forecast span {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+}
+
+.dash-weak-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.dash-weak-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.dash-weak-statement {
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.dash-invite {
+  text-align: center;
+  padding: 1.7rem 1rem;
+}
+.dash-invite h2 {
+  color: var(--lantern);
+  font-size: 1.3rem;
+  margin: 0 0 0.5rem;
+}
+.dash-invite p {
+  color: var(--parchment);
+  opacity: 0.85;
+  margin: 0;
+  max-width: 46ch;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------------ Settings */
+
+.settings {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex; /* center the panel when it's shorter than the viewport */
+  padding: 2rem 1.6rem 3rem;
+}
+.settings-inner {
+  width: 100%;
+  max-width: 640px;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0.7rem 0 0;
+}
+.settings-label {
+  flex: 0 0 auto;
+  min-width: 6.5rem;
+  color: var(--parchment);
+}
+.settings-row input[type='range'] {
+  flex: 1 1 auto;
+  accent-color: var(--lantern);
+}
+.settings-value {
+  flex: 0 0 auto;
+  min-width: 2.2ch;
+  text-align: right;
+  color: var(--lantern);
+  font-variant-numeric: tabular-nums;
+}
+.settings-mute-btn {
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+}

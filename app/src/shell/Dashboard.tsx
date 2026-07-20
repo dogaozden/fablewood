@@ -1,12 +1,24 @@
 import { useEffect, useState } from 'react';
 import { getPacks, getState } from '../bridge/client';
 import { services } from '../game/contracts';
+import type { SrsState } from '../srs/leitner';
+import {
+  boxDistribution,
+  currentStreak,
+  dueForecast,
+  flattenHistory,
+  passRate,
+  weakestBindings,
+  type BoxCounts,
+  type DueForecast,
+} from './metrics';
 import './shell.css';
 
 /**
  * The Dashboard pane — the hamlet is the dashboard (spec §7). Reads the live
  * Ledger (SRS + save) over the service contract and shows it as warm panels over
- * the hamlet vignette: what's due, the streak, province mastery, last entry.
+ * the hamlet vignette: mastery by province, the due forecast, streak + history,
+ * and the weakest bindings worth a Wellspring visit.
  */
 
 interface Props {
@@ -14,77 +26,121 @@ interface Props {
   onSetOut: () => void;
 }
 
+/** Over how many of the most recent answers the pass rate is computed. */
+const PASS_RATE_WINDOW = 20;
+/** How many weakest-binding facts to show. */
+const WEAKEST_LIMIT = 5;
+
+const BOX_LABELS = ['new', 'fragile', 'learning', 'steady', 'strong', 'mastered'] as const;
+
+interface DomainMastery {
+  packId: string;
+  title: string;
+  totalFacts: number;
+  boxCounts: BoxCounts;
+  welded: number; // facts with box > 0
+}
+
+interface WeakItem {
+  id: string;
+  statement: string;
+  box: number;
+}
+
 interface Metrics {
   hasPack: boolean;
-  provinceTitle: string;
-  dueNow: number;
-  totalFacts: number;
-  welded: number; // facts with box > 0
-  mastery: number; // avg box, 0-5
-  streak: number;
+  domains: DomainMastery[];
+  hasHistory: boolean;
+  forecast: DueForecast;
+  hearthStreak: number; // existing milestone counter (services.save.streak) — unrelated to answerStreak
+  answerStreak: number; // consecutive full-credit answers, from SRS history
+  totalCasts: number;
+  passRate: { rate: number; sample: number };
   lastPlayed: string;
-  nextDueMs?: number; // soonest upcoming review among welded facts
+  weakest: WeakItem[];
 }
 
+interface RawFact {
+  id: string;
+  statement: string;
+}
 interface RawPack {
   meta?: { title?: string };
-  facts?: { id: string }[];
+  facts?: RawFact[];
 }
 
-const safe = <T,>(fn: () => T, fallback: T): T => {
-  try {
-    return fn();
-  } catch {
-    return fallback;
-  }
+const EMPTY_METRICS: Metrics = {
+  hasPack: false,
+  domains: [],
+  hasHistory: false,
+  forecast: { today: 0, tomorrow: 0, week: 0 },
+  hearthStreak: 0,
+  answerStreak: 0,
+  totalCasts: 0,
+  passRate: { rate: 0, sample: 0 },
+  lastPlayed: '',
+  weakest: [],
 };
-
-/** Soonest upcoming review time across the pack's facts (from the persisted Ledger). */
-async function soonestNextDue(factIds: string[]): Promise<number | undefined> {
-  const raw = await getState<{ facts?: Record<string, { next_due?: number }> }>('srs.json');
-  const facts = raw?.facts;
-  if (!facts) return undefined;
-  const now = Date.now();
-  let soonest = Infinity;
-  for (const id of factIds) {
-    const nd = facts[id]?.next_due;
-    if (typeof nd === 'number' && nd > now && nd < soonest) soonest = nd;
-  }
-  return soonest === Infinity ? undefined : soonest;
-}
 
 async function computeMetrics(): Promise<Metrics> {
   await Promise.all([services.srs.ready(), services.save.ready()]).catch(() => {});
-  let streak = 0;
+  let hearthStreak = 0;
   let lastPlayed = '';
   try {
     const s = services.save.get();
-    streak = s.streak;
+    hearthStreak = s.streak;
     lastPlayed = s.lastPlayed;
   } catch {
     /* no save yet */
   }
-  const { packs } = await getPacks();
-  const first = packs[0];
-  if (!first) {
-    return { hasPack: false, provinceTitle: '', dueNow: 0, totalFacts: 0, welded: 0, mastery: 0, streak, lastPlayed };
+
+  const [{ packs }, raw] = await Promise.all([
+    getPacks(),
+    getState<SrsState>('srs.json').catch(() => null),
+  ]);
+  if (packs.length === 0) {
+    return { ...EMPTY_METRICS, hearthStreak, lastPlayed };
   }
-  const pack = first.pack as RawPack;
-  const factIds = (pack.facts ?? []).map((f) => f.id);
-  const dueNow = safe(() => services.srs.dueQueue(first.id, factIds).length, factIds.length);
-  const welded = factIds.filter((id) => safe(() => services.srs.boxOf(id), 0) > 0).length;
-  const mastery = safe(() => services.srs.masteryAvg(factIds), 0);
-  const nextDueMs = await soonestNextDue(factIds).catch(() => undefined);
+
+  const srsFacts = raw?.facts ?? {};
+  const domains: DomainMastery[] = [];
+  const allFactIds: string[] = [];
+  const statementsById = new Map<string, string>();
+
+  for (const p of packs) {
+    const pack = p.pack as RawPack;
+    const factIds = (pack.facts ?? []).map((f) => f.id);
+    for (const f of pack.facts ?? []) statementsById.set(f.id, f.statement);
+    allFactIds.push(...factIds);
+    const boxCounts = boxDistribution(factIds, srsFacts);
+    domains.push({
+      packId: p.id,
+      title: pack.meta?.title ?? p.id,
+      totalFacts: factIds.length,
+      boxCounts,
+      welded: factIds.length - boxCounts[0],
+    });
+  }
+
+  const forecast = dueForecast(allFactIds, srsFacts, Date.now());
+  const history = flattenHistory(srsFacts);
+  const weak = weakestBindings(srsFacts, WEAKEST_LIMIT).map((w) => ({
+    id: w.id,
+    box: w.box,
+    statement: statementsById.get(w.id) ?? w.id,
+  }));
+
   return {
     hasPack: true,
-    provinceTitle: pack.meta?.title ?? first.id,
-    dueNow,
-    totalFacts: factIds.length,
-    welded,
-    mastery,
-    streak,
+    domains,
+    hasHistory: history.length > 0,
+    forecast,
+    hearthStreak,
+    answerStreak: currentStreak(history),
+    totalCasts: history.length,
+    passRate: passRate(history, PASS_RATE_WINDOW),
     lastPlayed,
-    nextDueMs,
+    weakest: weak,
   };
 }
 
@@ -99,12 +155,18 @@ function ago(iso: string): string {
   return `${Math.floor(s / 86400)} days ago`;
 }
 
-function until(ms: number): string {
-  const s = (ms - Date.now()) / 1000;
-  if (s <= 0) return 'now';
-  if (s < 3600) return `in ${Math.max(1, Math.floor(s / 60))} min`;
-  if (s < 86400) return `in ${Math.floor(s / 3600)} h`;
-  return `in ${Math.floor(s / 86400)} days`;
+function BoxStackBar({ counts }: { counts: BoxCounts }) {
+  const total = counts.reduce((a, b) => a + b, 0) || 1;
+  const label = counts.map((c, i) => `${c} ${BOX_LABELS[i]}`).join(', ');
+  return (
+    <div className="dash-stackbar" role="img" aria-label={label}>
+      {counts.map((c, i) =>
+        c > 0 ? (
+          <span key={i} className={`box${i}`} style={{ width: `${(c / total) * 100}%` }} title={`${BOX_LABELS[i]}: ${c}`} />
+        ) : null,
+      )}
+    </div>
+  );
 }
 
 export function Dashboard({ onSetOut }: Props) {
@@ -114,7 +176,7 @@ export function Dashboard({ onSetOut }: Props) {
     let alive = true;
     computeMetrics()
       .then((metrics) => alive && setM(metrics))
-      .catch(() => alive && setM({ hasPack: false, provinceTitle: '', dueNow: 0, totalFacts: 0, welded: 0, mastery: 0, streak: 0, lastPlayed: '' }));
+      .catch(() => alive && setM(EMPTY_METRICS));
     return () => {
       alive = false;
     };
@@ -130,13 +192,14 @@ export function Dashboard({ onSetOut }: Props) {
     );
   }
 
-  const flames = Math.min(m.streak, 5);
-  const dueNote =
-    m.dueNow > 0
-      ? 'the Fade gnaws — renew them'
-      : m.nextDueMs
-        ? `the next fable stirs ${until(m.nextDueMs)}`
+  const forecastNote =
+    m.forecast.today > 0
+      ? `the Ledger stirs — ${m.forecast.today} ${m.forecast.today === 1 ? 'fable calls' : 'fables call'} for renewal today`
+      : m.forecast.tomorrow > 0 || m.forecast.week > 0
+        ? 'the Ledger rests easy today — more waits ahead this week'
         : 'the Ledger rests easy';
+
+  const flames = Math.min(m.hearthStreak, 5);
 
   return (
     <div className="dash">
@@ -145,7 +208,7 @@ export function Dashboard({ onSetOut }: Props) {
           <div>
             <h1 className="dash-title">The Hamlet</h1>
             <p className="dash-sub">
-              {m.hasPack ? `${m.provinceTitle} · your home in the Ledger Realms` : 'your home in the Ledger Realms'}
+              {m.hasPack ? `${m.domains.map((d) => d.title).join(' · ')} · your home in the Ledger Realms` : 'your home in the Ledger Realms'}
             </p>
           </div>
           <button className="dash-setout" onClick={onSetOut}>
@@ -156,51 +219,105 @@ export function Dashboard({ onSetOut }: Props) {
         {!m.hasPack ? (
           <div className="dash-empty">
             <h2>The roads are quiet, Keeper.</h2>
-            <p>No province has been settled yet. Compile a knowledge pack into <code>packs/</code>, and the Ledger will begin to fill.</p>
-            <p>Your hearth still burns {m.streak > 0 ? `${m.streak} nights tall` : 'unkindled'}.</p>
+            <p>
+              No province has been settled yet. Compile a knowledge pack into <code>packs/</code>, and the Ledger will
+              begin to fill.
+            </p>
+            <p>Your hearth still burns {m.hearthStreak > 0 ? `${m.hearthStreak} nights tall` : 'unkindled'}.</p>
           </div>
         ) : (
           <div className="dash-grid">
-            <div className="dash-card">
-              <p className="dash-eyebrow">Due today</p>
-              <div className="dash-stat">
-                {m.dueNow}
-                <span className="unit">{m.dueNow === 1 ? 'fable' : 'fables'}</span>
-              </div>
-              <p className="dash-note">{dueNote}</p>
-            </div>
-
-            <div className="dash-card">
-              <p className="dash-eyebrow">Hearth streak</p>
-              <div className="dash-stat">
-                {m.streak}
-                <span className="unit">{m.streak === 1 ? 'night' : 'nights'}</span>
-              </div>
-              <p className="dash-flames" aria-hidden="true">
-                {flames > 0 ? '🔥'.repeat(flames) : <span className="dim">🕯️</span>}
-              </p>
-            </div>
-
             <div className="dash-card span2">
-              <p className="dash-eyebrow">🛡 Province mastery</p>
-              <div className="dash-bar">
-                <span style={{ width: `${(m.mastery / 5) * 100}%` }} />
-              </div>
-              <div className="dash-stat" style={{ fontSize: '1.5rem' }}>
-                {m.mastery.toFixed(1)}
-                <span className="unit">/ 5</span>
-              </div>
-              <p className="dash-note">
-                the Fablewood remembers <strong>{m.welded}</strong> of <strong>{m.totalFacts}</strong> fables
-              </p>
+              <p className="dash-eyebrow">🛡 Mastery by province</p>
+              {m.domains.map((d) => (
+                <div className="dash-domain" key={d.packId}>
+                  <div className="dash-domain-head">
+                    <span className="dash-domain-title">{d.title}</span>
+                    <span className="dash-domain-count">
+                      {d.welded} / {d.totalFacts} welded
+                    </span>
+                  </div>
+                  <BoxStackBar counts={d.boxCounts} />
+                </div>
+              ))}
             </div>
 
-            <div className="dash-card">
-              <p className="dash-eyebrow">Last Ledger entry</p>
-              <div className="dash-stat" style={{ fontSize: '1.5rem' }}>
-                {ago(m.lastPlayed)}
+            {!m.hasHistory ? (
+              <div className="dash-card span2 dash-invite">
+                <h2>The Ledger is freshly bound, Keeper.</h2>
+                <p>Not a single fable has been cast yet. Seek the Wellspring, and the record will begin.</p>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="dash-card">
+                  <p className="dash-eyebrow">Due forecast</p>
+                  <div className="dash-forecast">
+                    <div>
+                      <strong>{m.forecast.today}</strong>
+                      <span>today</span>
+                    </div>
+                    <div>
+                      <strong>{m.forecast.tomorrow}</strong>
+                      <span>tomorrow</span>
+                    </div>
+                    <div>
+                      <strong>{m.forecast.week}</strong>
+                      <span>this week</span>
+                    </div>
+                  </div>
+                  <p className="dash-note">{forecastNote}</p>
+                </div>
+
+                <div className="dash-card">
+                  <p className="dash-eyebrow">📜 Casting streak</p>
+                  <div className="dash-stat">
+                    {m.answerStreak}
+                    <span className="unit">in a row</span>
+                  </div>
+                  <p className="dash-note">
+                    {m.totalCasts} cast{m.totalCasts === 1 ? '' : 's'} graded · {m.passRate.rate.toFixed(0)}% pass rate
+                    (last {m.passRate.sample})
+                  </p>
+                </div>
+
+                <div className="dash-card">
+                  <p className="dash-eyebrow">Hearth streak</p>
+                  <div className="dash-stat">
+                    {m.hearthStreak}
+                    <span className="unit">{m.hearthStreak === 1 ? 'night' : 'nights'}</span>
+                  </div>
+                  <p className="dash-flames" aria-hidden="true">
+                    {flames > 0 ? '🔥'.repeat(flames) : <span className="dim">🕯️</span>}
+                  </p>
+                </div>
+
+                <div className="dash-card">
+                  <p className="dash-eyebrow">Last Ledger entry</p>
+                  <div className="dash-stat" style={{ fontSize: '1.5rem' }}>
+                    {ago(m.lastPlayed)}
+                  </div>
+                </div>
+
+                <div className="dash-card span2 dash-weakest">
+                  <p className="dash-eyebrow">⚠ Weakest bindings</p>
+                  {m.weakest.length === 0 ? (
+                    <p className="dash-note">Nothing frays right now — the Ledger holds steady.</p>
+                  ) : (
+                    <>
+                      <ul className="dash-weak-list">
+                        {m.weakest.map((w) => (
+                          <li key={w.id}>
+                            <span className={`lib-badge box${w.box}`}>{w.box === 0 ? 'new' : `box ${w.box}`}</span>
+                            <span className="dash-weak-statement">{w.statement}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="dash-note">Return to the Wellspring to mend these.</p>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
