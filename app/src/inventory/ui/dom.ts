@@ -65,9 +65,30 @@ if (typeof window !== 'undefined') {
  *   await openInventoryPane();   // or openShopPane()
  *   this.input.keyboard!.enabled = true;
  *   this.input.keyboard!.resetKeys();
+ *
+ * GHOST-REOPEN GUARD (bugfix-wave #2, crucible finding "rapid q→Escape leaves Escape dead"):
+ * root-caused via an instrumented repro against real CombatScene — dom.ts's own add/remove
+ * of its keydown listener is airtight (every Escape press closes whatever pane is currently
+ * open, every time). The bug is upstream: Phaser's KeyboardPlugin queues every native
+ * keydown/keyup it sees (KeyboardManager#queue) and never clears that queue itself; its
+ * de-dup only remembers the ONE most-recently-processed entry, so while a caller's keyboard
+ * is disabled for a pane's lifetime (per the wrap above) the queue keeps growing untouched,
+ * and once more than one stale event has piled up, an OLD keydown — e.g. the very 'q' that
+ * opened the pane Escape just closed — can replay and silently reopen it the instant the
+ * caller re-enables its keyboard. Confirmed empirically: a ghost 'q' lands ~1-10ms after this
+ * module's own close() runs, far faster than any human can perceive the pane closing, decide
+ * to reopen it, and press a key. This module can't patch Phaser or CombatScene (out of
+ * bounds here), but it CAN refuse to let a reopen that fast masquerade as a fresh one: a new
+ * openPane() within REOPEN_SETTLE_MS of the last close is swallowed (opened and immediately
+ * self-closed, before the browser ever paints it) rather than flashed back open — from the
+ * player's side, Escape closed the pane and it stayed closed.
  */
+const REOPEN_SETTLE_MS = 150;
+let lastCloseAt = 0;
+
 export function openPane(onClose: () => void): PaneHandle {
   ensureStyles();
+  const ghostReopen = Date.now() - lastCloseAt < REOPEN_SETTLE_MS;
   const panel = el('div', { class: 'inv-panel', tabIndex: -1, role: 'dialog', 'aria-modal': 'true' });
   const root = el('div', { class: 'inv-overlay' }, [panel]);
 
@@ -80,6 +101,7 @@ export function openPane(onClose: () => void): PaneHandle {
   const close = (): void => {
     if (closed) return;
     closed = true;
+    lastCloseAt = Date.now();
     teardown();
     onClose();
   };
@@ -100,6 +122,8 @@ export function openPane(onClose: () => void): PaneHandle {
 
   document.body.appendChild(root);
   requestAnimationFrame(() => panel.focus());
+
+  if (ghostReopen) close(); // swallowed before the browser ever paints the reopen
 
   return { panel, close };
 }

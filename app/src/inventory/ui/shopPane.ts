@@ -7,6 +7,7 @@ import { services } from '../../game/contracts';
 import { CATALOG, RARITY_META, shopStock, type ItemDef } from '../catalog';
 import { sellPrice } from '../economy';
 import { iconUrl } from '../icons';
+import { store } from '../register';
 import { el, openPane } from './dom';
 
 /** Short buyer-facing description of what an item does (shop-only presentation, not catalog data). */
@@ -14,13 +15,13 @@ function effectLabel(item: ItemDef): string {
   const e = item.effect;
   switch (e.kind) {
     case 'heal':
-      return e.amount >= 999 ? 'Restores to full vigor' : `Restores ${e.amount} HP`;
+      return e.amount >= 999 ? 'Restores to full vigor' : `Restores ${e.amount} vigor`;
     case 'reveal_option':
-      return 'Strikes one wrong answer (trial)';
+      return 'Strikes one wrong answer in a trial';
     case 'retry_cast':
-      return 'Retry a failed cast (trial)';
+      return 'Retry a failed cast in a trial';
     case 'streak_shield':
-      return 'Holds your streak through a stumble (trial)';
+      return 'Holds your hearth streak through a stumble in a trial';
     case 'none':
       return '';
   }
@@ -71,12 +72,13 @@ export function openShopPane(): Promise<void> {
           text: 'Buy',
           disabled: gold < item.value,
           onClick: async () => {
-            const ok = await services.inventory.spendGold(item.value);
+            // Atomic (crucible #6): one store.mutate() write does gold AND the item
+            // together, so a reload can never land between "gold spent" and "item granted".
+            const ok = await store.buy(item.id, item.value);
             if (!ok) {
               showBanner(false, "You can't afford that yet.");
               return;
             }
-            await services.inventory.grantItem(item.id);
             showBanner(true, `Bought ${item.name}.`);
             render();
           },
@@ -105,12 +107,13 @@ export function openShopPane(): Promise<void> {
           type: 'button',
           text: `Sell ⟡${price}`,
           onClick: async () => {
-            const removed = await services.inventory.removeItem(item.id);
-            if (!removed) {
+            // Atomic (crucible #6): one store.mutate() write removes the item AND credits
+            // gold together — the sell-side mirror of buy() above.
+            const sold = await store.sell(item.id, price);
+            if (!sold) {
               showBanner(false, "You don't have one of those.");
               return;
             }
-            await services.inventory.addGold(price);
             showBanner(true, `Sold ${item.name} for ⟡${price}.`);
             render();
           },

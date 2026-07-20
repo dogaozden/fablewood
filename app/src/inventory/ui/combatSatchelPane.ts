@@ -34,7 +34,7 @@ export function openCombatSatchelPane(usable: CombatSatchelEntry[], gold: number
 
     if (!usable.length) {
       body.replaceChildren(
-        el('p', { class: 'inv-empty', text: "The Clerk's register shows nothing fit to use mid-battle." }),
+        el('p', { class: 'inv-empty', text: "The Clerk's register shows nothing fit to use in this trial." }),
       );
       return;
     }
