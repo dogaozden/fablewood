@@ -148,15 +148,34 @@ export class BootScene extends Phaser.Scene {
 
     markReady({ scene: 'boot', title: 'FABLEWOOD', seed: this.seed });
 
+    // Resume target for a hard reload with no ?scene= jump: the saved scene pointer,
+    // when it names a real resumable scene, else the hamlet. Combat is deliberately
+    // never persisted (DungeonScene/HamletScene only ever write scene:'vaults' or
+    // scene:'hamlet' — see their services.save.save() call sites), so a mid-battle
+    // reload always lands back at the dungeon, never combat. Read at gesture time,
+    // not raced against it: services.save.ready() is already warmed above (fire-and-
+    // forget), so awaiting it again here resolves that SAME settled/in-flight promise
+    // — virtually instant — but doing it here (rather than caching the answer in a
+    // background .then() before any gesture exists) is what actually guarantees
+    // correctness for a gesture that outruns the warm read (e.g. a fast e2e key tap).
     const enter = (): void => {
-      void resumeMusicOnce().then(() => {
+      void (async () => {
+        let resumeScene = 'hamlet';
         try {
-          music.play('hamlet');
+          await services.save.ready();
+          if (services.save.get().scene === 'vaults') resumeScene = 'vaults';
         } catch {
-          /* audio must never block entry */
+          /* save unreadable — fall back to the hamlet, same as always */
         }
-      });
-      this.scene.start('hamlet', { seed: this.seed });
+        void resumeMusicOnce().then(() => {
+          try {
+            music.play(resumeScene);
+          } catch {
+            /* audio must never block entry */
+          }
+        });
+        this.scene.start(resumeScene, { seed: this.seed });
+      })();
     };
     this.input.keyboard?.once('keydown', enter);
     this.input.once('pointerdown', enter);

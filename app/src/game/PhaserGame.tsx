@@ -34,6 +34,11 @@ export function PhaserGame() {
       parent,
       backgroundColor: '#241b2f',
       pixelArt: true,
+      // Right-click is a deliberate gameplay gesture in combat (playerTarget), so the
+      // native OS context menu must never leak over the canvas. Phaser scopes this
+      // listener to the game's own canvas (config.inputMouseEventTarget, unset here,
+      // defaults to `game.canvas`) — never document-wide.
+      disableContextMenu: true,
       scale: {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
