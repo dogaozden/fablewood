@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { openOverlay } from './helpers';
+import { openOverlay, waitReady, waitHamletPlayer, tapKey } from './helpers';
 
 // Regression: encounter overlays are document.body children, so they outlive the
 // canvas. The overlay's fixed full-viewport root swallows mouse clicks on the
@@ -43,5 +43,23 @@ test.describe('overlay ↔ game teardown', () => {
       () => (window.__FABLEWOOD_GAME as { input?: { keyboard?: { enabled?: boolean } } } | undefined)?.input?.keyboard?.enabled,
     );
     expect(kbEnabled).toBe(true);
+  });
+
+  // Same class of bug, different overlay family: the Satchel/shop panes (inventory-handoff
+  // §7) are ALSO document.body children built on the shared openPane() scaffold
+  // (inventory/ui/dom.ts) — they got the same GAME_TEARDOWN_EVENT subscription as the
+  // encounter overlay above. shopPane.ts shares this exact fix (same openPane function);
+  // this drives it through the more directly reachable Satchel (hamlet 'i' hotkey).
+  test('inventory Satchel pane is torn down with the game too (shares openPane\'s teardown fix)', async ({ page }) => {
+    await page.goto('/?scene=hamlet&seed=7');
+    await waitReady(page, 'hamlet');
+    await waitHamletPlayer(page);
+    await tapKey(page, 'i');
+    await expect(page.locator('.inv-overlay')).toHaveCount(1);
+
+    await keyboardSwitchTab(page, 'Dashboard');
+    await expect(page.locator('.phaser-root')).toHaveCount(0); // game unmounted
+    await expect(page.locator('.inv-overlay')).toHaveCount(0); // pane went with it, no orphan
+    await expect(page.locator('.dash')).toBeVisible(); // shell stays usable
   });
 });

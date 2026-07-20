@@ -4,6 +4,7 @@
  * exported and encounters/** is off-limits from this slice.
  */
 import { ensureStyles } from './styles';
+import { GAME_TEARDOWN_EVENT } from '../../game/encounters/overlay';
 
 /** createElement with attrs (on* → listeners, known props set directly, else setAttribute) + children. */
 export function el<K extends keyof HTMLElementTagNameMap>(
@@ -31,10 +32,30 @@ export interface PaneHandle {
 }
 
 /**
+ * The Satchel/shop panes (inventoryPane.ts, shopPane.ts, combatSatchelPane.ts) are
+ * document.body children, so — same bug as the encounter overlay (encounters/overlay.ts,
+ * GAME_TEARDOWN_EVENT is that module's own exported constant, not an internal) — they
+ * outlive the Phaser canvas: unmounting PhaserGame left an orphaned pane floating over
+ * whatever mounted next while its `await` kept a dead scene's continuation (re-enabling
+ * this.input.keyboard, clearing a busy flag) queued. Every open pane is dropped on
+ * teardown (DOM removed, no exit animation). The pane's own Promise is deliberately left
+ * unresolved, exactly like an abandoned encounter: that continuation would run against a
+ * torn-down scene.
+ */
+const openPanes = new Set<() => void>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(GAME_TEARDOWN_EVENT, () => {
+    for (const abort of [...openPanes]) abort();
+  });
+}
+
+/**
  * Open a parchment overlay panel (Satchel / Mira's shop share this scaffold):
  * appended to document.body, closes on click-outside OR Escape (browsing here is
  * non-punitive, unlike the encounters overlay, which deliberately omits both —
- * inventory-handoff §7). `onClose` fires exactly once, however the pane closes.
+ * inventory-handoff §7). `onClose` fires exactly once, however the pane closes (never on
+ * a forced GAME_TEARDOWN_EVENT abort — see the module comment above).
  *
  * CRITICAL (Phaser bleed, §7): a DOM overlay over the canvas lets WASD/E leak into
  * the game underneath. This module has no access to encounters' depth-counted
@@ -51,12 +72,22 @@ export function openPane(onClose: () => void): PaneHandle {
   const root = el('div', { class: 'inv-overlay' }, [panel]);
 
   let closed = false;
-  const close = () => {
+  const teardown = (): void => {
+    document.removeEventListener('keydown', onKey);
+    openPanes.delete(abort);
+    root.remove();
+  };
+  const close = (): void => {
     if (closed) return;
     closed = true;
-    document.removeEventListener('keydown', onKey);
-    root.remove();
+    teardown();
     onClose();
+  };
+  const abort = (): void => {
+    if (closed) return;
+    closed = true;
+    teardown();
+    // deliberately NOT calling onClose() — see the module comment above.
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') close();
@@ -65,6 +96,7 @@ export function openPane(onClose: () => void): PaneHandle {
     if (e.target === root) close();
   });
   document.addEventListener('keydown', onKey);
+  openPanes.add(abort);
 
   document.body.appendChild(root);
   requestAnimationFrame(() => panel.focus());
