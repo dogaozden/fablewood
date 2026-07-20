@@ -18,7 +18,7 @@ const EV = 'screenshots';
 // vc-law pack) → enter the first room → discovered-documents teaching → combat launches. Then
 // asserts the dungeon progress persisted to state/, and that it survives a page reload.
 test('full chain: boot → hamlet → gate → vaults → room → teaching → combat → save/reload', async ({ page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(150_000); // headroom for CI's cold first-compile (~2x local)
 
   // 1. boot title screen (plain '/', the true entry). One gesture enters the hamlet.
   await page.goto('/?seed=7');

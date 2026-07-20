@@ -13,7 +13,7 @@ export type TileType = 'floor' | 'wall' | 'gold' | 'lantern';
 export type Team = 'party' | 'enemy';
 export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
 
-export type ActionKind = 'strike' | 'weave' | 'sequence' | 'cast' | 'parley' | 'wait';
+export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'wait';
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
 export interface Coord {
@@ -62,27 +62,31 @@ export interface ActionMeta {
 
 export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: ActionMeta } = {
   strike: {
-    kind: 'strike', label: 'Strike', hotkey: '1', encounter: 'mcq', range: 1,
-    shape: 'single', tint: 0xf7ce6b, blurb: 'A quick blow. (multiple choice)',
+    kind: 'strike', label: 'Strike', hotkey: '1', encounter: null, range: 1,
+    shape: 'single', tint: 0xf7ce6b, blurb: 'Free — a quick blow, no question.',
+  },
+  smite: {
+    kind: 'smite', label: 'Smite', hotkey: '2', encounter: 'mcq', range: 2,
+    shape: 'single', tint: 0xd2792c, blurb: 'A bolt of cited truth. (multiple choice)',
   },
   weave: {
-    kind: 'weave', label: 'Binding Weave', hotkey: '2', encounter: 'match', range: 2,
+    kind: 'weave', label: 'Binding Weave', hotkey: '3', encounter: 'match', range: 2,
     shape: 'cross', tint: 0x9a6ec8, blurb: 'Cross AoE. (match the pairs)',
   },
   sequence: {
-    kind: 'sequence', label: 'Ritual Sequence', hotkey: '3', encounter: 'order', range: 3,
+    kind: 'sequence', label: 'Ritual Sequence', hotkey: '4', encounter: 'order', range: 3,
     shape: 'line', tint: 0x4c6c96, blurb: 'A lance in a line. (put in order)',
   },
   cast: {
-    kind: 'cast', label: 'Cast From Memory', hotkey: '4', encounter: 'free_recall', range: 3,
+    kind: 'cast', label: 'Cast From Memory', hotkey: '5', encounter: 'free_recall', range: 3,
     shape: 'single', tint: 0xeea23f, blurb: 'The big one — the Clerk judges. (recall)',
   },
   parley: {
-    kind: 'parley', label: 'Parley', hotkey: '5', encounter: 'scenario_branch', range: 1,
+    kind: 'parley', label: 'Parley', hotkey: '6', encounter: 'scenario_branch', range: 1,
     shape: 'single', tint: 0xe07aae, blurb: 'Talk it down. (a branching choice)',
   },
   wait: {
-    kind: 'wait', label: 'Wait', hotkey: '6', encounter: null, range: 0,
+    kind: 'wait', label: 'Wait', hotkey: '7', encounter: null, range: 0,
     shape: 'self', tint: 0x8a8078, blurb: 'Hold position, end turn.',
   },
 };

@@ -5,7 +5,7 @@ import {
   type TileGrid,
 } from '../grid';
 import { resolveAction } from '../damage';
-import { applyBranch, reduceShields, bossDefeated } from '../boss';
+import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from '../boss';
 import { decideEnemy } from '../ai';
 import { makeKeeper, makeMira, makeEnemy } from '../units';
 import { key, GRID_W, GRID_H, type UnitState, type TileType } from '../types';
@@ -95,33 +95,46 @@ describe('AoE geometry', () => {
 });
 
 describe('damage table', () => {
-  it('Strike scales with quality and bites on a whiff', () => {
-    expect(resolveAction('strike', 1)).toMatchObject({ hits: 2, selfChip: 0 });
-    expect(resolveAction('strike', 0.5)).toMatchObject({ hits: 1 });
-    expect(resolveAction('strike', 0)).toMatchObject({ hits: 0, selfChip: 1 });
+  it('Strike is a fixed FREE hit — quality-independent, never misses, no self-chip', () => {
+    expect(resolveAction('strike', 1)).toMatchObject({ hits: 1, selfChip: 0, fade: 0 });
+    expect(resolveAction('strike', 0)).toMatchObject({ hits: 1, selfChip: 0 }); // quality irrelevant
   });
 
-  it("Mira's mastery bonus folds into the primary hit", () => {
-    expect(resolveAction('strike', 1, { miraBonus: 1 }).hits).toBe(3);
-    expect(resolveAction('strike', 0, { miraBonus: 1 }).hits).toBe(0); // no bonus on a miss
+  it('Smite is a quick bolt — 3× a Strike at full, fizzles (no chip) on a whiff', () => {
+    expect(resolveAction('smite', 1)).toMatchObject({ hits: 3, selfChip: 0 });
+    expect(resolveAction('smite', 0.5)).toMatchObject({ hits: 1 });
+    expect(resolveAction('smite', 0)).toMatchObject({ hits: 0, selfChip: 0 });
   });
 
-  it('Weave hits the whole cross only at full quality', () => {
-    expect(resolveAction('weave', 1)).toMatchObject({ aoe: 'cross', hits: 1, aoeHit: 1 });
-    expect(resolveAction('weave', 0.5)).toMatchObject({ hits: 1, aoeHit: 0 }); // primary only
-    expect(resolveAction('weave', 0)).toMatchObject({ hits: 0, selfChip: 1 });
+  it("Mira's mastery bonus folds into a landed hit, never into a whiff", () => {
+    expect(resolveAction('strike', 1, { miraBonus: 1 }).hits).toBe(2); // free strike 1 + bonus
+    expect(resolveAction('smite', 1, { miraBonus: 1 }).hits).toBe(4); // smite 3 + bonus
+    expect(resolveAction('smite', 0, { miraBonus: 1 }).hits).toBe(0); // no bonus on a whiff
   });
 
-  it('Sequence lance depth = floor(q*3)', () => {
-    expect(resolveAction('sequence', 1).lineDepth).toBe(3);
-    expect(resolveAction('sequence', 0.5).lineDepth).toBe(1);
-    expect(resolveAction('sequence', 0).lineDepth).toBe(0);
+  it('Weave hits the whole cross only at full quality (2 dmg per tile)', () => {
+    expect(resolveAction('weave', 1)).toMatchObject({ aoe: 'cross', hits: 2, aoeHit: 2 });
+    expect(resolveAction('weave', 0.5)).toMatchObject({ hits: 2, aoeHit: 0 }); // primary only
+    expect(resolveAction('weave', 0)).toMatchObject({ hits: 0, selfChip: 0 });
+  });
+
+  it('Sequence lance depth = floor(q*3), 2 dmg per tile', () => {
+    expect(resolveAction('sequence', 1)).toMatchObject({ lineDepth: 3, hits: 2, aoeHit: 2 });
+    expect(resolveAction('sequence', 0.5)).toMatchObject({ lineDepth: 1, hits: 2 });
+    expect(resolveAction('sequence', 0)).toMatchObject({ lineDepth: 0, hits: 0 });
   });
 
   it('Cast is the big one, and the Fade bites back on failure', () => {
     expect(resolveAction('cast', 1)).toMatchObject({ hits: 6, fade: 0 });
     expect(resolveAction('cast', 0.5)).toMatchObject({ hits: 2 });
     expect(resolveAction('cast', 0)).toMatchObject({ hits: 0, fade: 2 });
+  });
+
+  it('every GATED spell out-damages a free Strike at full quality (the economy invariant)', () => {
+    const strike = resolveAction('strike', 1).hits; // 1
+    for (const a of ['smite', 'weave', 'sequence', 'cast'] as const) {
+      expect(resolveAction(a, 1).hits, `${a} full ≥ strike`).toBeGreaterThan(strike);
+    }
   });
 
   it('a passing Cast vs the Warden strips an extra shield', () => {
@@ -137,7 +150,7 @@ describe('damage table', () => {
   });
 
   it('every outcome carries a why-banner', () => {
-    for (const a of ['strike', 'weave', 'sequence', 'cast', 'parley', 'wait'] as const) {
+    for (const a of ['strike', 'smite', 'weave', 'sequence', 'cast', 'parley', 'wait'] as const) {
       for (const q of [0, 0.5, 1] as const) {
         expect(resolveAction(a, q, { branchTag: 'good' }).banner.length).toBeGreaterThan(0);
       }
@@ -159,6 +172,14 @@ describe('boss reducers', () => {
     expect(bossDefeated(0, 8)).toBe(true);
     expect(bossDefeated(2, 0)).toBe(true);
     expect(bossDefeated(2, 8)).toBe(false);
+  });
+  it('shielded Warden absorbs every non-Cast blow (boss questions stay mandatory)', () => {
+    expect(wardenAbsorbs('strike', true, 3)).toBe(true); // free Strike can't brute-force the boss
+    expect(wardenAbsorbs('smite', true, 3)).toBe(true);
+    expect(wardenAbsorbs('weave', true, 1)).toBe(true);
+    expect(wardenAbsorbs('cast', true, 3)).toBe(false); // only Cast pierces the shields
+    expect(wardenAbsorbs('strike', true, 0)).toBe(false); // shields gone → already beaten
+    expect(wardenAbsorbs('strike', false, 3)).toBe(false); // a regular enemy just takes the hit
   });
 });
 

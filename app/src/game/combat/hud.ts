@@ -149,8 +149,10 @@ export class CombatHud {
 
   showActionMenu(items: ActionItem[], onPick: (a: ActionKind) => void): void {
     this.menu.removeAll(true);
-    const bw = 148;
     const gap = 6;
+    // Fit the row to the canvas: 6 actions keep the 148px button; the 7th (Smite) shrinks
+    // them just enough to stay on-screen (≈129px) rather than overflow the 960px width.
+    const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {

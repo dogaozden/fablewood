@@ -62,7 +62,7 @@ function continueButton(resolve: Resolve, result: EncounterResult): HTMLButtonEl
   });
 }
 
-// --- mcq · Strike ------------------------------------------------------------
+// --- mcq · Smite -------------------------------------------------------------
 
 const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
   const options = (enc.options ?? []).map(String);

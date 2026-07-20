@@ -47,6 +47,27 @@ function quietGameKeyboard(quiet: boolean): void {
   for (const s of game.scene.getScenes(true)) s.input?.keyboard?.resetKeys();
 }
 
+/**
+ * Overlays are document.body children, so they outlive the canvas: switching
+ * shell tabs unmounts PhaserGame and the orphaned card kept floating over the
+ * Dashboard while its drill loop ran on against the dead scene. PhaserGame
+ * announces teardown via GAME_TEARDOWN_EVENT and every open overlay is dropped
+ * (no exit animation, latch stepped down). The abandoned promises are
+ * deliberately left unresolved: an encounter nobody answered must never be
+ * graded, and rejecting would crash the dead scene's continuations — the parked
+ * chains are garbage once the destroyed game releases them.
+ */
+const openOverlays = new Set<() => void>();
+export const GAME_TEARDOWN_EVENT = 'fablewood:game-teardown';
+
+export function abortOpenOverlays(): void {
+  for (const abort of [...openOverlays]) abort();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener(GAME_TEARDOWN_EVENT, abortOpenOverlays);
+}
+
 function buildOverlay(): Overlay {
   ensureStyles();
   const prevFocus = document.activeElement as HTMLElement | null;
@@ -70,6 +91,28 @@ function buildOverlay(): Overlay {
   document.body.appendChild(root);
   if (++overlayDepth === 1) quietGameKeyboard(true);
   requestAnimationFrame(() => panel.focus());
+
+  // Shared by close() (after its exit animation) and abort (immediately): remove
+  // the DOM and step the keyboard latch down exactly once per overlay.
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+  const finishClose = (): void => {
+    if (closeTimer !== null) clearTimeout(closeTimer);
+    closeTimer = null;
+    openOverlays.delete(abort);
+    root.remove();
+    if (--overlayDepth === 0) quietGameKeyboard(false);
+  };
+  const abort = (): void => {
+    if (closed) {
+      // mid-exit-animation: settle the bookkeeping now (its close() promise,
+      // like an aborted overlay's encounter promise, is left unresolved)
+      if (closeTimer !== null) finishClose();
+      return;
+    }
+    closed = true;
+    finishClose();
+  };
+  openOverlays.add(abort);
 
   return {
     root,
@@ -99,9 +142,8 @@ function buildOverlay(): Overlay {
       closed = true;
       root.classList.add('is-closing');
       return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          root.remove();
-          if (--overlayDepth === 0) quietGameKeyboard(false);
+        closeTimer = setTimeout(() => {
+          finishClose();
           prevFocus?.focus?.();
           resolve();
         }, 170);

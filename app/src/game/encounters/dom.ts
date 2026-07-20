@@ -29,11 +29,12 @@ export interface ActionMeta {
 
 /**
  * Each encounter kind is dressed as its combat move (slice-blueprint §3), so the overlay
- * speaks the same language as the battle: mcq = Strike, match = Binding Weave, etc.
+ * speaks the same language as the battle: mcq = Smite, match = Binding Weave, etc.
+ * (Strike is free and overlay-less since the friction redesign — mcq now gates Smite.)
  * Glyphs are monochrome typographic ornaments (they inherit text color → stay on-palette).
  */
 export const ACTIONS: Record<string, ActionMeta> = {
-  mcq: { glyph: '✦', action: 'Strike', kind: 'Multiple Choice', hint: 'Press 1–4, or click, to strike.' },
+  mcq: { glyph: '✦', action: 'Smite', kind: 'Multiple Choice', hint: 'Press 1–4, or click, to smite.' },
   free_recall: { glyph: '✧', action: 'Cast From Memory', kind: 'Free Recall', hint: 'Write it from memory, then Cast (Enter).' },
   scenario_branch: { glyph: '❧', action: 'Parley', kind: 'Scenario', hint: 'Press a number, or click a reply.' },
   match: { glyph: '❈', action: 'Binding Weave', kind: 'Match', hint: 'Pick one from each side to bind them.' },

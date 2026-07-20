@@ -2,10 +2,11 @@ import { type Page, expect } from '@playwright/test';
 
 /** Wait for the harness ready flag, optionally for a specific scene to be active.
  * The ceiling is generous: the very first navigation of a run pays a one-time Vite
- * cost compiling the full Phaser module graph (~25s cold); warm loads resolve in <2s. */
+ * cost compiling the full Phaser module graph (~25s cold locally; a 2-core CI runner
+ * can roughly double that); warm loads resolve in <2s. */
 export async function waitReady(page: Page, scene?: string): Promise<void> {
   await page.waitForFunction(() => (window as Window).__FABLEWOOD_READY === true, undefined, {
-    timeout: 45_000,
+    timeout: 75_000,
   });
   if (scene) {
     await page.waitForFunction(
@@ -109,70 +110,120 @@ export async function tapKey(page: Page, key: string): Promise<void> {
   await page.keyboard.up(key);
 }
 
-/** Fine-approach the South Gate door and enter the vaults. Closed-loop and convergent: nudges
- *  BOTH axes each step (so if "right" is blocked a rung above the 1-tile corridor, a "down"
- *  nudge frees it), faces up in range, and keeps trying to interact until Alder's dialogue
- *  opens — then advances with E only (arrows would move the province selection onto "Not yet").
- *  Returns true once the vaults scene is active. */
-export async function enterVaultsViaGate(page: Page, doorX = 248, doorY = 204): Promise<boolean> {
-  // PRIMARY (real input): fine-approach the door (doorY targets the LOWER rung — the top of the
-  // 1-tile corridor is blocked by the gate building), open Alder's dialogue, and advance it with
-  // E only (arrows would move the province selection onto "Not yet").
-  let lastX = -999;
-  let lastY = -999;
-  let stuck = 0;
-  for (let i = 0; i < 34; i++) {
-    const p = await hamletPlayer(page);
-    if (!p) {
-      await page.waitForTimeout(150);
-      continue;
+/** Hold a key DOWN until `done(pos)` holds or `maxMs` elapses, polling the live position —
+ *  closed-loop DURING the hold (release precision ≈ speed × poll ≈ 4px), unlike a timed hold
+ *  whose distance is at the mercy of headless frame pacing. Returns the position at release. */
+async function holdKeyUntil(
+  page: Page,
+  key: string,
+  done: (p: { x: number; y: number }) => boolean,
+  maxMs = 3000,
+): Promise<{ x: number; y: number } | null> {
+  const start = Date.now();
+  let p = await hamletPlayer(page);
+  await page.keyboard.down(key);
+  try {
+    while (Date.now() - start < maxMs) {
+      p = await hamletPlayer(page);
+      if (!p || done(p)) break;
+      await page.waitForTimeout(40);
     }
-    if (p.dialogueOpen) break;
-    const dx = doorX - p.x;
-    const dy = doorY - p.y;
-    if (Math.abs(dx) <= 10 && Math.abs(dy) <= 12) {
-      if (p.facing !== 'up') await holdKey(page, 'ArrowUp', 110);
-      await tapKey(page, 'e');
-      await page.waitForTimeout(220);
-    } else {
-      const notMoving = Math.abs(p.x - lastX) < 1 && Math.abs(p.y - lastY) < 1;
-      stuck = notMoving ? stuck + 1 : 0;
-      if (stuck >= 2) {
-        await holdKey(page, 'ArrowDown', 120); // blocked at the top rung → drop to the lower one
-        stuck = 0;
-      } else {
-        if (Math.abs(dx) > 10) await holdKey(page, dx > 0 ? 'ArrowRight' : 'ArrowLeft', 100);
-        if (Math.abs(dy) > 10) await holdKey(page, dy > 0 ? 'ArrowDown' : 'ArrowUp', 100);
+  } finally {
+    await page.keyboard.up(key);
+  }
+  return p;
+}
+
+/** Hold a key until the player stops moving on `axis` (pinned against collision) — the walls
+ *  turn a flaky approach into an exact one: wherever the hold started, the release coordinate
+ *  is the collision boundary. */
+async function holdKeyUntilPinned(page: Page, key: string, axis: 'x' | 'y', maxMs = 3000): Promise<void> {
+  let last = -999;
+  let still = 0;
+  await holdKeyUntil(
+    page,
+    key,
+    (p) => {
+      const v = axis === 'x' ? p.x : p.y;
+      still = Math.abs(v - last) < 1 ? still + 1 : 0;
+      last = v;
+      return still >= 3; // ~3 polls (~120ms) without movement = pinned
+    },
+    maxMs,
+  );
+}
+
+/** Wait until the hamlet scene's async bootstrap has loaded the provinces (packs). Read-only
+ *  peek, same pattern as hamletPlayer: without it a fast approach can knock on the gate before
+ *  Alder has anything to offer (empty-province dialogue has no choice and no warp). */
+async function waitProvincesLoaded(page: Page, timeout = 10_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const n = await page.evaluate(() => {
+      const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+      const h = g?.scene?.getScene?.('hamlet') as { provinces?: unknown[] } | undefined;
+      return h?.provinces?.length ?? 0;
+    });
+    if (n > 0) return true;
+    await page.waitForTimeout(200);
+  }
+  return false;
+}
+
+/** Approach the South Gate door and enter the vaults on 100% REAL input. The geometry makes
+ *  this deterministic rather than merely convergent: the door tile (248,204) sits in a 1-tile
+ *  corridor whose floor (the row-13 tree ring) and ceiling (the gate building) are collision
+ *  walls, so the funnel is (1) hold Down until pinned on the corridor floor — Y becomes exact,
+ *  (2) hold Right/Left releasing at the door column — closed-loop, ±4px, (3) hold Up until
+ *  pinned against the gate — faces up AND lands y≈202, 2px from the door's interact point,
+ *  (4) tap E; then advance Alder with E only (arrows would move the province selection onto
+ *  "Not yet"). Returns true once the vaults scene is active. */
+export async function enterVaultsViaGate(page: Page, doorX = 248, doorY = 204): Promise<boolean> {
+  await waitHamletPlayer(page);
+  await waitProvincesLoaded(page);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let p = await hamletPlayer(page);
+    if (!p) return false;
+    if ((await currentScene(page)) === 'vaults') return true;
+
+    // Stage from the south road if far afield — the funnel below assumes the road/plaza
+    // region, where "down" pins on the corridor floor and "right" runs clear to the door.
+    if (!p.dialogueOpen && (Math.abs(p.x - doorX) > 44 || p.y < doorY - 26)) {
+      await walkHamletTo(page, doorX - 16, doorY, 16);
+    }
+
+    p = await hamletPlayer(page);
+    if (p && !p.dialogueOpen) {
+      // (1) pin on the corridor floor; (2) align to the door column; (3) pin against the gate.
+      await holdKeyUntilPinned(page, 'ArrowDown', 'y', 1500);
+      p = await hamletPlayer(page);
+      if (p && Math.abs(p.x - doorX) > 3) {
+        const dir = p.x < doorX ? 'ArrowRight' : 'ArrowLeft';
+        await holdKeyUntil(page, dir, (q) => (dir === 'ArrowRight' ? q.x >= doorX - 2 : q.x <= doorX + 2), 3000);
+      }
+      await holdKeyUntilPinned(page, 'ArrowUp', 'y', 800);
+
+      // (4) knock: E opens Alder when in range+facing; re-tap briefly, else re-run the funnel.
+      for (let k = 0; k < 4; k++) {
+        await tapKey(page, 'e');
+        await page.waitForTimeout(260);
+        if ((await hamletPlayer(page))?.dialogueOpen) break;
       }
     }
-    lastX = p.x;
-    lastY = p.y;
-  }
-  if ((await hamletPlayer(page))?.dialogueOpen) {
-    for (let k = 0; k < 16; k++) {
-      await tapKey(page, 'e'); // advance Alder + confirm the default (province) choice
-      await page.waitForTimeout(280);
-      if ((await currentScene(page)) === 'vaults') return true;
-    }
-  }
-  if ((await currentScene(page)) === 'vaults') return true;
 
-  // NUDGE (guaranteed): driving the 1-tile gate corridor with timed key-holds is only ~70% reliable
-  // headlessly (the player is physics-driven; frame timing defeats the last approach). When the real
-  // walk above falls short, mirror doGate's own transition so the downstream chain always runs, then
-  // wait for the vaults scene to finish its async pack load. Filed as a testability finding: a warp
-  // hook or a wider interaction radius from the hamlet agent would let this run on 100% real input.
-  await page.evaluate(() => {
-    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-    const h = g?.scene?.getScene?.('hamlet') as { scene?: { start?(k: string, d: unknown): void } } | undefined;
-    h?.scene?.start?.('vaults', { packId: 'vc-law' });
-  });
-  try {
-    await page.waitForFunction(() => (window as Window).__FABLEWOOD_STATE?.scene === 'vaults', undefined, { timeout: 12_000 });
-    return true;
-  } catch {
-    return false;
+    if ((await hamletPlayer(page))?.dialogueOpen) {
+      for (let k = 0; k < 16; k++) {
+        await tapKey(page, 'e'); // advance Alder + confirm the default (province) choice
+        await page.waitForTimeout(280);
+        if ((await currentScene(page)) === 'vaults') return true;
+        const q = await hamletPlayer(page);
+        if (q && !q.dialogueOpen) break; // dialogue ended without a warp (e.g. packs raced) → retry
+      }
+    }
+    if ((await currentScene(page)) === 'vaults') return true;
   }
+  return (await currentScene(page)) === 'vaults';
 }
 
 /** Read a state file back through the dev bridge (GET /api/state/<name>). null if unwritten. */

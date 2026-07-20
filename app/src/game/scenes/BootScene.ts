@@ -27,15 +27,53 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload(): void {
+    // Lane-B painterly ground tiles (16x16). Loaded on EVERY path — title and
+    // ?scene= jumps alike — so the hamlet floor upgrades everywhere. A loaded
+    // key wins: buildTextures + scene placeholders skip keys that exist.
+    this.load.image('tile.grass', '/art/tile-grass.png');
+    this.load.image('tile.path', '/art/tile-path.png');
+    this.load.image('tile.water', '/art/tile-water.png');
     if (!this.next) {
       this.load.image('title-key-art', '/art/title-key-art.png');
     }
+    // Lane-B painterly hamlet building props (chroma-keyed cutouts). Loaded on
+    // every path so they register before buildTextures() runs in create(); an
+    // existing key makes buildTextures/scene placeholders skip the Lane-A grid
+    // bake, so the painterly art wins with zero scene edits.
+    this.load.image('prop.cottage', '/art/cottage-moss-roof.png');
+    this.load.image('prop.tavern', '/art/tavern-gilded-acorn.png');
+    this.load.image('prop.records-office', '/art/records-office.png');
+    this.load.image('prop.south-gate', '/art/south-gate.png');
+    this.load.image('prop.wellspring', '/art/wellspring-fountain.png');
+    this.load.image('prop.tree', '/art/tree-canopy-lane-b.png');
+    this.load.image('prop.lantern-post', '/art/lantern-post.png');
+    // Lane-B glow fx (luma-keyed on black; ADD-blended by the hamlet scene).
+    this.load.image('fx.glow', '/art/fx-glow.png');
+    this.load.image('fx.spark', '/art/fx-spark.png');
+    // Lane-B painterly NPC stills. Single-frame; see the create() cleanup below
+    // that drops their stale grid-built idle anim once a real PNG owns the key.
+    this.load.image('char.berry', '/art/berry-portrait.png');
+    this.load.image('char.clerk', '/art/clerk-portrait.png');
+    this.load.image('char.alder', '/art/alder-portrait.png');
   }
 
   create(): void {
     // Real art first: any key registered here wins over scene placeholder bakes
     // (their ensureTextures skip existing keys).
     buildTextures(this);
+
+    // Lane-B stills are single-frame: when a loaded PNG owns a char key (its
+    // texture source is an HTMLImageElement, not a grid-baked canvas), drop the
+    // stale grid-built idle anim — playing it would swap the sprite back to the
+    // old `<key>__sheet` pixel art. HamletScene then falls back to its gentle
+    // breathing-bob tween for these NPCs. If a PNG fails to load, the grid bake
+    // owns the key, the anim survives, and behavior is unchanged.
+    for (const key of ['char.berry', 'char.clerk', 'char.alder']) {
+      if (!this.textures.exists(key)) continue;
+      if (this.textures.get(key).getSourceImage() instanceof HTMLImageElement) {
+        this.anims.remove(`${key}.idle`);
+      }
+    }
 
     // Warm the persistence layer at boot (idempotent; scenes still await ready()
     // before reads). Fire-and-forget so the ready-flag timing stays deterministic.
