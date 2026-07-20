@@ -612,8 +612,18 @@ export class CombatScene extends Phaser.Scene {
       this.time.delayedCall(650, () => this.advanceTurn());
       return;
     }
-    if (unit.team === 'party') this.beginPlayerTurn(unit);
-    else this.time.delayedCall(320, () => this.runEnemyTurn(unit));
+    if (unit.team === 'party') {
+      // §5.1 Glow source 2 — a party unit starting ITS turn on a lit lantern tile grants +1
+      // Glow. Checked exactly once, right here at turn start, so no stacking trick is possible;
+      // a unit felled by Kindled or Staggered above never reaches this branch, so a lost turn
+      // grants nothing (matches "starts ITS turn", not "stood on a tile at some point"). Reuses
+      // the existing Glow-gain path (glowGain + refreshParty), same as brazier-lit/due-renewal.
+      if (this.tileTypeOf(unit) === 'lantern') {
+        this.glow = glowGain(this.glow, 'lantern-turn-start');
+        this.refreshParty();
+      }
+      this.beginPlayerTurn(unit);
+    } else this.time.delayedCall(320, () => this.runEnemyTurn(unit));
   }
 
   private focusCue(unit: UnitState): void {
@@ -1005,7 +1015,17 @@ export class CombatScene extends Phaser.Scene {
       this.attackerTell(unit, tile, ACTIONS.strike.tint);
       this.applyOutcome(unit, 'strike', tile, outcome, target);
       this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
-      this.actionLog.push({ action: 'strike', dmg: before - this.enemyHpSum(), overlay: false });
+      const dealt = before - this.enemyHpSum();
+      this.actionLog.push({ action: 'strike', dmg: dealt, overlay: false });
+      // §5.1 Glow source 1 — a Strike that deals damage grants the party +1 Glow. `dealt` is
+      // the same before/after enemy-hp delta actionLog uses above: already resolved past flank
+      // (computeHit, inside meleeHit) and past absorption (wardenAbsorbs/Warded), so "> 0" means
+      // exactly "actually dealt ≥1 damage after all modifiers/absorption". `unit` is always the
+      // active PARTY unit here (T1 strike only ever runs from a party turn via runPlayerAction),
+      // but the team guard stays explicit — Glow must never flow from an enemy action. Reuses
+      // the existing Glow-gain path (glowGain + the refreshParty just below), so the cap and the
+      // pip +pulse (hud.ts) apply unchanged.
+      if (unit.team === 'party' && dealt > 0) this.glow = glowGain(this.glow, 'strike');
       this.refreshParty();
       this.time.delayedCall(440, () => this.endPlayerTurn());
       return;

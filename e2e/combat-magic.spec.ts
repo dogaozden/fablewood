@@ -307,3 +307,85 @@ test('Satchel: using a Wick-Tallow in battle grants +1 Glow and consumes it from
   const invData = (await inv.json()) as { stacks?: Record<string, number> };
   expect(invData.stacks?.['wick-tallow'] ?? 0, 'exactly one Wick-Tallow was consumed').toBe(1);
 });
+
+// §5.1 source 1 — a Strike that deals damage grants +1 Glow. The T1 strike path itself is
+// untouched (CombatScene.ts just observes the same before/after enemy-hp delta the action
+// log already computes, post-flank and post-absorption).
+test('a Strike that deals damage grants +1 Glow', async ({ page }) => {
+  test.setTimeout(60_000);
+  await seedFreshSave(page);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  const opened = await waitForKeeperTurn(page);
+  expect(opened?.state).toBe('playerMove');
+  expect(opened?.glow, 'Glow starts at 0 (create()s reset block)').toBe(0);
+
+  // Deterministic geometry ("Rank 1"/"T2 cast" tests' own idiom) — wisp-0 within Strike's range 1.
+  await debugSetPos(page, 'keeper', 5, 3);
+  await debugSetPos(page, 'wisp-0', 6, 3);
+
+  await page.keyboard.press('1'); // Strike
+  await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling (helpers.ts's tapKey doc)
+  expect((await snap(page))?.state, 'Strike enters targeting like any T1 action').toBe('playerTarget');
+
+  // Click wisp-0's tile (6,3) — tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 ("T2 cast" test's own formula).
+  const canvas = page.locator('canvas').first();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('canvas has no bounding box');
+  const ix = 192 + 6 * 48 + 24;
+  const iy = 48 + 3 * 48 + 24;
+  await page.mouse.click(box.x + (ix / 960) * box.width, box.y + (iy / 540) * box.height);
+
+  const logged = await waitForLoggedAction(page, 'strike');
+  expect(logged, 'the strike resolved').toBe(true);
+  const after = await snap(page);
+  expect(
+    after?.log.find((l) => l.action === 'strike')?.dmg,
+    'the strike actually dealt damage — the precondition for the Glow grant',
+  ).toBeGreaterThan(0);
+  await page.screenshot({ path: `${EV}/e2e-magic-pips-strike.png` });
+  expect(after?.glow, 'a damage-dealing Strike granted +1 Glow').toBe(1);
+});
+
+// §5.1 source 2 — a party unit starting ITS turn on a lantern tile grants +1 Glow. buildLayout
+// always seeds ≥1 lantern tile (grid.ts's lanternN = 1 + floor(rng()*2)), so no brazier/kit
+// precondition is needed here. Initiative is speed-sorted with ties→party-first (initiative.ts):
+// keeper(5) > mira(4) === wraith(4) → the tie goes to the party → mira(4) > wisp(3) — so Mira is
+// guaranteed to act immediately after the Keeper, with zero enemy turns (and zero extra polling)
+// needed in between (units.ts's own speed table: KEEPER 5, MIRA 4, wisp 3, wraith 4).
+test('a party unit starting its turn on a lantern tile grants +1 Glow', async ({ page }) => {
+  test.setTimeout(60_000);
+  await seedFreshSave(page);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  const opened = await waitForKeeperTurn(page);
+  expect(opened?.state).toBe('playerMove');
+  expect(opened?.glow, 'Glow starts at 0 (create()s reset block)').toBe(0);
+
+  const layout = await layoutDebug(page);
+  let lantern: { c: number; r: number } | null = null;
+  for (let r = 0; r < (layout?.tiles.length ?? 0) && !lantern; r++) {
+    for (let c = 0; c < layout!.tiles[r].length; c++) {
+      if (layout!.tiles[r][c] === 'lantern') { lantern = { c, r }; break; }
+    }
+  }
+  expect(lantern, 'buildLayout always seeds at least one lantern tile').not.toBeNull();
+
+  // Park Mira on the lantern NOW, while it's still the Keeper's turn — nothing moves her
+  // afterward, so she is standing on it the instant her own turn begins next.
+  await debugSetPos(page, 'mira', lantern!.c, lantern!.r);
+
+  await page.keyboard.press('7'); // Keeper Waits — ends the turn with no damage/no encounter,
+  await page.waitForTimeout(150); // so this can't be confused with the Strike source above.
+
+  const afterWait = await snap(page);
+  expect(
+    afterWait?.activeId,
+    "Mira's turn opens immediately — a party-to-party handoff is synchronous (no enemy turn in between)",
+  ).toBe('mira');
+  expect(afterWait?.state).toBe('playerMove');
+  await page.screenshot({ path: `${EV}/e2e-magic-pips-lantern-turnstart.png` });
+  expect(afterWait?.glow, 'Mira started her turn standing on a lantern tile — +1 Glow').toBe(1);
+});
