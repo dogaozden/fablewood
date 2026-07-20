@@ -1,0 +1,826 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > attested-ward resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "amount": 1,
+      "op": "fade",
+    },
+    {
+      "op": "banner",
+      "text": "The oath falters — the Fade stirs (−1).",
+    },
+  ],
+  "q05": [
+    {
+      "id": "warded",
+      "magnitude": 2,
+      "op": "status",
+      "targetId": "primary",
+      "turns": -1,
+    },
+    {
+      "op": "banner",
+      "text": "A thinner ward — half-sworn.",
+    },
+  ],
+  "q1": [
+    {
+      "id": "warded",
+      "magnitude": 4,
+      "op": "status",
+      "targetId": "primary",
+      "turns": -1,
+    },
+    {
+      "op": "banner",
+      "text": "Sworn protection, entered into the record!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > cast resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "amount": 2,
+      "op": "fade",
+    },
+    {
+      "op": "banner",
+      "text": "The Fade lashes back (−2).",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "Partial recall — a glancing cast.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 6,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "Cast — the Ledger blazes (×3)!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > cinder-rebuke resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The ember gutters — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "A weak ember; it singes, nothing more.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "dir": "right",
+      "op": "push",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "The ember catches — and shoves them back!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > heartening-word resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "id": "emboldened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "e1",
+      "turns": 1,
+    },
+    {
+      "id": "emboldened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "e2",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "A botched word — the wrong side rallies!",
+    },
+  ],
+  "q05": [
+    {
+      "op": "banner",
+      "text": "The moment passes, unremarked.",
+    },
+  ],
+  "q1": [
+    {
+      "id": "emboldened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "keeper",
+      "turns": 2,
+    },
+    {
+      "id": "emboldened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "mira",
+      "turns": 2,
+    },
+    {
+      "op": "banner",
+      "text": "The right word lands — the retinue stands taller!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > injunction resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "amount": 2,
+      "op": "fade",
+    },
+    {
+      "amount": 2,
+      "op": "heal",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "The writ backfires — they mend, you bleed (−2).",
+    },
+  ],
+  "q05": [
+    {
+      "id": "weakened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "A half-writ — it still stings.",
+    },
+  ],
+  "q1": [
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "id": "weakened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "id": "staggered",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "A writ that stops them where they stand!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > lanternfall resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The lantern gives no light — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-3",
+    },
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-4",
+    },
+    {
+      "op": "banner",
+      "text": "A guttering flare — it barely catches.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "aoe-3",
+    },
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "aoe-4",
+    },
+    {
+      "id": "kindled",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "id": "kindled",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-1",
+      "turns": 2,
+    },
+    {
+      "id": "kindled",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-2",
+      "turns": 2,
+    },
+    {
+      "id": "kindled",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-3",
+      "turns": 2,
+    },
+    {
+      "id": "kindled",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-4",
+      "turns": 2,
+    },
+    {
+      "op": "banner",
+      "text": "All the lantern's light, loosed at once!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > lattice resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The lattice unravels — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "One name catches; the rest slip free.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-3",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-4",
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-1",
+      "turns": 1,
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-2",
+      "turns": 1,
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-3",
+      "turns": 1,
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-4",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "Every name in the room, tied at once!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > parley resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "amount": 2,
+      "op": "fade",
+    },
+    {
+      "op": "banner",
+      "text": "It backfires (−2).",
+    },
+  ],
+  "q05": [
+    {
+      "op": "banner",
+      "text": "No accord — the moment passes.",
+    },
+  ],
+  "q1": [
+    {
+      "id": "staggered",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "id": "weakened",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "op": "banner",
+      "text": "They yield — weakened.",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > processional resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The procession scatters — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "op": "banner",
+      "text": "The rite falters, but still sweeps through.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "dir": "right",
+      "op": "push",
+      "targetId": "primary",
+    },
+    {
+      "dir": "right",
+      "op": "push",
+      "targetId": "aoe-1",
+    },
+    {
+      "dir": "right",
+      "op": "push",
+      "targetId": "aoe-2",
+    },
+    {
+      "op": "banner",
+      "text": "The rite sweeps them down its length!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > rite-of-sealing resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The seal breaks — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "id": "inked",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "Half-sealed — only the foremost is marked.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-3",
+    },
+    {
+      "id": "inked",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "id": "inked",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-1",
+      "turns": 2,
+    },
+    {
+      "id": "inked",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-2",
+      "turns": 2,
+    },
+    {
+      "id": "inked",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "aoe-3",
+      "turns": 2,
+    },
+    {
+      "op": "banner",
+      "text": "Struck through in the Ledger, marked true!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > sequence resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The lance breaks — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "Partial — one-deep.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "op": "banner",
+      "text": "Full — a three-deep lance.",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > smite resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The bolt fizzles — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "A glancing bolt.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "A bolt of cited truth!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > snare-knot resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The thread snaps — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 1,
+    },
+    {
+      "op": "banner",
+      "text": "A loose loop — it slows, barely.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 1,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "id": "bound",
+      "magnitude": 1,
+      "op": "status",
+      "targetId": "primary",
+      "turns": 2,
+    },
+    {
+      "op": "banner",
+      "text": "The knot draws tight — it cannot step.",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > verbatim-decree resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "amount": 2,
+      "op": "fade",
+    },
+    {
+      "op": "banner",
+      "text": "The Fade lashes back (−2).",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 3,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "A partial citation — close, not exact.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 8,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "The book's own words, cited to the letter!",
+    },
+  ],
+}
+`;
+
+exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > weave resolves a stable BoardOp sequence at q1 / q05 / q0 1`] = `
+{
+  "q0": [
+    {
+      "op": "banner",
+      "text": "The weave slips — turn lost.",
+    },
+  ],
+  "q05": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "op": "banner",
+      "text": "Partial — primary only.",
+    },
+  ],
+  "q1": [
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "primary",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-1",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-2",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-3",
+    },
+    {
+      "amount": 2,
+      "op": "damage",
+      "targetId": "aoe-4",
+    },
+    {
+      "op": "banner",
+      "text": "Full — the weave binds all.",
+    },
+  ],
+}
+`;
