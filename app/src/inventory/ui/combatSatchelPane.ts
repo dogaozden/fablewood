@@ -29,7 +29,7 @@ export function openCombatSatchelPane(usable: CombatSatchelEntry[], gold: number
       el('div', { class: 'inv-header' }, [el('h2', { class: 'inv-title', text: 'Satchel' }), goldEl]),
       el('hr', { class: 'inv-rule' }),
       body,
-      el('button', { class: 'inv-close', type: 'button', text: 'Cancel', onClick: close }),
+      el('button', { class: 'inv-close', type: 'button', text: 'Never Mind', onClick: close }),
     );
 
     if (!usable.length) {

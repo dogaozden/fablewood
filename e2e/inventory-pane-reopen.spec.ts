@@ -76,7 +76,7 @@ test('rapid q/Escape loop never leaves a ghost-reopened Satchel pane behind', as
       stuckCount++;
       // recover so the loop can keep probing subsequent iterations
       try {
-        await page.locator('.inv-close', { hasText: 'Cancel' }).click({ timeout: 1_000 });
+        await page.locator('.inv-close', { hasText: 'Never Mind' }).click({ timeout: 1_000 });
         await page.locator('.inv-overlay').first().waitFor({ state: 'detached', timeout: 2_000 });
       } catch { /* best-effort recovery only */ }
     }
