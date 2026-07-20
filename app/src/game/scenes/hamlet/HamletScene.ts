@@ -10,6 +10,8 @@ import { services } from '../../contracts';
 import { getPacks } from '../../../bridge/client';
 import { DialogueBox } from '../../dialogue';
 import { music } from '../../../music/instance';
+import { openInventoryPane } from '../../../inventory/ui/inventoryPane';
+import { openShopPane } from '../../../inventory/ui/shopPane';
 import { hex, C } from './palette';
 import { ensurePlaceholders } from './textures';
 import { pickInteraction, facingVec, type Vec2 } from './interaction';
@@ -31,6 +33,7 @@ import {
   alderConv,
   alderFarewell,
   cottageConv,
+  factorConv,
   wellspringEmpty,
   wellspringIntro,
   wellspringOutro,
@@ -64,6 +67,7 @@ export class HamletScene extends Phaser.Scene {
   private wasd!: { up: Key; down: Key; left: Key; right: Key };
   private keyE!: Key;
   private keySpace!: Key;
+  private keyI!: Key;
 
   private dialogue!: DialogueBox;
   private labels = new Map<LocationId, Phaser.GameObjects.Text>();
@@ -188,6 +192,7 @@ export class HamletScene extends Phaser.Scene {
       { key: 'char.berry', x: 245, y: 76 },
       { key: 'char.clerk', x: 44, y: 180 },
       { key: 'char.alder', x: 224, y: 202 },
+      { key: 'char.mira', x: 296, y: 148 },
     ];
     for (const d of defs) {
       const npc = this.add.sprite(d.x, d.y, d.key).setOrigin(0.5, 1).setDepth(d.y);
@@ -296,13 +301,19 @@ export class HamletScene extends Phaser.Scene {
     };
     this.keyE = kb.addKey(KC.E);
     this.keySpace = kb.addKey(KC.SPACE);
+    this.keyI = kb.addKey(KC.I);
   }
 
   // ---------------------------------------------------------------- async data
 
   private async bootstrap(): Promise<void> {
     try {
-      await Promise.all([services.save.ready(), services.srs.ready(), services.settings.ready()]);
+      await Promise.all([
+        services.save.ready(),
+        services.srs.ready(),
+        services.settings.ready(),
+        services.inventory.ready(),
+      ]);
     } catch {
       /* stubs/real impls both fine; ignore readiness errors */
     }
@@ -379,6 +390,7 @@ export class HamletScene extends Phaser.Scene {
     }
 
     const locked = this.busy || this.dialogue.isOpen;
+    if (!locked && Phaser.Input.Keyboard.JustDown(this.keyI)) void this.openSatchel();
     if (!locked) this.handleMovement(delta);
     else this.idleAnimate();
 
@@ -486,6 +498,8 @@ export class HamletScene extends Phaser.Scene {
         return cottageConv();
       case 'wellspring':
         return this.packId ? wellspringIntro() : wellspringEmpty();
+      case 'factor':
+        return factorConv();
     }
   }
 
@@ -508,6 +522,9 @@ export class HamletScene extends Phaser.Scene {
           break;
         case 'gate':
           await this.doGate();
+          break;
+        case 'factor':
+          await this.doFactor();
           break;
       }
     } finally {
@@ -568,6 +585,30 @@ export class HamletScene extends Phaser.Scene {
     await this.dialogue.run(alderFarewell());
     await this.persist();
     this.scene.start('vaults', { packId: choice });
+  }
+
+  /** Mira the Factor: dismiss on cancel, or open her shop (inventory-handoff §9). */
+  private async doFactor(): Promise<void> {
+    const choice = await this.dialogue.run(factorConv());
+    if (choice !== 'shop') return;
+    this.input.keyboard!.enabled = false;
+    await openShopPane();
+    this.input.keyboard!.enabled = true;
+    this.input.keyboard!.resetKeys();
+  }
+
+  /** Press I anywhere in the hamlet to check the Satchel (inventory-handoff §9). */
+  private async openSatchel(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      this.input.keyboard!.enabled = false;
+      await openInventoryPane();
+      this.input.keyboard!.enabled = true;
+      this.input.keyboard!.resetKeys();
+    } finally {
+      this.busy = false;
+    }
   }
 
   // --------------------------------------------------------------------- helpers

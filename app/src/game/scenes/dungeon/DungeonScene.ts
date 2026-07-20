@@ -22,6 +22,9 @@ import {
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
 import { music } from '../../../music/instance';
+import { roomClearLoot, bossLoot } from '../../../inventory/economy';
+import { itemById } from '../../../inventory/catalog';
+import { openInventoryPane } from '../../../inventory/ui/inventoryPane';
 import {
   firstUnclearedIndex,
   markRoomCleared,
@@ -63,6 +66,7 @@ export class DungeonScene extends Phaser.Scene {
   private handlers!: NodeHandlers;
   private busy = false;
   private didReady = false;
+  private satchelBusy = false;
 
   constructor() {
     super('vaults');
@@ -93,7 +97,11 @@ export class DungeonScene extends Phaser.Scene {
       /* audio is optional; never let it block the scene */
     }
     this.view = new VaultView(this);
-    this.handlers = { onRoom: (i) => this.onRoom(i), onCamp: () => void this.onCamp() };
+    this.handlers = {
+      onRoom: (i) => this.onRoom(i),
+      onCamp: () => void this.onCamp(),
+      onSatchel: () => void this.onSatchel(),
+    };
     this.view.renderChrome();
     // hard safety net: a screenshot/e2e must never hang waiting on __FABLEWOOD_READY
     this.time.delayedCall(READY_FALLBACK_MS, () => this.markReadyOnce());
@@ -112,6 +120,7 @@ export class DungeonScene extends Phaser.Scene {
   private async bootFlow(): Promise<void> {
     await services.save.ready();
     await services.srs.ready(); // the gate drill records to SRS — load Leitner state first
+    await services.inventory.ready(); // warms the wallet before the camp satchel button can be used
     await this.loadSpecAndFacts();
 
     this.progress = this.readProgress();
@@ -341,14 +350,29 @@ export class DungeonScene extends Phaser.Scene {
       return { transitioned: true };
     }
 
-    // normal / gate room cleared → mark, persist, unlock next, loot
+    // normal / gate room cleared → mark, persist, unlock next, loot (inventory-handoff §4)
     this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
     await services.save.save({ dungeon: this.progress });
     this.drawMap();
     this.refreshStatus();
-    this.view.lootToast(`${room.name} falls quiet. You pocket a Faded Coin.`);
+    await this.grantRoomLoot(room);
     this.busy = false;
     return { transitioned: false };
+  }
+
+  /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). */
+  private async grantRoomLoot(room: DungeonRoom): Promise<void> {
+    const roomIndex = this.spec.rooms.findIndex((r) => r.id === room.id);
+    const rng = mulberry32((this.seed + roomIndex * 7919 + 1) >>> 0);
+    const loot = roomClearLoot(roomIndex, rng);
+    await services.inventory.addGold(loot.gold);
+    if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
+    const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
+    this.view.lootToast(
+      trinketName
+        ? `${room.name} falls quiet. +${loot.gold} gold, and a ${trinketName} glints in the dust.`
+        : `${room.name} falls quiet. +${loot.gold} gold.`,
+    );
   }
 
   /** free_recall gate: pass (≥0.5) opens; miss costs HP with immediate retry; HP-out = Fade retreat. */
@@ -389,9 +413,36 @@ export class DungeonScene extends Phaser.Scene {
     this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
     const streak = services.save.get().streak + 1;
     const reward = (this.pack ? rewardText(bossQuest(this.pack)) : null) ?? DEV_REWARD;
+
+    // Boss bounty: gold + the guaranteed Warden Signet + a boss-weighted trinket (inventory-handoff §4).
+    const rng = mulberry32((this.seed + 104729) >>> 0);
+    const loot = bossLoot(rng);
+    await services.inventory.addGold(loot.gold);
+    await services.inventory.grantItem(loot.relicId);
+    if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
+    const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
+    const lootLine = trinketName
+      ? ` The Warden yields ${loot.gold} gold, their signet, and a ${trinketName}.`
+      : ` The Warden yields ${loot.gold} gold and their signet.`;
+
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
-    await this.view.vaultOpensBeat(reward, streak);
+    await this.view.vaultOpensBeat(reward + lootLine, streak);
     this.scene.start('hamlet', { seed: this.seed });
+  }
+
+  /** Open the Satchel from the camp card (inventory-handoff §9). Not gated on `busy` —
+   *  the camp card that hosts this button holds `busy` true for its whole lifetime. */
+  private async onSatchel(): Promise<void> {
+    if (this.satchelBusy) return;
+    this.satchelBusy = true;
+    try {
+      this.input.keyboard!.enabled = false;
+      await openInventoryPane();
+      this.input.keyboard!.enabled = true;
+      this.input.keyboard!.resetKeys();
+    } finally {
+      this.satchelBusy = false;
+    }
   }
 
   private async applyHp(delta: number): Promise<void> {
@@ -484,4 +535,15 @@ function toFactMap(facts: FactLite[]): Map<string, FactLite> {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Deterministic PRNG for loot rolls (same tiny mulberry32 as VaultView.ts/HamletScene.ts). */
+function mulberry32(seed: number): () => number {
+  let a = seed | 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

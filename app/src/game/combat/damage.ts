@@ -109,6 +109,11 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
     }
     case 'wait':
       return { ...EMPTY, banner: 'Holding position.' };
+    case 'satchel':
+      // Never actually reached: onPickAction gates on validTargets first, and
+      // satchel has none yet (inventory-handoff §10, deferred). Kept here only
+      // so this switch stays exhaustive over ActionKind.
+      return { ...EMPTY, banner: 'The satchel is not open in combat yet.' };
   }
 }
 

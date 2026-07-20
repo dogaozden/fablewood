@@ -16,7 +16,7 @@ export const PATH = 1;
 export const WATER = 2;
 
 export type Grid = number[][];
-export type LocationId = 'cottage' | 'tavern' | 'records' | 'wellspring' | 'gate';
+export type LocationId = 'cottage' | 'tavern' | 'records' | 'wellspring' | 'gate' | 'factor';
 
 export interface PropSpec {
   key: string;
@@ -166,6 +166,20 @@ export function buildHamlet(): HamletMap {
     [7, 2], [8, 2], [7, 6], [13, 2], [19, 3], [18, 7], [19, 7], [6, 6], [6, 7], [13, 10], [7, 10], [19, 11],
   ] as const)
     tree(c, r);
+
+  // Mira the Factor (inventory-handoff §9): no building of her own — she is her
+  // existing char.mira NPC sprite (placed via HamletScene.buildNpcs), standing in
+  // open grass east of the plaza. This location entry is just her interaction
+  // zone (door/center/label), appended the same way the Wellspring is above:
+  // no BUILDINGS entry, no prop art, no solid footprint.
+  locations.push({
+    id: 'factor',
+    name: 'Mira the Factor',
+    prompt: 'Browse wares',
+    door: tc(18, 9),
+    center: { x: 18 * TILE + TILE / 2, y: 8 * TILE + TILE / 2 },
+    label: { x: 18 * TILE + TILE / 2, y: 8 * TILE - 12 },
+  });
 
   // Lantern posts (decorative, non-solid): warm pools of light along the paths.
   const lanternTiles: [number, number][] = [

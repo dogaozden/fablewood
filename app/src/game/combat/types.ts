@@ -13,7 +13,7 @@ export type TileType = 'floor' | 'wall' | 'gold' | 'lantern';
 export type Team = 'party' | 'enemy';
 export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
 
-export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'wait';
+export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'satchel' | 'wait';
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
 export interface Coord {
@@ -84,6 +84,15 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
   parley: {
     kind: 'parley', label: 'Parley', hotkey: '6', encounter: 'scenario_branch', range: 1,
     shape: 'single', tint: 0xe07aae, blurb: 'Talk it down. (a branching choice)',
+  },
+  // Menu/hotkey entry only (inventory-handoff §10): the item-list handshake and
+  // combat/** effect-wiring stay deferred to a future slice — this just reserves
+  // the ActionKind + registers the hotkey so nothing has to shift again later.
+  // The generic hotkey dispatch (CombatScene's input.keyboard 'keydown' handler,
+  // which looks up ACTIONS by e.key) needs no changes to pick this up.
+  satchel: {
+    kind: 'satchel', label: 'Satchel', hotkey: 'q', encounter: null, range: 0,
+    shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item. (coming soon)',
   },
   wait: {
     kind: 'wait', label: 'Wait', hotkey: '7', encounter: null, range: 0,

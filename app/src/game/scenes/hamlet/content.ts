@@ -86,6 +86,18 @@ export function alderFarewell(): Conversation {
   };
 }
 
+/** Mira the Factor — the wares-and-trade stop (inventory-handoff §9). */
+export function factorConv(): Conversation {
+  return {
+    speaker: 'Mira the Factor',
+    pages: ['Keeper! Coin to spend, or loot to weigh? My ledger is open either way.'],
+    choices: [
+      { label: 'Browse wares', value: 'shop' },
+      { label: 'Never mind', value: '__cancel__' },
+    ],
+  };
+}
+
 /** Keeper's Cottage — no NPC, the Keeper's own quiet beat. */
 export function cottageConv(): Conversation {
   return {
