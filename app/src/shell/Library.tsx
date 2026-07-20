@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getPacks, getState } from '../bridge/client';
 import { services } from '../game/contracts';
+import { boxLabel } from './metrics';
 import './shell.css';
 
 /**
@@ -35,7 +36,7 @@ function until(ms: number): string {
 }
 
 function BoxBadge({ box }: { box: number }) {
-  return <span className={`lib-badge box${box}`}>{box === 0 ? 'new' : `box ${box}`}</span>;
+  return <span className={`lib-badge box${box}`}>{boxLabel(box)}</span>;
 }
 
 function FactRow({ fact, srs }: { fact: Fact; srs: SrsState }) {
@@ -107,7 +108,7 @@ export function Library() {
           <h2 className="lib-title">The Library</h2>
           <p className="lib-sub">The shelves stand empty.</p>
           <p style={{ color: 'var(--parchment)', opacity: 0.85 }}>
-            No packs installed yet. Compile a knowledge pack into <code>packs/</code> and it will
+            No province has been settled yet. Compile a knowledge pack into <code>packs/</code> and it will
             appear here as a province of the Ledger.
           </p>
         </div>
@@ -132,7 +133,7 @@ export function Library() {
                 <span className={isOpen ? 'lib-caret open' : 'lib-caret'}>▸</span>
                 <span className="lib-packtitle">{pack.title}</span>
                 <span className="lib-counts">
-                  {pack.facts.length} facts · {pack.encounterCount} encounters
+                  {pack.facts.length} fables · {pack.encounterCount} encounters
                 </span>
               </button>
               {isOpen && (

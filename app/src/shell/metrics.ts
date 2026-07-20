@@ -15,6 +15,16 @@ const DAY_MS = 86_400_000;
 /** Facts per Leitner box, indexed 0 (never seen) through 5 (mastered). */
 export type BoxCounts = [number, number, number, number, number, number];
 
+/** The Ledger's own names for each Leitner box (weld strength), indexed 0-5. */
+export const BOX_LABELS = ['new', 'fragile', 'learning', 'steady', 'strong', 'mastered'] as const;
+
+/** Human label for a Leitner box index — never a raw box number. Clamps a
+ *  corrupted out-of-range box the same way boxDistribution does, rather than
+ *  throwing or leaking `undefined` into the UI. */
+export function boxLabel(box: number): string {
+  return BOX_LABELS[Math.min(Math.max(Math.round(box), 0), 5)];
+}
+
 /** How many of `factIds` sit in each box. Ids missing from `facts` count as box 0. */
 export function boxDistribution(
   factIds: string[],

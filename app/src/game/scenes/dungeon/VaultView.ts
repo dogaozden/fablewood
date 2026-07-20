@@ -191,7 +191,7 @@ export class VaultView {
   }
 
   setStatus(hp: number, maxHp: number, streak: number): void {
-    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Streak  ${streak}`);
+    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Hearth Streak  ${streak}`);
   }
 
   // ---- the map strip --------------------------------------------------------
@@ -431,7 +431,7 @@ export class VaultView {
     }
     if (hasTeaser) {
       const n = facts.length;
-      cont.add(s.add.text(cx, ty, `✦  ${n} faded record${n > 1 ? 's' : ''} wait here — the ledger will show them`, { fontFamily: FONT, fontSize: '13px', color: hex(C.bark), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 80 } }).setOrigin(0.5, 0));
+      cont.add(s.add.text(cx, ty, `✦  ${n} faded fable${n > 1 ? 's' : ''} wait here — the ledger will show them`, { fontFamily: FONT, fontSize: '13px', color: hex(C.bark), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 80 } }).setOrigin(0.5, 0));
     }
 
     return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Close' : 'Descend ▸');
@@ -452,7 +452,7 @@ export class VaultView {
     const healLine = !heal
       ? 'The party rests, and is restored to full.'
       : heal.before < heal.after
-        ? `The hearth mends you — ${heal.before} → ${heal.after} HP.`
+        ? `The hearth mends you — ${heal.before} to ${heal.after} HP.`
         : `The hearth is warm; your party is already whole — ${heal.after}/${heal.after} HP.`;
     cont.add(s.add.text(cx, top + 104, healLine, { fontFamily: FONT, fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
     if (this.handlers) {
@@ -580,7 +580,7 @@ export class VaultView {
     const title = s.add.text(cx, cy - 62, 'THE VAULT OPENS', { fontFamily: FONT, fontSize: '38px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(303).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 12, false, true);
     const rule = s.add.rectangle(cx, cy - 26, 220, 2, C.amber, 0.8).setDepth(303).setAlpha(0);
     const line = s.add.text(cx, cy + 4, reward, { fontFamily: FONT, fontSize: '20px', color: hex(C.lanternGold), fontStyle: 'bold', align: 'center', wordWrap: { width: 640 } }).setOrigin(0.5).setDepth(303).setAlpha(0);
-    const streakT = s.add.text(cx, cy + 48, `Streak  ${streak}`, { fontFamily: FONT, fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
+    const streakT = s.add.text(cx, cy + 48, `Hearth Streak  ${streak}`, { fontFamily: FONT, fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
 
     return new Promise((resolve) => {
       s.tweens.add({ targets: scrim, alpha: 1, duration: 300 });

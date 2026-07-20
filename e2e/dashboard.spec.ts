@@ -124,7 +124,7 @@ test.describe('Dashboard + Settings', () => {
     await page.locator('.settings').waitFor({ state: 'visible' });
 
     // Judge latency section renders its empty state (no encounter has run yet).
-    await expect(page.locator('.settings-judge')).toContainText('No grade yet');
+    await expect(page.locator('.settings-judge')).toContainText('No verdict yet');
 
     // Move the slider via real keyboard interaction — range inputs have ambiguous
     // .fill() support, but Home/ArrowRight is native, deterministic, and fully

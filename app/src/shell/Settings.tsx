@@ -107,14 +107,12 @@ export function Settings({ muted, onToggleMute }: Props) {
                 {lastGrade.latencyMs ?? '—'}
                 <span className="unit">ms</span>
               </div>
-              <p className="dash-note">
-                verdict: {lastGrade.verdict} · tier: {lastGrade.tier ?? 'unknown'}
-              </p>
+              <p className="dash-note">{lastGrade.line}</p>
             </>
           ) : (
             <p className="dash-note">
-              No grade yet this session — answer a cast-from-memory question and the Clerk&rsquo;s latency will
-              appear here.
+              No verdict yet — answer a cast-from-memory question, and the Clerk&rsquo;s swiftness will appear
+              here.
             </p>
           )}
         </div>

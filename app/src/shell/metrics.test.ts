@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BOX_LABELS,
   boxDistribution,
+  boxLabel,
   currentStreak,
   dueForecast,
   endOfDay,
@@ -41,6 +43,24 @@ describe('boxDistribution', () => {
 
   it('empty factIds → all zero', () => {
     expect(boxDistribution([], {})).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+});
+
+describe('boxLabel', () => {
+  it('labels every in-range box with the Ledger\'s own name, never a raw number', () => {
+    expect(BOX_LABELS.map((_, i) => boxLabel(i))).toEqual([
+      'new',
+      'fragile',
+      'learning',
+      'steady',
+      'strong',
+      'mastered',
+    ]);
+  });
+
+  it('clamps a corrupted out-of-range box instead of returning undefined', () => {
+    expect(boxLabel(99)).toBe('mastered');
+    expect(boxLabel(-4)).toBe('new');
   });
 });
 

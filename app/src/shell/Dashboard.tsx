@@ -3,7 +3,9 @@ import { getPacks, getState } from '../bridge/client';
 import { services } from '../game/contracts';
 import type { SrsState } from '../srs/leitner';
 import {
+  BOX_LABELS,
   boxDistribution,
+  boxLabel,
   currentStreak,
   dueForecast,
   flattenHistory,
@@ -30,8 +32,6 @@ interface Props {
 const PASS_RATE_WINDOW = 20;
 /** How many weakest-binding facts to show. */
 const WEAKEST_LIMIT = 5;
-
-const BOX_LABELS = ['new', 'fragile', 'learning', 'steady', 'strong', 'mastered'] as const;
 
 interface DomainMastery {
   packId: string;
@@ -307,7 +307,7 @@ export function Dashboard({ onSetOut }: Props) {
                       <ul className="dash-weak-list">
                         {m.weakest.map((w) => (
                           <li key={w.id}>
-                            <span className={`lib-badge box${w.box}`}>{w.box === 0 ? 'new' : `box ${w.box}`}</span>
+                            <span className={`lib-badge box${w.box}`}>{boxLabel(w.box)}</span>
                             <span className="dash-weak-statement">{w.statement}</span>
                           </li>
                         ))}
