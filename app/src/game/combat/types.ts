@@ -81,7 +81,7 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
   },
   weave: {
     kind: 'weave', label: 'Binding Weave', hotkey: '3', encounter: 'match', range: 2,
-    shape: 'cross', tint: 0x9a6ec8, blurb: 'Cross AoE. (match the pairs)',
+    shape: 'cross', tint: 0x9a6ec8, blurb: 'A cross of binding light. (match the pairs)',
   },
   sequence: {
     kind: 'sequence', label: 'Ritual Sequence', hotkey: '4', encounter: 'order', range: 3,

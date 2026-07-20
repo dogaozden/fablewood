@@ -45,7 +45,7 @@ export function openInventoryPane(): Promise<void> {
         ];
       }
       if (item.use === 'trial') {
-        return [el('span', { class: 'inv-btn is-muted', title: 'Used in trials', text: 'Trial-use' })];
+        return [el('span', { class: 'inv-btn is-muted', title: 'Used in trials', text: 'Trial-bound' })];
       }
       return [];
     };

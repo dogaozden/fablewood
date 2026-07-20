@@ -633,7 +633,7 @@ exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > sequence reso
     },
     {
       "op": "banner",
-      "text": "Partial — one-deep.",
+      "text": "Partial — the lance falls short.",
     },
   ],
   "q1": [
@@ -788,7 +788,7 @@ exports[`SPELLBOOK — table snapshot (§7, freezes the numbers) > weave resolve
     },
     {
       "op": "banner",
-      "text": "Partial — primary only.",
+      "text": "Partial — only the nearest thread binds.",
     },
   ],
   "q1": [

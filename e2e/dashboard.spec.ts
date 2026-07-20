@@ -59,7 +59,7 @@ test.describe('Dashboard + Settings', () => {
 
     await page.goto('/');
     await waitReady(page);
-    await page.getByRole('button', { name: 'Dashboard' }).click();
+    await page.getByRole('button', { name: 'The Ledger' }).click();
     await page.locator('.dash').waitFor({ state: 'visible' });
 
     // Mastery by province: 4 of the pack's 42 facts have been seen (welded).
@@ -102,7 +102,7 @@ test.describe('Dashboard + Settings', () => {
 
     await page.goto('/');
     await waitReady(page);
-    await page.getByRole('button', { name: 'Dashboard' }).click();
+    await page.getByRole('button', { name: 'The Ledger' }).click();
     await page.locator('.dash').waitFor({ state: 'visible' });
 
     await expect(page.locator('.dash-domain-count')).toContainText('0 / 42');
@@ -120,7 +120,7 @@ test.describe('Dashboard + Settings', () => {
 
     await page.goto('/');
     await waitReady(page);
-    await page.getByRole('button', { name: /Settings/ }).click();
+    await page.getByRole('button', { name: /The Study/ }).click();
     await page.locator('.settings').waitFor({ state: 'visible' });
 
     // Judge latency section renders its empty state (no encounter has run yet).
@@ -145,7 +145,7 @@ test.describe('Dashboard + Settings', () => {
     // exact:true matters here — "Mute music" is a case-insensitive SUBSTRING of
     // "Unmute music", so a loose match could silently click the wrong toggle state.
     await page.getByRole('button', { name: 'Mute music', exact: true }).click();
-    await expect(page.locator('.settings-music')).toContainText('Muted');
+    await expect(page.locator('.settings-music')).toContainText('Hushed');
     await expect(page.getByRole('button', { name: 'Unmute music', exact: true })).toBeVisible();
 
     await page.screenshot({ path: `${EV}/e2e-settings.png` });
@@ -153,7 +153,7 @@ test.describe('Dashboard + Settings', () => {
     // Reload: the persisted volume must survive independent of React state.
     await page.goto('/');
     await waitReady(page);
-    await page.getByRole('button', { name: /Settings/ }).click();
+    await page.getByRole('button', { name: /The Study/ }).click();
     await page.locator('.settings').waitFor({ state: 'visible' });
     await expect(page.locator('.settings input[type="range"]')).toHaveValue('42');
   });

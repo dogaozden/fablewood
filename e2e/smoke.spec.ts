@@ -17,5 +17,5 @@ test('boot scene renders the canvas and sets the title', async ({ page }) => {
   expect(state?.seed).toBe(7);
 
   // shell chrome is present around the canvas
-  await expect(page.getByRole('button', { name: 'Game' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Realms' })).toBeVisible();
 });

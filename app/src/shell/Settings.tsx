@@ -72,11 +72,11 @@ export function Settings({ muted, onToggleMute }: Props) {
   return (
     <div className="settings">
       <div className="settings-inner">
-        <h2 className="lib-title">Settings</h2>
+        <h2 className="lib-title">The Study</h2>
         <p className="lib-sub">Tune the hearth.</p>
 
         <div className="dash-card settings-music">
-          <p className="dash-eyebrow">Music</p>
+          <p className="dash-eyebrow">🎵 The hearth&rsquo;s music</p>
           <label className="settings-row">
             <span className="settings-label">Volume</span>
             <input
@@ -92,20 +92,20 @@ export function Settings({ muted, onToggleMute }: Props) {
             <span className="settings-value">{volume}</span>
           </label>
           <label className="settings-row">
-            <span className="settings-label">{muted ? 'Muted' : 'Sound on'}</span>
+            <span className="settings-label">{muted ? 'Hushed' : 'Singing'}</span>
             <button className="dash-setout settings-mute-btn" onClick={onToggleMute}>
-              {muted ? 'Unmute' : 'Mute'}
+              {muted ? 'Sing' : 'Hush'}
             </button>
           </label>
         </div>
 
         <div className="dash-card settings-judge">
-          <p className="dash-eyebrow">The Clerk&rsquo;s ledger</p>
+          <p className="dash-eyebrow">⏳ The Clerk&rsquo;s ledger</p>
           {lastGrade ? (
             <>
               <div className="dash-stat" style={{ fontSize: '1.6rem' }}>
                 {lastGrade.latencyMs ?? '—'}
-                <span className="unit">ms</span>
+                <span className="unit">grains</span>
               </div>
               <p className="dash-note">{lastGrade.line}</p>
             </>

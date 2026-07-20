@@ -434,7 +434,7 @@ export class VaultView {
       cont.add(s.add.text(cx, ty, `✦  ${n} faded fable${n > 1 ? 's' : ''} wait here — the ledger will show them`, { fontFamily: FONT, fontSize: '13px', color: hex(C.bark), fontStyle: 'italic', align: 'center', wordWrap: { width: w - 80 } }).setOrigin(0.5, 0));
     }
 
-    return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Close' : 'Descend ▸');
+    return this.finishCard(cont, h, opts.mode ?? 'wait', opts.revisit ? 'Withdraw ▸' : 'Descend ▸');
   }
 
   showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {

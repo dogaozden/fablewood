@@ -23,7 +23,7 @@ test.describe('overlay ↔ game teardown', () => {
     await openOverlay(page, 'mcq');
     await expect(page.locator('.fw-overlay')).toHaveCount(1);
 
-    await keyboardSwitchTab(page, 'Dashboard');
+    await keyboardSwitchTab(page, 'The Ledger');
     await expect(page.locator('.phaser-root')).toHaveCount(0); // game unmounted
     await expect(page.locator('.fw-overlay')).toHaveCount(0); // overlay went with it
     await expect(page.locator('.dash')).toBeVisible(); // shell stays usable
@@ -37,7 +37,7 @@ test.describe('overlay ↔ game teardown', () => {
 
     // back to the game: a fresh mount must boot with its keyboard live (the
     // depth latch stepped down on abort, so nothing re-quiets the new game)
-    await keyboardSwitchTab(page, 'Game');
+    await keyboardSwitchTab(page, 'Realms');
     await page.waitForFunction(() => window.__FABLEWOOD_READY === true, undefined, { timeout: 45_000 });
     const kbEnabled = await page.evaluate(
       () => (window.__FABLEWOOD_GAME as { input?: { keyboard?: { enabled?: boolean } } } | undefined)?.input?.keyboard?.enabled,
@@ -57,7 +57,7 @@ test.describe('overlay ↔ game teardown', () => {
     await tapKey(page, 'i');
     await expect(page.locator('.inv-overlay')).toHaveCount(1);
 
-    await keyboardSwitchTab(page, 'Dashboard');
+    await keyboardSwitchTab(page, 'The Ledger');
     await expect(page.locator('.phaser-root')).toHaveCount(0); // game unmounted
     await expect(page.locator('.inv-overlay')).toHaveCount(0); // pane went with it, no orphan
     await expect(page.locator('.dash')).toBeVisible(); // shell stays usable
