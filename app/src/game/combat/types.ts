@@ -3,12 +3,13 @@
  * (grid/initiative/damage/boss/ai) and the scene agree on lives here.
  */
 import type { EnemyArchetype, EncounterKind, Quality } from '../contracts';
+import type { StatusInstance } from './status';
 
 export const GRID_W = 12;
 export const GRID_H = 8;
 export const CELL = 48; // 16px tiles at 3× integer zoom
 
-export type TileType = 'floor' | 'wall' | 'gold' | 'lantern';
+export type TileType = 'floor' | 'wall' | 'gold' | 'lantern' | 'brazier' | 'mist';
 
 export type Team = 'party' | 'enemy';
 export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
@@ -41,6 +42,15 @@ export interface UnitState extends Coord {
   parley: boolean;
   /** parley "weaken" stacks here as negative atk; also used for skip */
   skipNextTurn: boolean;
+  /** NEW (§2) — always [] at spawn; replaces skipNextTurn + Parley's permanent attack-1 for
+   *  new call sites. skipNextTurn itself is KEPT one release for save-less migration ease
+   *  (deleted Phase 3) — reads/writes for the new status system all go through
+   *  hasStatus(u,'staggered') instead. */
+  statuses: StatusInstance[];
+  /** NEW (§4.2) — one opportunity strike DEALT per unit per round; reset each new round. */
+  oaSpent: boolean;
+  /** NEW (§10) — companion signature free action, once per battle. */
+  uniqueSpent: boolean;
   /** boss only */
   isBoss?: boolean;
   shields?: number;

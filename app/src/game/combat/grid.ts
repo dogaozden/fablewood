@@ -12,17 +12,26 @@ export interface Layout {
   tiles: TileGrid;
   lanterns: Coord[];
   gold: Coord[];
+  /** §4.4 — unlit lanterns; a party unit adjacent may light one (free interact, +1 Glow) */
+  braziers: Coord[];
+  /** §4.4 — 0 or 2 contiguous interior tiles; blocks line-of-fire and Ritecraft lines */
+  mist: Coord[];
   /** suggested spawn tiles (guaranteed floor, non-overlapping) */
   partySpawns: Coord[];
   enemySpawns: Coord[];
 }
 
 export function tileCost(t: TileType): number {
-  return t === 'gold' ? 2 : 1; // floor & lantern = 1; wall handled as blocking
+  return t === 'gold' ? 2 : 1; // floor, lantern, brazier & mist = 1; wall handled as blocking
 }
 
 export function isBlocking(t: TileType): boolean {
   return t === 'wall';
+}
+
+/** §4.4 — wall AND mist block sight (wraith LoF, hasLineOfFire below) and Ritecraft lines. */
+export function blocksSight(t: TileType): boolean {
+  return t === 'wall' || t === 'mist';
 }
 
 /**
@@ -66,6 +75,41 @@ export function buildLayout(roomId: string, seed: number): Layout {
   const floorFree = (co: Coord) => tiles[co.r][co.c] === 'floor' && !reserved.has(key(co.c, co.r));
   const take = (co: Coord | null) => { if (co) reserved.add(key(co.c, co.r)); return co; };
 
+  // §4.4 — braziers 0-1, never in spawn zones, placed only on still-floor tiles (lanterns
+  // above are already reserved, so they can never be displaced by this step).
+  const braziers: Coord[] = [];
+  const brazierN = Math.floor(rng() * 2); // 0..1
+  for (let i = 0; i < brazierN; i++) {
+    const cand = pick(interior, rng, (co) => floorFree(co) && !spawnZone(co, true) && !spawnZone(co, false));
+    if (cand) { tiles[cand.r][cand.c] = 'brazier'; braziers.push(cand); reserved.add(key(cand.c, cand.r)); }
+  }
+
+  // §4.4 — mist: 0-1 patch of 2 contiguous interior tiles, never in spawn zones. Best-effort:
+  // if no contiguous pair is free this seed, the patch is simply absent (0 is a valid count).
+  const mist: Coord[] = [];
+  const mistPatchN = Math.floor(rng() * 2); // 0..1
+  for (let i = 0; i < mistPatchN; i++) {
+    let pool = interior.filter((co) => floorFree(co) && !spawnZone(co, true) && !spawnZone(co, false));
+    let placed = false;
+    while (pool.length && !placed) {
+      const idx = Math.floor(rng() * pool.length);
+      const t0 = pool[idx];
+      pool = pool.filter((_, j) => j !== idx);
+      const neighbors = Object.values(DIRS)
+        .map((d) => ({ c: t0.c + d.c, r: t0.r + d.r }))
+        .filter((co) => floorFree(co) && !spawnZone(co, true) && !spawnZone(co, false));
+      if (neighbors.length) {
+        const n = neighbors[Math.floor(rng() * neighbors.length)];
+        tiles[t0.r][t0.c] = 'mist';
+        tiles[n.r][n.c] = 'mist';
+        mist.push(t0, n);
+        reserved.add(key(t0.c, t0.r));
+        reserved.add(key(n.c, n.r));
+        placed = true;
+      }
+    }
+  }
+
   const partySpawns: Coord[] = [];
   const enemySpawns: Coord[] = [];
   for (let i = 0; i < 3; i++) {
@@ -75,7 +119,7 @@ export function buildLayout(roomId: string, seed: number): Layout {
     if (e) enemySpawns.push(e);
   }
 
-  return { tiles, lanterns, gold, partySpawns, enemySpawns };
+  return { tiles, lanterns, gold, braziers, mist, partySpawns, enemySpawns };
 }
 
 function pick(pool: Coord[], rng: () => number, ok: (c: Coord) => boolean): Coord | null {
@@ -177,7 +221,7 @@ export function lineTiles(origin: Coord, dir: Dir, depth: number): Coord[] {
   return out;
 }
 
-/** Straight clear line-of-fire for a wraith (same row/col, within range, no walls). */
+/** Straight clear line-of-fire for a wraith (same row/col, within range, no walls/mist). */
 export function hasLineOfFire(from: Coord, to: Coord, range: number, tiles: TileGrid): boolean {
   if (from.c !== to.c && from.r !== to.r) return false;
   const dist = Math.abs(from.c - to.c) + Math.abs(from.r - to.r);
@@ -185,7 +229,39 @@ export function hasLineOfFire(from: Coord, to: Coord, range: number, tiles: Tile
   const stepC = Math.sign(to.c - from.c);
   const stepR = Math.sign(to.r - from.r);
   for (let i = 1; i < dist; i++) {
-    if (isBlocking(tiles[from.r + stepR * i][from.c + stepC * i])) return false;
+    if (blocksSight(tiles[from.r + stepR * i][from.c + stepC * i])) return false;
   }
   return true;
+}
+
+export interface ForceMoveBoard {
+  tiles: TileGrid;
+  /** keys of every OTHER living unit (excludes the unit being pushed/pulled) */
+  occupied: Set<string>;
+}
+
+export interface ForceMoveResult {
+  moved: boolean;
+  /** true when the mover stayed put and should take +1 bump damage */
+  bump: boolean;
+  /** destination if moved, else the unchanged original position */
+  to: Coord;
+}
+
+/**
+ * §4.3 forced movement: one tile along `dir`. In-bounds + non-wall + unoccupied → moves
+ * (terrain entered normally). Otherwise stays and bumps (+1 dmg — the caller applies it via
+ * computeHit). No domino: an occupied destination is a bump, never a chain push.
+ *
+ * Direction-agnostic on purpose: pass the away-from-caster Dir for a push, the
+ * toward-caster Dir for a (future) pull — the resolution rules are identical either way,
+ * so no separate pull implementation is needed when that spell arrives.
+ */
+export function forceMove(pos: Coord, dir: Dir, board: ForceMoveBoard): ForceMoveResult {
+  const d = DIRS[dir];
+  const to: Coord = { c: pos.c + d.c, r: pos.r + d.r };
+  if (!inBounds(to.c, to.r)) return { moved: false, bump: true, to: pos };
+  if (isBlocking(board.tiles[to.r][to.c])) return { moved: false, bump: true, to: pos };
+  if (board.occupied.has(key(to.c, to.r))) return { moved: false, bump: true, to: pos };
+  return { moved: true, bump: false, to };
 }

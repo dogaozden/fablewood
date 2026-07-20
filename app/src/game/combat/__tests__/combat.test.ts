@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { buildInitiative, nextInOrder } from '../initiative';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles, hasLineOfFire,
-  type TileGrid,
+  blocksSight, forceMove, type TileGrid, type ForceMoveBoard,
 } from '../grid';
-import { resolveAction } from '../damage';
+import { resolveAction, isFlanked } from '../damage';
 import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from '../boss';
-import { decideEnemy } from '../ai';
-import { makeKeeper, makeMira, makeEnemy } from '../units';
-import { key, GRID_W, GRID_H, type UnitState, type TileType } from '../types';
+import { decideEnemy, occupancyExcept, opportunityStrikers, carefulStepMove } from '../ai';
+import { makeKeeper, makeMira, makeEnemy, ENEMY_STATS } from '../units';
+import { key, manhattan, GRID_W, GRID_H, type UnitState, type TileType } from '../types';
 import { usableSatchelItems, resolveHealUse } from '../satchel';
 import { itemById } from '../../../inventory/catalog';
 
@@ -96,6 +96,56 @@ describe('AoE geometry', () => {
   });
 });
 
+describe('blocksSight & mist LoF (§4.4)', () => {
+  it('wall and mist block sight; floor/gold/lantern/brazier do not', () => {
+    expect(blocksSight('wall')).toBe(true);
+    expect(blocksSight('mist')).toBe(true);
+    expect(blocksSight('floor')).toBe(false);
+    expect(blocksSight('gold')).toBe(false);
+    expect(blocksSight('lantern')).toBe(false);
+    expect(blocksSight('brazier')).toBe(false);
+  });
+
+  it("a mist tile blocks a wraith's line of fire the same as a wall", () => {
+    const tiles = floorGrid(6, 6);
+    tiles[1][3] = 'mist';
+    expect(hasLineOfFire({ c: 1, r: 1 }, { c: 4, r: 1 }, 3, tiles)).toBe(false);
+  });
+
+  it('a brazier does NOT block line of fire (passable, unlike wall/mist)', () => {
+    const tiles = floorGrid(6, 6);
+    tiles[1][3] = 'brazier';
+    expect(hasLineOfFire({ c: 1, r: 1 }, { c: 4, r: 1 }, 3, tiles)).toBe(true);
+  });
+});
+
+describe('forceMove — forced movement (§4.3)', () => {
+  const tiles = floorGrid(6, 6);
+  const board = (t: TileGrid, occupied = new Set<string>()): ForceMoveBoard => ({ tiles: t, occupied });
+
+  it('moves one tile in-bounds onto an unoccupied non-wall tile', () => {
+    expect(forceMove({ c: 2, r: 2 }, 'right', board(tiles))).toMatchObject({ moved: true, bump: false, to: { c: 3, r: 2 } });
+  });
+
+  it('bumps off a wall — stays, +1 bump, no move', () => {
+    const walled = floorGrid(6, 6);
+    walled[2][3] = 'wall';
+    expect(forceMove({ c: 2, r: 2 }, 'right', board(walled))).toMatchObject({ moved: false, bump: true, to: { c: 2, r: 2 } });
+  });
+
+  it('bumps out of bounds — stays, +1 bump, no move', () => {
+    expect(forceMove({ c: 0, r: 2 }, 'left', board(tiles))).toMatchObject({ moved: false, bump: true, to: { c: 0, r: 2 } });
+  });
+
+  it('bumps off an occupied tile — no domino (the occupant never moves, mover just bumps)', () => {
+    expect(forceMove({ c: 2, r: 2 }, 'right', board(tiles, new Set([key(3, 2)])))).toMatchObject({ moved: false, bump: true, to: { c: 2, r: 2 } });
+  });
+
+  it('is direction-agnostic — a pull (toward-caster Dir) resolves under the same rules as a push', () => {
+    expect(forceMove({ c: 2, r: 2 }, 'left', board(tiles))).toMatchObject({ moved: true, bump: false, to: { c: 1, r: 2 } });
+  });
+});
+
 describe('damage table', () => {
   it('Strike is a fixed FREE hit — quality-independent, never misses, no self-chip', () => {
     expect(resolveAction('strike', 1)).toMatchObject({ hits: 1, selfChip: 0, fade: 0 });
@@ -160,6 +210,41 @@ describe('damage table', () => {
   });
 });
 
+describe('flanking geometry — isFlanked (§4.1)', () => {
+  it('a living same-team unit at the opposite tile flanks — all 4 directions', () => {
+    const cases: Array<[{ c: number; r: number }, { c: number; r: number }, { c: number; r: number }]> = [
+      [{ c: 5, r: 5 }, { c: 5, r: 4 }, { c: 5, r: 3 }], // attacker south, target north, ally further north
+      [{ c: 5, r: 5 }, { c: 5, r: 6 }, { c: 5, r: 7 }], // attacker north, target south, ally further south
+      [{ c: 5, r: 5 }, { c: 4, r: 5 }, { c: 3, r: 5 }], // attacker east, target west, ally further west
+      [{ c: 5, r: 5 }, { c: 6, r: 5 }, { c: 7, r: 5 }], // attacker west, target east, ally further east
+    ];
+    for (const [attacker, target, opposite] of cases) {
+      const ally = makeKeeper(opposite.c, opposite.r);
+      expect(isFlanked(attacker, target, 'party', [ally])).toBe(true);
+    }
+  });
+
+  it('no unit at the opposite tile → no flank', () => {
+    expect(isFlanked({ c: 5, r: 5 }, { c: 5, r: 4 }, 'party', [])).toBe(false);
+  });
+
+  it('a DEAD unit at the opposite tile does not flank', () => {
+    const ally = makeKeeper(5, 3);
+    ally.alive = false;
+    expect(isFlanked({ c: 5, r: 5 }, { c: 5, r: 4 }, 'party', [ally])).toBe(false);
+  });
+
+  it("an enemy-team unit at the opposite tile does not flank (must be the attacker's own team)", () => {
+    const foe = makeEnemy({ archetype: 'wisp' }, 0, 5, 3);
+    expect(isFlanked({ c: 5, r: 5 }, { c: 5, r: 4 }, 'party', [foe])).toBe(false);
+  });
+
+  it('non-adjacent (range > 1) attacks never flank — spells never flank by the same gate', () => {
+    const ally = makeKeeper(5, 2);
+    expect(isFlanked({ c: 5, r: 5 }, { c: 5, r: 3 }, 'party', [ally])).toBe(false); // distance 2
+  });
+});
+
 describe('boss reducers', () => {
   it('good breaks a shield + staggers; bad costs HP + heals the Warden', () => {
     expect(applyBranch('good')).toMatchObject({ shieldDelta: -1, stagger: true, partyDelta: 0 });
@@ -212,6 +297,83 @@ describe('enemy AI', () => {
   });
 });
 
+describe('AI v2 archetype directives (§8)', () => {
+  const tiles = floorGrid(GRID_W, GRID_H);
+
+  it('wisp prefers the flank-completing tile over an equidistant non-flanking one', () => {
+    const keeper = makeKeeper(5, 5);
+    const allyWisp = makeEnemy({ archetype: 'wisp' }, 1, 5, 4); // north of the keeper
+    const self = makeEnemy({ archetype: 'wisp' }, 0, 8, 6); // equidistant from (6,5) and (5,6)
+    const occ = occupancyExcept([self, keeper, allyWisp], self.id);
+    const intent = decideEnemy(self, [keeper], tiles, occ, [allyWisp]);
+    expect(intent.attackTargetId).toBe('keeper');
+    expect(intent.moveTo).toEqual({ c: 5, r: 6 }); // flanks: opposite tile (5,4) holds the ally
+  });
+
+  it('wraith already adjacent retreats via Careful Step instead of trading blows', () => {
+    const wraith = makeEnemy({ archetype: 'wraith' }, 0, 5, 5);
+    const keeper = makeKeeper(5, 6); // adjacent
+    const occ = occupancyExcept([wraith, keeper], wraith.id);
+    const intent = decideEnemy(wraith, [keeper], tiles, occ);
+    expect(intent.carefulStep).toBe(true);
+    expect(intent.attackTargetId).toBeNull();
+  });
+
+  it('construct falls back to normal approach-and-attack when no wraith ally is present', () => {
+    const construct = makeEnemy({ archetype: 'construct' }, 0, 1, 1);
+    const keeper = makeKeeper(1, 2); // adjacent
+    const intent = decideEnemy(construct, [keeper], tiles, new Set([key(1, 2)]));
+    expect(intent.attackTargetId).toBe('keeper');
+    expect(intent.moveTo).toBeNull();
+  });
+
+  it('decideEnemy without an allies argument keeps working (backward-compatible default [])', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    const keeper = makeKeeper(5, 6);
+    const intent = decideEnemy(wisp, [keeper], tiles, new Set([key(5, 6)]));
+    expect(intent.attackTargetId).toBe('keeper');
+  });
+});
+
+describe('opportunity strikes — eligibility (§4.2)', () => {
+  it('eligible: alive, opposing team, orthogonally adjacent to the vacated tile, unspent, unstaggered', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp]).map((u) => u.id)).toEqual(['wisp-0']);
+  });
+
+  it('suppressed when the striker is Staggered', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    wisp.statuses = [{ id: 'staggered', turnsLeft: 1, magnitude: 0 }];
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp])).toEqual([]);
+  });
+
+  it('suppressed once oaSpent is true (max one dealt per unit per round)', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    wisp.oaSpent = true;
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp])).toEqual([]);
+  });
+
+  it('excludes dead units, same-team units, and non-adjacent units', () => {
+    const deadWisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    deadWisp.alive = false;
+    const sameTeam = makeKeeper(5, 5);
+    const farWisp = makeEnemy({ archetype: 'wisp' }, 1, 9, 9);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [deadWisp])).toEqual([]);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [sameTeam])).toEqual([]);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [farWisp])).toEqual([]);
+  });
+});
+
+describe('Careful Step movement math (§4.2)', () => {
+  it('halves move, floors, minimum 1', () => {
+    expect(carefulStepMove(4)).toBe(2);
+    expect(carefulStepMove(5)).toBe(2);
+    expect(carefulStepMove(3)).toBe(1);
+    expect(carefulStepMove(1)).toBe(1);
+    expect(carefulStepMove(0)).toBe(1);
+  });
+});
+
 describe('seeded layout', () => {
   it('is deterministic and well-formed', () => {
     const a = buildLayout('room-1', 7);
@@ -236,6 +398,33 @@ describe('seeded layout', () => {
 
   it('different seeds diverge', () => {
     expect(buildLayout('room-1', 1).tiles).not.toEqual(buildLayout('room-1', 2).tiles);
+  });
+});
+
+describe('brazier & mist generation (§4.4)', () => {
+  it('braziers 0-1, mist 0 or 2 contiguous tiles, never in spawn zones, lanterns preserved — across many seeds', () => {
+    for (let seed = 0; seed < 40; seed++) {
+      const layout = buildLayout('room-terrain', seed);
+      expect(layout.braziers.length).toBeLessThanOrEqual(1);
+      expect([0, 2]).toContain(layout.mist.length);
+      expect(layout.lanterns.length).toBeGreaterThanOrEqual(1); // never displaced
+
+      for (const co of [...layout.braziers, ...layout.mist]) {
+        expect(co.c).toBeGreaterThan(3); // outside the party spawn zone (c<=3)
+        expect(co.c).toBeLessThan(GRID_W - 4); // outside the enemy spawn zone (c>=8)
+        expect(layout.tiles[co.r][co.c]).toBe(layout.braziers.includes(co) ? 'brazier' : 'mist');
+      }
+      if (layout.mist.length === 2) {
+        expect(manhattan(layout.mist[0], layout.mist[1])).toBe(1); // contiguous patch
+      }
+    }
+  });
+
+  it('is deterministic for a fixed seed', () => {
+    const a = buildLayout('room-terrain', 11);
+    const b = buildLayout('room-terrain', 11);
+    expect(a.braziers).toEqual(b.braziers);
+    expect(a.mist).toEqual(b.mist);
   });
 });
 
@@ -277,6 +466,23 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
 
   it('rejects a non-heal item outright (tools/trinkets have no combat-resolvable effect yet)', () => {
     expect(resolveHealUse(trinket, 6)).toMatchObject({ ok: false, gained: 0 });
+  });
+});
+
+describe('unit factories — Phase 1 stat/field changes', () => {
+  it('construct hp is 5 (the bruiser must survive one full Weave)', () => {
+    expect(ENEMY_STATS.construct.hp).toBe(5);
+    const construct = makeEnemy({ archetype: 'construct' }, 0, 0, 0);
+    expect(construct.hp).toBe(5);
+    expect(construct.maxHp).toBe(5);
+  });
+
+  it('every factory spawns with empty statuses and unspent OA/unique flags', () => {
+    for (const u of [makeKeeper(0, 0), makeMira(0, 0), makeEnemy({ archetype: 'wisp' }, 0, 0, 0)]) {
+      expect(u.statuses).toEqual([]);
+      expect(u.oaSpent).toBe(false);
+      expect(u.uniqueSpent).toBe(false);
+    }
   });
 });
 
