@@ -10,9 +10,14 @@
  * those requires touching the ENCOUNTER SURFACE (encounters/**), which every inventory doc
  * (§7, §10) marks off-limits, and is a materially bigger feature (arming a pre-action flag,
  * honoring it inside an encounter renderer, and for reveal_option literally greying an MCQ
- * option — none of which this pass builds). So only 'heal' items are surfaced as
- * usable-in-combat here; tools stay catalog/shop-only (already labeled "(trial)" there)
- * until that encounter-surface work is separately scoped.
+ * option — none of which this pass builds). So only 'heal' items were surfaced as
+ * usable-in-combat here initially; tools stay catalog/shop-only (already labeled "(trial)"
+ * there) until that encounter-surface work is separately scoped.
+ *
+ * Phase 2 (magic-combat-depth §11.1) widens the filter to `heal | glow`: the two new Glow
+ * items (wick-tallow/lantern-brand) are combat-only by design (catalog.ts's `use:'combat'`),
+ * so unlike heals they have NO field-use path at all — consume.ts's useItem always refuses
+ * them outside this scene.
  */
 import { CATALOG, type ItemDef } from '../../inventory/catalog';
 import type { InventorySnapshot } from '../contracts';
@@ -25,9 +30,9 @@ export interface UsableSatchelItem {
   qty: number;
 }
 
-/** Owned items with a combat-resolvable effect (heals — see file header), qty > 0, catalog order. */
+/** Owned items with a combat-resolvable effect (heal or glow — see file header), qty > 0, catalog order. */
 export function usableSatchelItems(snapshot: InventorySnapshot): UsableSatchelItem[] {
-  return CATALOG.filter((i) => i.effect.kind === 'heal' && (snapshot.stacks[i.id] ?? 0) > 0).map((item) => ({
+  return CATALOG.filter((i) => (i.effect.kind === 'heal' || i.effect.kind === 'glow') && (snapshot.stacks[i.id] ?? 0) > 0).map((item) => ({
     item,
     qty: snapshot.stacks[item.id] ?? 0,
   }));

@@ -69,6 +69,44 @@ const wardancersRestorative = [
   '................',
 ] as const;
 
+const wickTallow = [
+  '................',
+  '................',
+  '.......e........',
+  '......eEe.......',
+  '.....xEEEx......',
+  '....xTTTTTx.....',
+  '....xTKKKTx.....',
+  '....xTKccKTx....',
+  '....xTKccKTx....',
+  '....xTKKKKTx....',
+  '....xTTTTTTx....',
+  '.....xTTTTx.....',
+  '......xxxx......',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const lanternBrand = [
+  '................',
+  '.......xx.......',
+  '......xGGx......',
+  '.....xGWWGx.....',
+  '.....xAWWAx.....',
+  '......xAAx......',
+  '.......TTx......',
+  '.......TKx......',
+  '......xTKx......',
+  '......xTKx......',
+  '......xTKx......',
+  '.....xxTKxx.....',
+  '.....xTTTTx.....',
+  '......xxxx......',
+  '................',
+  '................',
+] as const;
+
 const scrivenersHint = [
   '................',
   '..xxxxxxxxxxx...',
@@ -245,6 +283,8 @@ export const ICONS: Record<string, readonly string[]> = {
   'embermend-draught': embermendDraught,
   'lanternoil-tonic': lanternoilTonic,
   'wardancers-restorative': wardancersRestorative,
+  'wick-tallow': wickTallow,
+  'lantern-brand': lanternBrand,
   'scriveners-hint': scrivenersHint,
   'second-wind-seal': secondWindSeal,
   'ward-of-focus': wardOfFocus,

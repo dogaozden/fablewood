@@ -19,10 +19,10 @@ const seq = (...vals: number[]) => {
 };
 
 describe('catalog integrity — ids are state-referenced and must stay coherent', () => {
-  it('has 12 unique kebab-case ids covering every rarity and type', () => {
+  it('has 14 unique kebab-case ids covering every rarity and type', () => {
     const ids = CATALOG.map((i) => i.id);
-    expect(ids).toHaveLength(12);
-    expect(new Set(ids).size).toBe(12);
+    expect(ids).toHaveLength(14);
+    expect(new Set(ids).size).toBe(14);
     for (const id of ids) expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     const rarities = new Set(CATALOG.map((i) => i.rarity));
     expect([...rarities].sort()).toEqual(['common', 'legendary', 'rare', 'uncommon', 'very_rare']);
@@ -38,11 +38,18 @@ describe('catalog integrity — ids are state-referenced and must stay coherent'
     expect(itemById('warden-signet-of-terms')).toMatchObject({ use: null, sellable: false, type: 'relic', value: 0 });
   });
 
-  it("Mira's stock is exactly the 3 draughts + 3 tools", () => {
+  it('the two Glow items (magic-combat-depth §11.1) derive use:"combat" and never sell', () => {
+    expect(itemById('wick-tallow')).toMatchObject({ use: 'combat', sellable: false, effect: { kind: 'glow', amount: 1 } });
+    expect(itemById('lantern-brand')).toMatchObject({ use: 'combat', sellable: false, effect: { kind: 'glow', amount: 2 } });
+  });
+
+  it("Mira's stock is exactly the 3 draughts + 2 glow items + 3 tools (magic-combat-depth §11.1)", () => {
     expect(shopStock().map((i) => i.id)).toEqual([
       'embermend-draught',
       'lanternoil-tonic',
       'wardancers-restorative',
+      'wick-tallow',
+      'lantern-brand',
       'scriveners-hint',
       'second-wind-seal',
       'ward-of-focus',

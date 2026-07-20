@@ -25,6 +25,12 @@ export async function useItem(store: InventoryStore, id: string): Promise<UseRes
     await store.remove(id, 1);
     return { ok: true, message: `Restored ${next - cur} vigor.` };
   }
+  if (effect.kind === 'glow') {
+    // Combat-only (magic-combat-depth §11.1): the field/hamlet Satchel has no battle to grant
+    // Glow into. CombatScene's own useSatchelItem branch applies the Glow effect + removeItem
+    // directly (scene-side per-battle state, never persisted) rather than routing through here.
+    return { ok: false, message: 'Only usable in battle.' };
+  }
   if (effect.kind === 'reveal_option' || effect.kind === 'retry_cast' || effect.kind === 'streak_shield') {
     return { ok: false, message: 'Only usable in a trial.' };
   }

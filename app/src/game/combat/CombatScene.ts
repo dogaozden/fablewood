@@ -13,6 +13,7 @@ import Phaser from 'phaser';
 import { markReady } from '../ready';
 import {
   services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
+  type Quality,
 } from '../contracts';
 import type { Pack } from '../../packs/types';
 import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
@@ -32,17 +33,37 @@ import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } fr
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
-import { CombatHud } from './hud';
+import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
+import {
+  SPELLBOOK, resolveSpell, spellsForArt, qualitySlot, type SpellDef, type SpellId, type BoardOp, type ResolveSpellOpts,
+} from './spells';
+import {
+  ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus,
+  type ArtRanks, type GlowState,
+} from './arts';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
 
-type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'resolving' | 'enemy' | 'over';
+type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'playerTier' | 'resolving' | 'enemy' | 'over';
+
+/**
+ * §6 dev/e2e harness override: `?rank=1|2|3` beside `?demo=1`/`?boss=1`/`?kit=1` — tiers
+ * must be testable without a seeded SRS. Any other value (absent, malformed, out of range)
+ * falls back to null (the computed rank governs, per computeRank/arts.ts).
+ */
+export function parseRankOverride(raw: string | null): 1 | 2 | 3 | null {
+  const n = Number(raw);
+  return n === 1 || n === 2 || n === 3 ? n : null;
+}
+
+/** The five Arts' T1 action buttons — the only ones a tier flyout (§12.2) can open. */
+const ART_ACTIONS: ReadonlySet<ActionKind> = new Set(['smite', 'weave', 'sequence', 'cast', 'parley']);
 
 interface UnitView {
   container: Phaser.GameObjects.Container;
@@ -115,6 +136,28 @@ export class CombatScene extends Phaser.Scene {
   private tagToIds = new Map<string, string[]>();
   private roomTags: string[] = [];
 
+  // §2/§5/§6 the Five Arts & Glow (Phase 2 — magic-combat-depth.md)
+  /** dev/e2e harness override (?rank=1|2|3); null = use the computed rank. */
+  private rankOverride: 1 | 2 | 3 | null = null;
+  /** cached ONCE per battle (loadContent, after allFactIds is built) — never recomputed mid-battle. */
+  private rank: 1 | 2 | 3 = 1;
+  private rankInfo: ArtRanks = { rank: 1, welded3: 0, welded4: 0 };
+  /** party-shared, per-battle, reset in create() — NEVER persisted (§13/§14). */
+  private glow: GlowState = { pips: 0 };
+  /** the concrete spell about to be cast; set only when a T2/T3 tier is chosen via the
+   *  flyout. Null (T1/strike) means runPlayerAction's untouched Phase-1/T1 path applies. */
+  private pendingSpell: SpellDef | null = null;
+  /** which Art button opened the currently-open tier flyout (state==='playerTier' only). */
+  private flyoutAction: ActionKind | null = null;
+  /** §5.3 Overglow per-cast toggle ('o' in the flyout); reset whenever the flyout (re)opens. */
+  private overglowOn = false;
+  /** the action-bar items last shown (showMenu) — lets the flyout anchor above the right button. */
+  private menuItems: Array<{ action: ActionKind; enabled: boolean; reason?: string }> = [];
+  /** the tier flyout's most recently rendered rows/Overglow state (e2e debug reads only —
+   *  the flyout itself is Phaser-drawn, not DOM, so tests can't inspect it via a locator). */
+  private lastFlyoutRows: TierRow[] = [];
+  private lastFlyoutOverglow: OverglowRow | null = null;
+
   // boss
   private boss: UnitState | null = null;
   private shields = 0;
@@ -130,6 +173,7 @@ export class CombatScene extends Phaser.Scene {
   init(data: (CombatLaunch & { seed?: number }) | { seed?: number }): void {
     const params = new URLSearchParams(window.location.search);
     this.demo = params.get('demo') === '1';
+    this.rankOverride = parseRankOverride(params.get('rank'));
     if (data && 'room' in data && data.room) {
       this.launch = data as CombatLaunch;
     } else {
@@ -173,6 +217,15 @@ export class CombatScene extends Phaser.Scene {
     this.tileImages.clear();
     this.carefulStepOn = false;
     this.hoveredStatusUnitId = null;
+    this.rank = 1;
+    this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
+    this.glow = { pips: 0 };
+    this.pendingSpell = null;
+    this.flyoutAction = null;
+    this.overglowOn = false;
+    this.menuItems = [];
+    this.lastFlyoutRows = [];
+    this.lastFlyoutOverglow = null;
 
     this.encSeed = this.launch.seed | 0;
     this.drawBackdrop();
@@ -213,6 +266,7 @@ export class CombatScene extends Phaser.Scene {
       if (this.destroyed) return;
       this.applyPoolHp(); // split the saved pooled HP onto Keeper/Mira (save is ready now)
       this.refreshParty();
+      this.hud.setRankLine(this.rank, this.rankInfo.welded4);
       this.time.delayedCall(320, () => this.advanceTurn());
     });
   }
@@ -480,6 +534,17 @@ export class CombatScene extends Phaser.Scene {
       }
     } catch { /* static build has no bridge */ }
     if (this.allFactIds.size === 0) for (const id of FIXTURE_FACTS) this.allFactIds.add(id);
+
+    // §6 — one global rank off Leitner box distribution, computed ONCE per battle (cached in
+    // this.rank/this.rankInfo — trap 1, never recomputed mid-battle) over the battle's full
+    // fact pool. ?rank= overrides the computed value so e2e/dev never needs a seeded SRS.
+    this.rankInfo = computeRank((id) => this.boxOfSafe(id), [...this.allFactIds]);
+    this.rank = this.rankOverride ?? this.rankInfo.rank;
+  }
+
+  /** `services.srs.boxOf`, tolerant of an offline/stub SRS (0 = unseen, the honest default). */
+  private boxOfSafe(id: string): number {
+    try { return services.srs.boxOf(id); } catch { return 0; }
   }
 
   /** crucible #11 — see loadContent's call site. Best-effort: tries every installed pack's
@@ -564,6 +629,8 @@ export class CombatScene extends Phaser.Scene {
     this.state = 'playerMove';
     this.moved = false;
     this.pendingAction = null;
+    this.pendingSpell = null;
+    this.overglowOn = false;
     this.carefulStepOn = false;
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
@@ -596,8 +663,8 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** §4.4 — free interact: light an adjacent unlit brazier (once per brazier — the tile
-   *  becoming 'lantern' is itself the once-only gate). Glow hook is a NO-OP in Phase 1
-   *  (Phase 2 wires the +1 pip, docs/design/magic-combat-depth.md §5.1). */
+   *  becoming 'lantern' is itself the once-only gate). §5.1 Glow source — wires the Phase-1
+   *  no-op hook: lighting a brazier grants the party +1 Glow immediately. */
   private tryLightBrazier(unit: UnitState): void {
     const co = this.layout.braziers.find(
       (b) => this.layout.tiles[b.r][b.c] === 'brazier' && manhattan(unit, b) === 1,
@@ -606,6 +673,8 @@ export class CombatScene extends Phaser.Scene {
     this.layout.tiles[co.r][co.c] = 'lantern';
     const img = this.tileImages.get(key(co.c, co.r));
     if (img) img.setTexture(TILE_KEYS.lantern);
+    this.glow = glowGain(this.glow, 'brazier-lit');
+    this.refreshParty();
     this.hud.showBanner('The brazier catches — a lantern now, for the rest of the battle.', P.lanternGold);
   }
 
@@ -622,6 +691,7 @@ export class CombatScene extends Phaser.Scene {
         const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
         this.state = 'playerTarget';
         this.pendingAction = a;
+        this.pendingSpell = null; // autopilot always drives the T1 anchor action, never a flyout tier
         void this.runPlayerAction(unit, a, { c: tgt.c, r: tgt.r });
         return;
       }
@@ -655,8 +725,9 @@ export class CombatScene extends Phaser.Scene {
       // an empty satchel is handled inside the panel (a friendly line), not by disabling this.
       if (action === 'wait' || action === 'satchel') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
-      return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no target in range' };
+      return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no foe within reach' };
     });
+    this.menuItems = items;
     this.hud.showActionMenu(items, (a) => this.onPickAction(unit, a));
   }
 
@@ -665,8 +736,12 @@ export class CombatScene extends Phaser.Scene {
     if (unit.id !== this.activeId) return;
     if (action === 'wait') { this.hud.showBanner('Holding position.', P.stoneGrey); this.endPlayerTurn(); return; }
     if (action === 'satchel') { void this.openSatchel(unit); return; }
+    // §12.2 — Rank≥2 pressing an Art opens the tier flyout instead of casting T1 directly.
+    // At Rank 1 this branch never taken: today's exact flow, zero regression.
+    if (ART_ACTIONS.has(action) && this.rank >= 2) { this.openTierFlyout(unit, action); return; }
+    this.pendingSpell = null; // T1/strike: the untouched Phase-1 resolveAction/applyOutcome path
     const targets = this.validTargets(unit, action);
-    if (!targets.length) { this.hud.showBanner(`${ACTIONS[action].label}: no target in range.`, P.stoneGrey); return; }
+    if (!targets.length) { this.hud.showBanner(`${ACTIONS[action].label}: no foe within reach.`, P.stoneGrey); return; }
     this.enterTargeting(action, targets);
   }
 
@@ -679,12 +754,14 @@ export class CombatScene extends Phaser.Scene {
     this.hoverGfx.clear();
     this.drawTargets();
     this.hud.hideActionMenu();
-    this.hud.showBanner(`${ACTIONS[action].label} — choose a target. (Esc cancels)`, ACTIONS[action].tint);
+    const label = this.pendingSpell?.label ?? ACTIONS[action].label;
+    this.hud.showBanner(`${label} — choose a target. (Esc cancels)`, ACTIONS[action].tint);
   }
 
   private cancelTargeting(unit: UnitState): void {
     this.state = 'playerMove';
     this.pendingAction = null;
+    this.pendingSpell = null;
     this.targetTiles.clear();
     this.hoverGfx.clear();
     if (!this.moved) this.drawMoveRange();
@@ -713,6 +790,134 @@ export class CombatScene extends Phaser.Scene {
         return exhaustive;
       }
     }
+  }
+
+  // ---- tier flyout (§12.2, Rank 2+) --------------------------------------
+
+  /** Target legality for a SPECIFIC spell (any tier) — used by the flyout's row-enabling and
+   *  by a T2/T3 cast's own targeting phase. T1 rows reuse this too (numbers match validTargets
+   *  exactly by design — spellsForArt(art)[0] IS the shipped T1 SpellDef). */
+  private validTargetsForSpell(unit: UnitState, spell: SpellDef): UnitState[] {
+    const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
+    switch (spell.shape) {
+      case 'single':
+        if (spell.id === 'parley') return enemies.filter((e) => e.parley && manhattan(unit, e) <= spell.range);
+        return enemies.filter((e) => manhattan(unit, e) <= spell.range);
+      case 'cross':
+        return enemies.filter((e) => manhattan(unit, e) <= spell.range);
+      case 'line':
+        return enemies.filter((e) => hasLineOfFire(unit, e, spell.range, this.layout.tiles));
+      case 'burst1':
+        return enemies.filter((e) => manhattan(unit, e) === 1);
+      case 'self':
+        return [];
+      case 'ally':
+        return this.units.filter((u) => u.alive && u.team === 'party' && manhattan(unit, u) <= spell.range);
+      default: {
+        const exhaustive: never = spell.shape;
+        return exhaustive;
+      }
+    }
+  }
+
+  /** One flyout row: greys with a reason via Rank, Glow, then target availability, in that order. */
+  private tierRow(unit: UnitState, spell: SpellDef): TierRow {
+    const costText = spell.glowCost === 0 ? 'free' : `◈${spell.glowCost}`;
+    if (spell.tier > this.rank) {
+      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs Rank ${spell.tier}` };
+    }
+    if (this.glow.pips < spell.glowCost) {
+      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs ${spell.glowCost} glow` };
+    }
+    if (spell.shape === 'self') {
+      return { tier: spell.tier, label: spell.label, costText, enabled: true };
+    }
+    const targets = this.validTargetsForSpell(unit, spell);
+    return targets.length
+      ? { tier: spell.tier, label: spell.label, costText, enabled: true }
+      : { tier: spell.tier, label: spell.label, costText, enabled: false, reason: 'no foe within reach' };
+  }
+
+  /** Rank≥2 pressing an Art opens this instead of casting T1 directly. Phaser-drawn (container,
+   *  like showActionMenu) — never a DOM pane, so it must not quiet the keyboard. */
+  private openTierFlyout(unit: UnitState, action: ActionKind): void {
+    this.state = 'playerTier';
+    this.flyoutAction = action;
+    this.overglowOn = false;
+    this.hud.hideActionMenu();
+    this.renderFlyout(unit, action);
+    const art = SPELLBOOK[action as SpellId].art;
+    this.hud.showBanner(`${ARTS[art].label} — choose a tier. (Esc closes)`, ACTIONS[action].tint);
+  }
+
+  private renderFlyout(unit: UnitState, action: ActionKind): void {
+    const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
+    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s));
+    // §12.2 — the Overglow toggle is offered "when a damaging tier is highlighted"; this
+    // flyout has no live hover-tracking, so the default/focus tier is the highest one
+    // currently unlocked (rank-derived) — matches spec's own worked example (Rank 3 Kindling
+    // defaults to Lanternfall, correctly greying Overglow for a burst spell per the phase2-
+    // spells decision: burst spells can't multiply).
+    const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
+    const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
+    const overglow: OverglowRow | null = canOverglow(this.rank, this.glow)
+      ? {
+          enabled: focusSpell.shape !== 'burst1',
+          on: this.overglowOn,
+          reason: focusSpell.shape === 'burst1' ? "won't multiply a burst" : undefined,
+        }
+      : null;
+    this.lastFlyoutRows = rows;
+    this.lastFlyoutOverglow = overglow;
+    const x = this.hud.getActionButtonX(this.menuItems, action);
+    this.hud.showTierFlyout(
+      x, rows, overglow,
+      (tier) => this.pickTierKey(unit, tier),
+      () => this.toggleOverglowKey(unit),
+    );
+  }
+
+  private closeTierFlyout(unit: UnitState): void {
+    this.flyoutAction = null;
+    this.hud.hideTierFlyout();
+    this.state = 'playerMove';
+    if (!this.moved) this.drawMoveRange();
+    this.showMenu(unit);
+  }
+
+  private toggleOverglowKey(unit: UnitState): void {
+    if (this.state !== 'playerTier' || !this.flyoutAction) return;
+    const action = this.flyoutAction;
+    const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
+    const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
+    const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
+    if (!canOverglow(this.rank, this.glow) || focusSpell.shape === 'burst1') return; // greyed — no-op
+    this.overglowOn = !this.overglowOn;
+    this.renderFlyout(unit, action);
+  }
+
+  private pickTierKey(unit: UnitState, tier: 1 | 2 | 3): void {
+    if (this.state !== 'playerTier' || !this.flyoutAction) return;
+    const action = this.flyoutAction;
+    const spell = spellsForArt(SPELLBOOK[action as SpellId].art).find((s) => s.tier === tier);
+    if (!spell) return;
+    const row = this.tierRow(unit, spell);
+    if (!row.enabled) return;
+    const overglow = this.overglowOn;
+    this.flyoutAction = null;
+    this.hud.hideTierFlyout();
+    this.pendingSpell = spell;
+    // §5.3 — Overglow never applies to a burst1 spell (Lanternfall); carrying `false` through
+    // rather than leaving it `true`-but-inert keeps castGatedSpell's own bookkeeping honest.
+    this.overglowOn = overglow && spell.shape !== 'burst1';
+
+    if (spell.shape === 'self' || spell.shape === 'burst1') {
+      // No tile to choose (self/self-anchored burst) — resolves immediately, like Wait/Satchel.
+      void this.runPlayerAction(unit, action, { c: unit.c, r: unit.r });
+      return;
+    }
+    const targets = this.validTargetsForSpell(unit, spell);
+    this.enterTargeting(action, targets);
   }
 
   private movePlayerTo(unit: UnitState, tile: Coord): void {
@@ -806,8 +1011,20 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
 
+    // §12.2 — a T2/T3 spell chosen via the flyout resolves through the SpellDef/BoardOp
+    // pipeline (castGatedSpell) instead of the T1 resolveAction/applyOutcome chain below,
+    // which stays byte-for-byte untouched (adapter-equivalence proven in combat.test.ts's
+    // "adapter equivalence — resolveAction over resolveSpell" suite) — Rank 1 sees today's
+    // exact flow, since pendingSpell is only ever non-null after a flyout tier pick, and the
+    // flyout itself never opens below Rank 2.
+    if (this.pendingSpell && this.pendingSpell.tier > 1) {
+      await this.castGatedSpell(unit, action, this.pendingSpell, tile);
+      return;
+    }
+
     // GATED POWER MOVES: answering the question IS the cast. Each hits far harder than a
-    // free Strike — that payoff is what the friction now buys.
+    // free Strike — that payoff is what the friction now buys. (T1 only — a T2/T3 tier
+    // chosen via the flyout is routed to castGatedSpell below, BEFORE this branch runs.)
     const meta = ACTIONS[action];
     const kind = meta.encounter as EncounterKind;
     const vsBoss = !!target?.isBoss;
@@ -823,12 +1040,20 @@ export class CombatScene extends Phaser.Scene {
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
+    // §5.1 Glow source 4 (trap 14): snapshot due-ness BEFORE record() mutates the queue.
+    // This applies to every T1 cast too, not just T2/T3 — the SRS loop is the mana engine
+    // regardless of which tier answering the question happens to buy.
+    const dueSetAtCast = this.snapshotDueSet();
     // Record FIRST — the learning record is sacred: never dropped, even if the
     // scene tears down mid-overlay (record() is pure service work, safe when dead).
     this.results.push(result);
     await this.record(result);
     if (this.destroyed) return;
     this.hud.setDeliberating(false);
+    if (dueRenewalSurge(result.quality, result.factIds, dueSetAtCast)) {
+      this.glow = glowGain(this.glow, 'due-renewal');
+      this.refreshParty();
+    }
 
     // Lantern grace: standing on a lantern can soften a whiff for DAMAGE only —
     // the SRS record stays honest (we record result.quality, above).
@@ -856,6 +1081,253 @@ export class CombatScene extends Phaser.Scene {
 
     this.refreshParty();
     this.time.delayedCall(620, () => this.endPlayerTurn());
+  }
+
+  /**
+   * §12.2/§2 — a T2/T3 spell's full resolution: spend Glow (+ Overglow), run the encounter
+   * (with `flair` for the overlay eyebrow, §12.4), snapshot-then-record SRS (due-renewal +
+   * weld edge both captured pre-record, trap 14), resolve the board geometry, dispatch through
+   * resolveSpell, and apply the resulting BoardOps generically (applySpellOps) — the
+   * SpellDef/BoardOp-driven pipeline §16 trap 4 describes, scoped to T2/T3 only so the T1
+   * path above stays byte-for-byte untouched.
+   */
+  private async castGatedSpell(unit: UnitState, action: ActionKind, spell: SpellDef, tile: Coord): Promise<void> {
+    const target = spell.shape === 'ally' ? this.unitAt(tile) : this.enemyAt(tile);
+    const vsBoss = !!(target && target.team === 'enemy' && target.isBoss);
+    const artKind = ARTS[spell.art].encounter;
+    const factIds = this.dueFactIds(this.roomTags);
+    const context = spell.art === 'courtcraft' ? 'parley' : vsBoss ? 'boss' : 'combat';
+
+    // Spend Glow up front — the flyout only ever offered an enabled row when this would
+    // succeed, but re-check defensively rather than trust stale UI state across the awaits below.
+    const spend = glowSpend(this.glow, spell.glowCost);
+    if (!spend.ok) {
+      this.hud.showBanner(`${spell.label}: needs ${spell.glowCost} glow.`, P.stoneGrey);
+      this.returnToActionMenu(unit);
+      return;
+    }
+    const overglow = this.overglowOn && spell.shape !== 'burst1' && canOverglow(this.rank, spend.state);
+    const afterOverglow = overglow ? glowSpend(spend.state, 1) : spend;
+    this.glow = afterOverglow.ok ? afterOverglow.state : spend.state;
+    this.overglowOn = false;
+    this.refreshParty();
+
+    const dueSetAtCast = this.snapshotDueSet();
+
+    if (artKind === 'free_recall') this.hud.setDeliberating(true);
+    let result: EncounterResult;
+    try {
+      result = await services.runEncounter({
+        context, kinds: [artKind], factIds, packId: this.launch.packId, seed: this.encSeed++, flair: spell.label,
+      });
+    } catch {
+      result = { encounterId: `local-${spell.id}`, kind: artKind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
+    }
+    // §5.5 the weld edge: capture every involved fact's box BEFORE record() mutates it (trap
+    // 14 — same capture-before-record duty as the due-renewal snapshot above).
+    const factBoxesAtCast = result.factIds.map((id) => this.boxOfSafe(id));
+    this.results.push(result);
+    await this.record(result);
+    if (this.destroyed) return;
+    if (artKind === 'free_recall') this.hud.setDeliberating(false);
+
+    if (dueRenewalSurge(result.quality, result.factIds, dueSetAtCast)) {
+      this.glow = glowGain(this.glow, 'due-renewal');
+      this.refreshParty();
+    }
+
+    let dmgQuality = result.quality;
+    if (dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
+      dmgQuality = 0.5;
+      this.graceAvailable = false;
+      this.hud.showBanner('The lantern steadies you — the miss becomes a graze.', P.lanternGold);
+    }
+    // Courtcraft's quality IS the branch outcome (kinds.ts renderScenario): good=1/neutral=0.5/
+    // bad=0 — same mapping damage.ts's resolveAction adapter uses for T1 Parley.
+    const quality: Quality = spell.art === 'courtcraft'
+      ? (result.branchTag === 'good' ? 1 : result.branchTag === 'bad' ? 0 : 0.5)
+      : dmgQuality;
+
+    const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
+    const weld = weldBonus(factBoxesAtCast) === 1;
+    const geometry = this.spellGeometry(unit, spell, tile, quality);
+    const opts: ResolveSpellOpts = {
+      primaryTargetId: geometry.primaryId,
+      aoeTargetIds: geometry.aoeIds,
+      partyIds: this.units.filter((u) => u.team === 'party' && u.alive).map((u) => u.id),
+      enemyIds: this.units.filter((u) => u.team === 'enemy' && u.alive).map((u) => u.id),
+      dir: geometry.dir,
+      overglow,
+      weld,
+      miraBonus,
+      vsBoss,
+    };
+    const ops = resolveSpell(spell, quality, opts);
+
+    if (spell.shape !== 'self' && spell.shape !== 'burst1') this.attackerTell(unit, tile, ACTIONS[action].tint);
+    const before = this.enemyHpSum();
+    const bannerOp = ops.find((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner');
+    this.applySpellOps(unit, action, ops);
+    this.actionLog.push({ action, dmg: before - this.enemyHpSum(), overlay: true });
+
+    // §9 trap 10 — the shield gate stays string-matched on the ActionKind (unchanged boss.ts,
+    // Phase 3's job to generalize): since Attested Ward/Verbatim Decree both live behind the
+    // 'cast' button, wardenAbsorbs('cast',...) already lets every Attestation tier pierce,
+    // exactly like T1 Cast — no boss.ts edit needed this phase.
+    if (spell.bossRider === 'strip-shield' && quality === 1 && vsBoss && this.boss) {
+      this.shields = reduceShields(this.shields, 1);
+      this.floatText(this.boss, '−shield', P.waterLight);
+      this.syncBoss();
+    }
+
+    if (bannerOp) this.hud.showBanner(bannerOp.text, quality > 0 ? ACTIONS[action].tint : P.duskRose);
+    this.refreshParty();
+    this.time.delayedCall(620, () => this.endPlayerTurn());
+  }
+
+  /** Resolves a spell's board geometry (primary/aoe target ids + push direction) from its
+   *  OWN shape/range (which may differ from its Art's T1 anchor action, e.g. Snare-Knot is
+   *  range-3 single where Weave is range-2 cross) — the "caller resolves ids, board-aware"
+   *  half of resolveSpell's contract (spells.ts's ResolveSpellOpts doc). */
+  private spellGeometry(
+    unit: UnitState, spell: SpellDef, tile: Coord, quality: Quality,
+  ): { primaryId?: string; aoeIds: string[]; dir?: Dir } {
+    switch (spell.shape) {
+      case 'single': {
+        const t = this.enemyAt(tile);
+        return { primaryId: t?.id, aoeIds: [] };
+      }
+      case 'ally': {
+        const t = this.unitAt(tile);
+        return { primaryId: t && t.team === 'party' ? t.id : undefined, aoeIds: [] };
+      }
+      case 'cross': {
+        const primary = this.enemyAt(tile);
+        const aoeIds: string[] = [];
+        for (const co of crossTiles(tile)) {
+          if (co.c === tile.c && co.r === tile.r) continue;
+          const e = this.enemyAt(co);
+          if (e) aoeIds.push(e.id);
+        }
+        return { primaryId: primary?.id, aoeIds };
+      }
+      case 'line': {
+        const dir = this.dirTo(unit, tile) ?? undefined;
+        if (!dir) return { aoeIds: [] };
+        const depth = spell.effects[qualitySlot(quality)].lineDepth;
+        let primaryId: string | undefined;
+        const aoeIds: string[] = [];
+        for (const [i, co] of lineTiles(unit, dir, depth).entries()) {
+          const e = this.enemyAt(co);
+          if (e) { if (i === 0) primaryId = e.id; else aoeIds.push(e.id); }
+          // §4.4 — mist (and walls) block Ritecraft lines, same as sequence's own handling.
+          if (blocksSight(this.tileTypeOf(co))) break;
+        }
+        return { primaryId, aoeIds, dir };
+      }
+      case 'burst1': {
+        const aoeIds: string[] = [];
+        for (const co of crossTiles(unit)) {
+          if (co.c === unit.c && co.r === unit.r) continue;
+          const e = this.enemyAt(co);
+          if (e) aoeIds.push(e.id);
+        }
+        return { aoeIds };
+      }
+      case 'self':
+        return { aoeIds: [] };
+      default: {
+        const exhaustive: never = spell.shape;
+        return exhaustive;
+      }
+    }
+  }
+
+  /**
+   * Applies a resolveSpell BoardOp[] to the live board — the scene-side half of spells.ts's
+   * documented contract: 'damage' ops route through computeHit AGAIN with the REAL live
+   * attacker/target statuses (overglow/weld already baked into the op's amount, so
+   * `overglow:false, weld:false` here — never double-counted); flank is always false (spells
+   * never flank, §4.1). The 'banner' op is intentionally skipped — the caller shows it with
+   * a quality-derived tint, mirroring the T1 path's own banner call.
+   */
+  private applySpellOps(caster: UnitState, action: ActionKind, ops: BoardOp[]): void {
+    for (const op of ops) {
+      if (op.op === 'banner') continue;
+      if (op.op === 'fade') { this.damageParty(op.amount, caster); continue; }
+      if (op.op === 'damage') {
+        const target = this.unitById(op.targetId);
+        if (!target?.alive) continue;
+        if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
+        const result = computeHit({
+          base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
+          flank: false, overglow: false, weld: false,
+        });
+        target.statuses = result.targetStatuses;
+        if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
+        else if (result.absorbed > 0) this.floatText(target, 'warded', P.waterBlue);
+        continue;
+      }
+      if (op.op === 'status') {
+        const target = this.unitById(op.targetId);
+        if (!target?.alive) continue;
+        // §8 Bond-proof: constructs shrug Bound off — applyStatus already no-ops the state
+        // change; the scene surfaces the exact banner text the construct-immunity spec wants.
+        if (op.id === 'bound' && target.kind === 'construct') {
+          this.hud.showBanner('Nothing in it to bind.', P.stoneGrey);
+          continue;
+        }
+        target.statuses = applyStatus(target, op.id, op.turns, op.magnitude);
+        this.drawHpBar(target);
+        this.floatText(target, STATUS_DEFS[op.id].label, STATUS_DEFS[op.id].tint);
+        continue;
+      }
+      if (op.op === 'push') {
+        const target = this.unitById(op.targetId);
+        if (target?.alive) this.pushUnit(caster, target, op.dir, action);
+        continue;
+      }
+      if (op.op === 'heal') {
+        const target = this.unitById(op.targetId);
+        if (target?.alive) this.healUnit(target, op.amount);
+      }
+    }
+  }
+
+  /** §4.3 forced movement, applied to a spell's push (Cinder-Rebuke/Processional): same
+   *  forceMove + bump-damage rules as construct's Vault-Slam (enemyStrike below). */
+  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, action: ActionKind): void {
+    const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
+    const res = forceMove(target, dir, board);
+    if (res.moved) {
+      target.c = res.to.c; target.r = res.to.r;
+      const v = this.views.get(target.id);
+      if (v) {
+        const p = this.tileToScreen(target);
+        v.container.setDepth(10 + target.r);
+        this.tweens.add({ targets: v.container, x: p.x, y: p.y, duration: 140 });
+      }
+      return;
+    }
+    if (!res.bump) return;
+    if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
+    const result = computeHit({
+      base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
+      flank: false, overglow: false, weld: false,
+    });
+    target.statuses = result.targetStatuses;
+    if (result.hpDamage > 0) {
+      this.damageUnit(target, result.hpDamage, P.berry);
+      this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
+    }
+  }
+
+  /** Injunction-bad's enemy mend — a simple, un-gated heal-up (no SRS/death implications). */
+  private healUnit(target: UnitState, amount: number): void {
+    const before = target.hp;
+    target.hp = Math.min(target.maxHp, target.hp + amount);
+    if (target.hp > before) this.floatText(target, `+${target.hp - before}`, P.moss);
+    this.drawHpBar(target);
   }
 
   private applyOutcome(actor: UnitState, action: ActionKind, tile: Coord, o: ReturnType<typeof resolveAction>, target: UnitState | null): void {
@@ -990,9 +1462,38 @@ export class CombatScene extends Phaser.Scene {
    */
   private async useSatchelItem(unit: UnitState, id: string): Promise<void> {
     const item = itemById(id);
+    if (!item) { this.returnToActionMenu(unit); return; }
+
+    // §11.1 — the two Glow items (wick-tallow/lantern-brand): combat-only, so unlike heals
+    // there is no services.save write at all — Glow is scene-side, per-battle, never
+    // persisted (§13). services.inventory.removeItem is the SAME stack-decrement choke point
+    // useItem's own heal branch calls internally (store.remove); consume.ts's useItem itself
+    // always refuses 'glow' (it has no battle to grant into), so this bypasses it deliberately.
+    if (item.effect.kind === 'glow') {
+      if (this.glow.pips >= GLOW_CAP) {
+        this.hud.showBanner('The wick is already bright.', P.stoneGrey);
+        this.returnToActionMenu(unit);
+        return;
+      }
+      let removed = false;
+      try { removed = await services.inventory.removeItem(id, 1); } catch { removed = false; }
+      if (this.destroyed) return;
+      if (!removed) {
+        this.hud.showBanner('You have none left.', P.stoneGrey);
+        this.returnToActionMenu(unit);
+        return;
+      }
+      this.glow = glowGain(this.glow, id === 'lantern-brand' ? 'lantern-brand' : 'wick-tallow');
+      this.refreshParty();
+      this.hud.showBanner(`${item.name} — the wick brightens.`, P.lanternGold);
+      this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
+      this.time.delayedCall(560, () => this.endPlayerTurn());
+      return;
+    }
+
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
-    if (!item || !keeper || !mira) { this.returnToActionMenu(unit); return; }
+    if (!keeper || !mira) { this.returnToActionMenu(unit); return; }
 
     const livePool = keeper.hp + mira.hp;
     const plan = resolveHealUse(item, livePool);
@@ -1362,10 +1863,16 @@ export class CombatScene extends Phaser.Scene {
       const p = this.tileToScreen(co);
       this.hoverGfx.fillStyle(col, 0.42).fillRect(p.x - CELL / 2 + 4, p.y - CELL / 2 + 4, CELL - 8, CELL - 8);
     };
-    if (this.pendingAction === 'weave') for (const co of crossTiles(tile)) mark(co, P.orchid);
-    else if (this.pendingAction === 'sequence') {
+    // §12.2 — a T2/T3 spell's shape/range can differ from its Art's T1 anchor action (e.g.
+    // Snare-Knot is range-3 single where Weave is range-2 cross); prefer pendingSpell's own
+    // shape/range when a tier was chosen via the flyout, else fall back to the action's
+    // (T1/strike, unchanged).
+    const shape = this.pendingSpell?.shape ?? ACTIONS[this.pendingAction].shape;
+    if (shape === 'cross') for (const co of crossTiles(tile)) mark(co, P.orchid);
+    else if (shape === 'line') {
       const dir = this.dirTo(unit, tile);
-      if (dir) for (const co of lineTiles(unit, dir, 3)) mark(co, P.waterBlue);
+      const maxDepth = this.pendingSpell?.effects.q1.lineDepth ?? 3;
+      if (dir) for (const co of lineTiles(unit, dir, maxDepth)) mark(co, P.waterBlue);
     } else mark(tile, ACTIONS[this.pendingAction].tint);
   }
 
@@ -1430,6 +1937,15 @@ export class CombatScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => {
       const unit = this.unitById(this.activeId);
       if (!unit || unit.team !== 'party') return;
+      // §12.2 — the tier flyout owns its own small key set (1/2/3 pick, 'o' toggles Overglow,
+      // Esc closes back to the action menu) and swallows everything else while open, so a
+      // stray '1'-'7' press can never double-fire as a normal action-bar hotkey underneath it.
+      if (this.state === 'playerTier') {
+        if (e.key === 'Escape') { this.closeTierFlyout(unit); return; }
+        if (e.key === 'o') { this.toggleOverglowKey(unit); return; }
+        if (e.key === '1' || e.key === '2' || e.key === '3') { this.pickTierKey(unit, Number(e.key) as 1 | 2 | 3); return; }
+        return;
+      }
       if (e.key === 'Escape' && this.state === 'playerTarget') { this.cancelTargeting(unit); return; }
       if (e.key === 'e' && this.state === 'playerMove') { this.tryLightBrazier(unit); return; }
       if (e.key === 'c' && this.state === 'playerMove' && !this.moved) { this.toggleCarefulStep(unit); return; }
@@ -1460,6 +1976,16 @@ export class CombatScene extends Phaser.Scene {
     catch { return false; }
   }
 
+  /** §5.1 source 4 / trap 14 — the "at cast time" due-set snapshot dueRenewalSurge needs,
+   *  MUST be captured before record() mutates dueQueue membership. seenDueIds (arts.ts)
+   *  disambiguates dueQueue's mixed seen-due/unseen result via boxOf. */
+  private snapshotDueSet(): Set<string> {
+    try {
+      const due = services.srs.dueQueue(this.launch.packId, [...this.allFactIds]);
+      return seenDueIds(due, (id) => this.boxOfSafe(id));
+    } catch { return new Set(); }
+  }
+
   private async record(result: EncounterResult): Promise<void> {
     try {
       await Promise.all(result.factIds.map((id) => services.srs.record(id, result.quality, result.encounterId)));
@@ -1482,7 +2008,7 @@ export class CombatScene extends Phaser.Scene {
     this.hoverGfx.clear();
 
     if (outcome === 'victory') {
-      this.hud.showToast('The vault opens — Victory!', P.lanternGold);
+      this.hud.showToast('The foe falls, Keeper.', P.lanternGold);
       this.hud.showBanner('Loot secured. Hearth streak climbs.', P.moss);
       // crucible #5 — the streak bump used to persist here immediately (fire-and-forget,
       // independent of hp/loot), while hp/loot only ever settle later when the return
@@ -1523,6 +2049,7 @@ export class CombatScene extends Phaser.Scene {
       graceAvailable: this.graceAvailable,
       miraBonusActive: this.miraBonusActive(),
       streak,
+      glow: this.glow.pips,
     });
   }
 
@@ -1586,6 +2113,9 @@ export class CombatScene extends Phaser.Scene {
   combatSnapshot(): {
     state: string; activeTeam: string | null; activeId: string; enemyHp: number; partyHp: number;
     log: Array<{ action: string; dmg: number; overlay: boolean }>;
+    /** §6/§5 — e2e-only reads for Phase 2 (rank cache + Glow pips), same "read-only debug
+     *  surface" spirit as everything else in this section. */
+    rank: number; welded3: number; welded4: number; glow: number;
   } {
     return {
       state: this.state,
@@ -1594,6 +2124,10 @@ export class CombatScene extends Phaser.Scene {
       enemyHp: this.enemyHpSum(),
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
+      rank: this.rank,
+      welded3: this.rankInfo.welded3,
+      welded4: this.rankInfo.welded4,
+      glow: this.glow.pips,
     };
   }
 
@@ -1643,5 +2177,20 @@ export class CombatScene extends Phaser.Scene {
    *  brazier-interact / mist-lane assertions need to locate these without guessing seeds). */
   layoutDebug(): { tiles: TileType[][]; braziers: Coord[]; mist: Coord[] } {
     return { tiles: this.layout.tiles, braziers: this.layout.braziers, mist: this.layout.mist };
+  }
+
+  /** Debug: set Glow directly, bypassing sources (e2e-only test setup — a T2/T3 cast e2e
+   *  spec needs a pip in hand without fighting a brazier/due-fact precondition, the same
+   *  spirit as debugApplyStatus/debugSetPos). Clamped to [0, GLOW_CAP]. */
+  debugSetGlow(pips: number): void {
+    this.glow = { pips: Math.max(0, Math.min(GLOW_CAP, Math.floor(pips))) };
+    this.refreshParty();
+  }
+
+  /** Debug: the tier flyout's current rows/Overglow state, if open (e2e-only — the flyout is
+   *  Phaser-drawn, not DOM, so a spec can't reach it via a locator; proves greying — e.g.
+   *  "needs Rank 3", Overglow greyed for Lanternfall — without depending on click side effects). */
+  flyoutDebug(): { rows: TierRow[]; overglow: OverglowRow | null } | null {
+    return this.state === 'playerTier' ? { rows: this.lastFlyoutRows, overglow: this.lastFlyoutOverglow } : null;
   }
 }

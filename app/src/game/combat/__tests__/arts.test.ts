@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeRank, RANK2_NEED, RANK3_NEED, ARTS,
-  GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, weldBonus,
+  GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, weldBonus, seenDueIds,
   type GlowState, type GlowSource,
 } from '../arts';
 
@@ -87,6 +87,22 @@ describe('dueRenewalSurge (§5.1 source 4 — the SRS due queue as the mana engi
   });
   it('a full pass with none of its facts due never surges', () => {
     expect(dueRenewalSurge(1, ['a', 'b'], new Set(['c']))).toBe(false);
+  });
+});
+
+describe('seenDueIds (trap 14 — disambiguating dueQueue\'s mixed seen-due/unseen result)', () => {
+  it('keeps only ids whose box is >0 (seen) — unseen ids in the same result are dropped', () => {
+    const boxOf = (id: string) => (id === 'due-1' ? 3 : id === 'due-2' ? 1 : 0); // 'new-1'/'new-2' unseen
+    const queue = ['due-1', 'due-2', 'new-1', 'new-2']; // dueQueue's own ordering: due first, then unseen
+    expect(seenDueIds(queue, boxOf)).toEqual(new Set(['due-1', 'due-2']));
+  });
+
+  it('an all-unseen queue (nothing seen-and-due) yields an empty set', () => {
+    expect(seenDueIds(['a', 'b'], () => 0)).toEqual(new Set());
+  });
+
+  it('an empty queue yields an empty set', () => {
+    expect(seenDueIds([], () => 5)).toEqual(new Set());
   });
 });
 
