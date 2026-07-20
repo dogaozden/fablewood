@@ -4,9 +4,13 @@
 mod autopilot;
 mod bridge;
 mod judge;
+mod judge_pool;
+mod parse_worker_line;
+mod warm_pool;
 
 fn main() {
     tauri::Builder::default()
+        .manage(judge_pool::ClaudeJudgePool::new())
         .setup(|app| {
             autopilot::init(app.handle().clone());
             Ok(())
