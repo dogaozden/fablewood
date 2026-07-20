@@ -110,10 +110,10 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
     case 'wait':
       return { ...EMPTY, banner: 'Holding position.' };
     case 'satchel':
-      // Never actually reached: onPickAction gates on validTargets first, and
-      // satchel has none yet (inventory-handoff §10, deferred). Kept here only
-      // so this switch stays exhaustive over ActionKind.
-      return { ...EMPTY, banner: 'The satchel is not open in combat yet.' };
+      // Never actually reached: CombatScene.onPickAction special-cases 'satchel' before
+      // the validTargets gate and resolves it via combat/satchel.ts + services.inventory,
+      // never this table (inventory-handoff §10). Kept only so the switch stays exhaustive.
+      return { ...EMPTY, banner: 'The satchel resolves outside this table.' };
   }
 }
 

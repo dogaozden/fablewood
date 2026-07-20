@@ -108,3 +108,48 @@ test('combat friction: free Strike (no overlay) vs gated Cast (overlay → bigge
 
   if (pageErrors.length) console.log('note: pageerrors during combat (tolerated):', pageErrors.slice(0, 2).join(' | '));
 });
+
+// Satchel in battle (inventory-handoff §10). No ?demo=1 here — the autopilot would race
+// opening the panel, so this drives the Keeper's first turn under full manual control:
+// seed a damaged pool + an owned heal item straight through the bridge (the packless
+// ?scene=combat fixture otherwise starts every wallet at gold:20/stacks:{}, and a full
+// pool has nothing to heal), open the Satchel with the real 'q' hotkey, use the potion,
+// and confirm the pool rose, the store decremented, and the action resolved (spent the turn).
+test('Satchel in battle: using a potion heals the pool and consumes it from the persistent satchel', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.request.put('/api/state/save.json', { data: { hp: 6 } });
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 20, stacks: { 'embermend-draught': 2 } },
+  });
+
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  // Wait for the Keeper's first turn to open (initiative: Keeper speed 5 goes first).
+  const start = Date.now();
+  let s = await snap(page);
+  while (s?.state !== 'playerMove' && Date.now() - start < 20_000) {
+    await page.waitForTimeout(200);
+    s = await snap(page);
+  }
+  expect(s?.state, 'the first player turn opened for manual control').toBe('playerMove');
+  const partyHpBefore = s!.partyHp;
+  expect(partyHpBefore, 'the seeded damaged pool (hp:6) is what the battle launched with').toBe(6);
+
+  await page.keyboard.press('q');
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.screenshot({ path: `${EV}/e2e-combat-satchel-open.png` });
+
+  await page.locator('.inv-row').getByRole('button', { name: 'Use' }).first().click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+
+  const used = await waitForLoggedAction(page, 'satchel', 0);
+  expect(used, 'a satchel use resolved (the action spent the turn)').not.toBeNull();
+  await page.screenshot({ path: `${EV}/e2e-combat-satchel-used.png` });
+
+  const after = await snap(page);
+  expect(after!.partyHp, 'party HP rose from the heal (+6 draught, pool 6→12)').toBe(12);
+
+  const inv = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(inv?.stacks?.['embermend-draught'] ?? 0, 'exactly one potion was consumed from the persistent store').toBe(1);
+});

@@ -9,6 +9,8 @@ import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from '../boss
 import { decideEnemy } from '../ai';
 import { makeKeeper, makeMira, makeEnemy } from '../units';
 import { key, GRID_W, GRID_H, type UnitState, type TileType } from '../types';
+import { usableSatchelItems, resolveHealUse } from '../satchel';
+import { itemById } from '../../../inventory/catalog';
 
 const floorGrid = (w: number, h: number): TileGrid =>
   Array.from({ length: h }, () => Array.from({ length: w }, () => 'floor' as TileType));
@@ -234,6 +236,47 @@ describe('seeded layout', () => {
 
   it('different seeds diverge', () => {
     expect(buildLayout('room-1', 1).tiles).not.toEqual(buildLayout('room-1', 2).tiles);
+  });
+});
+
+describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
+  const draught = itemById('embermend-draught')!; // heal +6
+  const fullRestore = itemById('wardancers-restorative')!; // heal 999 ("to full")
+  const trinket = itemById('faded-coin-cache')!; // effect kind 'none' — no combat effect
+
+  it('usableSatchelItems surfaces only owned heal items (qty > 0), catalog order', () => {
+    const snap = {
+      gold: 0,
+      stacks: { 'embermend-draught': 2, 'scriveners-hint': 3, 'faded-coin-cache': 1, 'lanternoil-tonic': 0 },
+    };
+    const usable = usableSatchelItems(snap);
+    // tools ('scriveners-hint') and trinkets ('faded-coin-cache') are excluded even though
+    // owned; a zero-qty heal ('lanternoil-tonic') is excluded too — only a real, owned heal remains.
+    expect(usable.map((u) => u.item.id)).toEqual(['embermend-draught']);
+    expect(usable[0].qty).toBe(2);
+  });
+
+  it('usableSatchelItems is empty when nothing in the satchel is usable in combat (cannot-use-when-empty)', () => {
+    expect(usableSatchelItems({ gold: 0, stacks: {} })).toEqual([]);
+    expect(usableSatchelItems({ gold: 0, stacks: { 'scriveners-hint': 5, 'ward-of-focus': 1 } })).toEqual([]);
+  });
+
+  it('resolveHealUse restores the item amount, clamped to the pool ceiling', () => {
+    expect(resolveHealUse(draught, 6)).toMatchObject({ ok: true, nextPool: 12, gained: 6 });
+    expect(resolveHealUse(draught, 12)).toMatchObject({ ok: true, nextPool: 16, gained: 4 }); // clamps at 16
+  });
+
+  it('a 999 ("full") heal always clamps to the pool ceiling', () => {
+    expect(resolveHealUse(fullRestore, 1)).toMatchObject({ ok: true, nextPool: 16, gained: 15 });
+  });
+
+  it('rejects (no consumption, no turn spent) when already at full vigor — the action-spend gate', () => {
+    expect(resolveHealUse(draught, 16)).toMatchObject({ ok: false, nextPool: 16, gained: 0 });
+    expect(resolveHealUse(draught, 16).message).toBe('Already at full vigor.');
+  });
+
+  it('rejects a non-heal item outright (tools/trinkets have no combat-resolvable effect yet)', () => {
+    expect(resolveHealUse(trinket, 6)).toMatchObject({ ok: false, gained: 0 });
   });
 });
 

@@ -85,14 +85,15 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
     kind: 'parley', label: 'Parley', hotkey: '6', encounter: 'scenario_branch', range: 1,
     shape: 'single', tint: 0xe07aae, blurb: 'Talk it down. (a branching choice)',
   },
-  // Menu/hotkey entry only (inventory-handoff §10): the item-list handshake and
-  // combat/** effect-wiring stay deferred to a future slice — this just reserves
-  // the ActionKind + registers the hotkey so nothing has to shift again later.
-  // The generic hotkey dispatch (CombatScene's input.keyboard 'keydown' handler,
-  // which looks up ACTIONS by e.key) needs no changes to pick this up.
+  // Opens the in-battle item panel (inventory-handoff §10). shape:'self'/range:0 means
+  // validTargets has no case for it (falls to the default `[]`) — CombatScene.onPickAction
+  // special-cases 'satchel' before that gate anyway (same as 'wait'), so it's always
+  // pickable. Resolves heals through combat/satchel.ts + services.inventory.useItem, not
+  // the damage table; reveal_option/retry_cast/streak_shield stay catalog-only (touching
+  // the encounter surface to actually consume them is out of scope — see satchel.ts).
   satchel: {
     kind: 'satchel', label: 'Satchel', hotkey: 'q', encounter: null, range: 0,
-    shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item. (coming soon)',
+    shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item.',
   },
   wait: {
     kind: 'wait', label: 'Wait', hotkey: '7', encounter: null, range: 0,

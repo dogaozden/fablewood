@@ -12,7 +12,7 @@
 import Phaser from 'phaser';
 import { markReady } from '../ready';
 import {
-  services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind,
+  services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
 } from '../contracts';
 import type { Pack } from '../../packs/types';
 import { getPacks } from '../../bridge/client';
@@ -33,6 +33,9 @@ import { CombatHud } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS } from './fixtures';
 import { P } from './palette';
 import { music } from '../../music/instance';
+import { usableSatchelItems, resolveHealUse } from './satchel';
+import { itemById } from '../../inventory/catalog';
+import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
 
@@ -251,6 +254,12 @@ export class CombatScene extends Phaser.Scene {
    * The save holds ONE pooled party HP (max 16 = Keeper 10 + Mira 6). Split it
    * proportionally onto the units on launch; the camp heals the pool back to 16.
    * hpLost (the pooled delta) is reported in CombatOutcome for the dungeon/camp.
+   *
+   * Also re-run mid-battle by the Satchel (inventory-handoff §10) after a heal raises the
+   * pool — the first time HP can rise without the battle ending. Since the split always
+   * gives every living-pool unit ≥1 hp, a unit that had fainted (alive:false) can come back
+   * here; reviveView() undoes fadeDead's tween (alpha/scale/angle) so it doesn't stay
+   * visually "dead" while alive:true and its hp bar reads a real value.
    */
   private applyPoolHp(): void {
     let pool = 16;
@@ -258,8 +267,28 @@ export class CombatScene extends Phaser.Scene {
     pool = Math.max(0, Math.min(16, pool));
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
-    if (keeper) { keeper.hp = pool > 0 ? Math.max(1, Math.min(10, Math.ceil((pool * 10) / 16))) : 0; keeper.alive = keeper.hp > 0; this.drawHpBar(keeper); }
-    if (mira) { mira.hp = pool > 0 ? Math.max(1, Math.min(6, Math.floor((pool * 6) / 16))) : 0; mira.alive = mira.hp > 0; this.drawHpBar(mira); }
+    if (keeper) {
+      const wasDead = !keeper.alive;
+      keeper.hp = pool > 0 ? Math.max(1, Math.min(10, Math.ceil((pool * 10) / 16))) : 0;
+      keeper.alive = keeper.hp > 0;
+      if (wasDead && keeper.alive) this.reviveView(keeper);
+      this.drawHpBar(keeper);
+    }
+    if (mira) {
+      const wasDead = !mira.alive;
+      mira.hp = pool > 0 ? Math.max(1, Math.min(6, Math.floor((pool * 6) / 16))) : 0;
+      mira.alive = mira.hp > 0;
+      if (wasDead && mira.alive) this.reviveView(mira);
+      this.drawHpBar(mira);
+    }
+  }
+
+  /** Undo fadeDead's death tween (used only when a Satchel heal revives a fainted ally). */
+  private reviveView(u: UnitState): void {
+    const v = this.views.get(u.id);
+    if (!v) return;
+    this.tweens.killTweensOf(v.container);
+    v.container.setAlpha(1).setScale(1).setAngle(0);
   }
 
   private makeUnitView(u: UnitState): void {
@@ -348,6 +377,11 @@ export class CombatScene extends Phaser.Scene {
   private async loadContent(): Promise<void> {
     try { await services.srs.ready(); } catch { /* stub or offline */ }
     try { await services.save.ready(); } catch { /* stub or offline */ }
+    // Warms the wallet before the Satchel action can be opened — mirrors HamletScene/
+    // DungeonScene's own boot-time services.inventory.ready() call. Without this, the
+    // packless ?scene=combat dev/e2e harness (never visits hamlet/dungeon first) would
+    // read InventoryStore's in-memory defaults instead of the persisted stacks.
+    try { await services.inventory.ready(); } catch { /* stub or offline */ }
     try {
       const { packs } = await getPacks();
       const entry = packs.find((pk) => pk.id === this.launch.packId);
@@ -453,7 +487,9 @@ export class CombatScene extends Phaser.Scene {
 
   private showMenu(unit: UnitState): void {
     const items = (Object.keys(ACTIONS) as ActionKind[]).map((action) => {
-      if (action === 'wait') return { action, enabled: true };
+      // Self-cast, no targeting phase (inventory-handoff §10): always pickable, like Wait —
+      // an empty satchel is handled inside the panel (a friendly line), not by disabling this.
+      if (action === 'wait' || action === 'satchel') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
       return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no target in range' };
     });
@@ -464,6 +500,7 @@ export class CombatScene extends Phaser.Scene {
     if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
     if (unit.id !== this.activeId) return;
     if (action === 'wait') { this.hud.showBanner('Holding position.', P.stoneGrey); this.endPlayerTurn(); return; }
+    if (action === 'satchel') { void this.openSatchel(unit); return; }
     const targets = this.validTargets(unit, action);
     if (!targets.length) { this.hud.showBanner(`${ACTIONS[action].label}: no target in range.`, P.stoneGrey); return; }
     this.enterTargeting(action, targets);
@@ -649,6 +686,93 @@ export class CombatScene extends Phaser.Scene {
     const end = this.checkEnd();
     if (end) { this.resolveBattle(end); return; }
     this.advanceTurn();
+  }
+
+  // ---- satchel (inventory-handoff §10) -----------------------------------
+
+  /**
+   * Opens the in-battle item panel. A DOM overlay (inventory/ui/combatSatchelPane.ts),
+   * so the caller must quiet the game keyboard for its lifetime — same mandatory wrap
+   * every Satchel/shop caller uses (inventory/ui/dom.ts's openPane doc, §7).
+   */
+  private async openSatchel(unit: UnitState): Promise<void> {
+    // Q can fire mid-targeting too (the keydown handler allows any hotkey from
+    // playerTarget, same as Wait) — leave that cleanly first, like cancelTargeting.
+    this.state = 'playerMove';
+    this.pendingAction = null;
+    this.targetTiles.clear();
+    this.hoverGfx.clear();
+    this.hud.hideActionMenu();
+
+    let usable: ReturnType<typeof usableSatchelItems> = [];
+    let gold = 0;
+    try {
+      usable = usableSatchelItems(services.inventory.snapshot());
+      gold = services.inventory.getGold();
+    } catch { /* offline — empty satchel is the honest answer */ }
+
+    this.input.keyboard!.enabled = false;
+    const chosen = await openCombatSatchelPane(usable, gold);
+    this.input.keyboard!.enabled = true;
+    this.input.keyboard!.resetKeys();
+
+    if (this.destroyed) return; // scene torn down while the DOM panel was open
+    if (!chosen) { this.returnToActionMenu(unit); return; }
+
+    // Lock the board out (same as every other action's async gap) for the mutation below —
+    // the panel closing already re-enabled the keyboard, so this closes that re-entrancy window.
+    this.state = 'resolving';
+    await this.useSatchelItem(unit, chosen);
+  }
+
+  private returnToActionMenu(unit: UnitState): void {
+    if (this.destroyed) return;
+    this.state = 'playerMove';
+    if (!this.moved) this.drawMoveRange();
+    this.showMenu(unit);
+  }
+
+  /**
+   * Resolves a chosen heal item through the SAME choke point camp-rest/the hamlet Satchel
+   * use (services.inventory.useItem — consume.ts's clamp-and-persist), spending the action
+   * only on success. services.save.hp goes stale the instant combat damage starts (nothing
+   * else writes it mid-battle), so the LIVE pool (Keeper+Mira's current hp) is synced into
+   * the save FIRST — resolveHealUse (pure, combat/satchel.ts) computes against that live
+   * number so the scene knows the outcome before ever calling the real, async mutation.
+   */
+  private async useSatchelItem(unit: UnitState, id: string): Promise<void> {
+    const item = itemById(id);
+    const keeper = this.unitById('keeper');
+    const mira = this.unitById('mira');
+    if (!item || !keeper || !mira) { this.returnToActionMenu(unit); return; }
+
+    const livePool = keeper.hp + mira.hp;
+    const plan = resolveHealUse(item, livePool);
+    if (!plan.ok) {
+      this.hud.showBanner(plan.message, P.stoneGrey);
+      this.returnToActionMenu(unit);
+      return;
+    }
+
+    try { await services.save.save({ hp: livePool }); } catch { /* offline */ }
+    let res: UseResult;
+    try { res = await services.inventory.useItem(id); }
+    catch { res = { ok: false, message: 'The satchel would not open.' }; }
+    if (this.destroyed) return;
+    if (!res.ok) {
+      this.hud.showBanner(res.message, P.stoneGrey);
+      this.returnToActionMenu(unit);
+      return;
+    }
+
+    const before = { keeper: keeper.hp, mira: mira.hp };
+    this.applyPoolHp();
+    if (keeper.hp > before.keeper) this.floatText(keeper, `+${keeper.hp - before.keeper}`, P.moss);
+    if (mira.hp > before.mira) this.floatText(mira, `+${mira.hp - before.mira}`, P.moss);
+    this.refreshParty();
+    this.hud.showBanner(res.message, P.moss);
+    this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
+    this.time.delayedCall(560, () => this.endPlayerTurn());
   }
 
   // ---- boss phase -------------------------------------------------------
