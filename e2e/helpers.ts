@@ -155,8 +155,10 @@ async function holdKeyUntilPinned(page: Page, key: string, axis: 'x' | 'y', maxM
 
 /** Wait until the hamlet scene's async bootstrap has loaded the provinces (packs). Read-only
  *  peek, same pattern as hamletPlayer: without it a fast approach can knock on the gate before
- *  Alder has anything to offer (empty-province dialogue has no choice and no warp). */
-async function waitProvincesLoaded(page: Page, timeout = 10_000): Promise<boolean> {
+ *  Alder has anything to offer (empty-province dialogue has no choice and no warp). Also needed
+ *  before the Wellspring interaction: without a loaded packId, doWellspring() takes its
+ *  no-pack branch (wellspringEmpty(), no drill) instead of the real intro. */
+export async function waitProvincesLoaded(page: Page, timeout = 10_000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     const n = await page.evaluate(() => {
@@ -262,5 +264,15 @@ declare global {
     __FABLEWOOD_READY?: boolean;
     __FABLEWOOD_STATE?: { scene?: string; title?: string; seed?: number };
     __FABLEWOOD_GAME?: unknown;
+    /** Dev/e2e-only warp hook installed by HamletScene (absent in production builds). */
+    __fwWarp?: (locationId: string) => boolean;
   }
+}
+
+/** Warp the hamlet Keeper next to a location's door (dev/e2e-only hook — instant,
+ *  flake-proof setup positioning). Returns false if the hook or the location is
+ *  missing. NOT for the full-chain spec: that one spec's South Gate approach stays
+ *  100% real keyboard input on purpose; this is for OTHER specs' setup. */
+export async function warpHamletTo(page: Page, locationId: string): Promise<boolean> {
+  return page.evaluate((id) => window.__fwWarp?.(id) ?? false, locationId);
 }

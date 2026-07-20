@@ -63,8 +63,7 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   if (kind) {
     const seedParam = Number(new URLSearchParams(window.location.search).get('seed'));
     const seed = Number.isFinite(seedParam) && seedParam !== 0 ? seedParam : 7;
-    // let React mount + the boot scene mark ready, then open over the canvas.
-    setTimeout(() => {
+    const openDevOverlay = (): void => {
       if (kind === 'teaching') {
         void presentTeaching(FIXTURE_TEACHING);
         return;
@@ -73,6 +72,19 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
       if (!enc) return;
       const facts = factsFor(enc.fact_ids, FIXTURE_PACK);
       void presentEncounter(reskin(enc, seed), facts, { context: 'drill', judge: services.judge });
-    }, 80);
+    };
+    // Wait for the real ready flag, not a fixed delay: the game engine (Phaser +
+    // scenes) now loads in its own lazy chunk (bundle diet), so a flat timeout can
+    // no longer assume window.__FABLEWOOD_GAME exists by the time it fires.
+    // overlay.ts's quietGameKeyboard() silently no-ops without it, leaking the
+    // hamlet's WASD/E/Space captures into this overlay's own text inputs.
+    const openWhenReady = (): void => {
+      if (window.__FABLEWOOD_READY) {
+        setTimeout(openDevOverlay, 80); // let the canvas paint a frame first
+        return;
+      }
+      setTimeout(openWhenReady, 30);
+    };
+    openWhenReady();
   }
 }

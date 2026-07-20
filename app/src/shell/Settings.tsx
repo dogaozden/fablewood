@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { services } from '../game/contracts';
-import { music } from '../music/instance';
 import { getLastGrade, type LastGrade } from '../judge/client';
 import './shell.css';
 
@@ -18,6 +17,15 @@ interface Props {
 }
 
 const SAVE_DEBOUNCE_MS = 300;
+
+// Tone stays behind the game/App.tsx lazy boundary — same cached dynamic-import
+// pattern as App.tsx's loadMusic, so this pane never drags the engine chunk into
+// the shell bundle. import() of the same specifier resolves to the same module.
+let musicModule: Promise<typeof import('../music/instance')> | undefined;
+function loadMusic() {
+  musicModule ??= import('../music/instance');
+  return musicModule;
+}
 /** How often to poll for a fresh judge grade while this pane is open. */
 const POLL_MS = 1000;
 
@@ -36,7 +44,7 @@ export function Settings({ muted, onToggleMute }: Props) {
         const v = services.settings.get().volume;
         const initial = typeof v === 'number' && Number.isFinite(v) ? v : 100;
         setVolume(initial);
-        music.setVolume(initial);
+        void loadMusic().then(({ music }) => music.setVolume(initial));
         setReady(true);
       })
       .catch(() => alive && setReady(true));
@@ -54,7 +62,7 @@ export function Settings({ muted, onToggleMute }: Props) {
 
   const onVolumeChange = (next: number) => {
     setVolume(next);
-    music.setVolume(next);
+    void loadMusic().then(({ music }) => music.setVolume(next));
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       void services.settings.set({ volume: next });

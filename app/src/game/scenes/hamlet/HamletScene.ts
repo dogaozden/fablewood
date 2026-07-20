@@ -79,6 +79,7 @@ export class HamletScene extends Phaser.Scene {
   private saveAccum = 0;
   private provinces: Province[] = [];
   private packId?: string;
+  private didShutdown = false;
 
   constructor() {
     super('hamlet');
@@ -122,9 +123,40 @@ export class HamletScene extends Phaser.Scene {
     cam.ignore(this.uiRoot);
     this.uiCam.ignore(this.worldGroup.getChildren());
 
+    // Dev/e2e-only warp hook: teleports the Keeper next to a location's door (same
+    // spot `?demo=near-<id>` parks at below) without walking. For OTHER e2e specs'
+    // setup only — the one full-chain spec keeps its 100% real-input South Gate
+    // walk on purpose. Stripped from production builds by the `import.meta.env.DEV`
+    // guard, same idiom as the `?overlay=` dev harness in encounters/register.ts.
+    if (import.meta.env.DEV) {
+      window.__fwWarp = (id: string): boolean => {
+        const loc = this.map.locations.find((l) => l.id === id);
+        if (!loc) return false;
+        this.placePlayer(loc.door.x, loc.door.y + 2);
+        this.facing = 'up';
+        return true;
+      };
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.didShutdown = true;
       void this.persist();
       this.dialogue.destroy();
+      if (import.meta.env.DEV) delete window.__fwWarp;
+    });
+
+    // A full Game teardown (PhaserGame.tsx's unmount, e.g. the shell switching away
+    // from the "Game" tab while the Keeper is still in the hamlet) does NOT emit
+    // SHUTDOWN — Phaser's SceneManager.destroy() calls every scene's Systems.destroy()
+    // directly, skipping shutdown() entirely. Without this, the position/scene pointer
+    // was silently lost whenever the whole app closed mid-hamlet-visit instead of via a
+    // scene transition. Guarded: every added scene (even ones that already shut down
+    // earlier, e.g. hamlet -> vaults) gets a DESTROY event on full teardown too, so
+    // without the guard this would replay stale hamlet coordinates over newer progress
+    // made in whatever scene the game was actually destroyed from.
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => {
+      if (this.didShutdown) return;
+      void this.persist();
     });
 
     void this.bootstrap();
