@@ -93,8 +93,11 @@ python3 sprites/sprite_lint.py final.png --size WxH --palette sprites/fablewood3
   the sprite dark (mean brightness −40%; ledger 2026-07-20). Reorder-after-quantize
   fix is pending in the research session's court.
 - `--max-parts 2` for buildings with detached elements (chimney smoke, hanging signs).
-- Expect template-driven raws to lint ~10% orphan rate vs the 2% doctrine default —
-  judge speckle BY EYE at 6× until thresholds are calibrated per asset class.
+- Lint with the CALIBRATED per-lane gates (docs/art-reviews/lint-calibration-v1.md):
+  quantized buildings `--max-orphan-rate 0.12 --max-parts 4`; quantized world-props
+  `--max-orphan-rate 0.10 --max-parts 2`; raw-painterly/tiles/fx get size-check only
+  (palette/orphan gating is meaningless off the quantized lane). The director's eye
+  still overrules lint — it triages, it doesn't verdict.
 
 ## Judge (the gate is law)
 

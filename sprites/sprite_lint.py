@@ -56,7 +56,12 @@ def lint(path, size=None, palette_path=None, max_colors=None, texel=None,
     def fail(check, msg):
         nonlocal ok
         ok = False
+        prev = report.get(check)
         report[check] = {"pass": False, "detail": msg}
+        if isinstance(prev, dict):
+            # keep pre-computed metrics (e.g. silhouette parts/fill_ratio) alongside the failure
+            for k, v in prev.items():
+                report[check].setdefault(k, v)
 
     # --- size ---
     if size:
