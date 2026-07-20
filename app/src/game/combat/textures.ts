@@ -34,6 +34,7 @@ export const ICON_KEYS: Record<string, string> = {
   sequence: 'icon.sequence',
   cast: 'icon.cast',
   parley: 'icon.parley',
+  satchel: 'icon.satchel',
   wait: 'icon.wait',
 };
 
@@ -56,6 +57,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.sequence, ICON, ICON, drawIconSequence);
   bake(scene, ICON_KEYS.cast, ICON, ICON, drawIconCast);
   bake(scene, ICON_KEYS.parley, ICON, ICON, drawIconParley);
+  bake(scene, ICON_KEYS.satchel, ICON, ICON, drawIconSatchel);
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
 }
 
@@ -268,6 +270,25 @@ function drawIconParley(g: Phaser.GameObjects.Graphics): void {
   g.fillRoundedRect(6, 8, 24, 16, 5).strokeRoundedRect(6, 8, 24, 16, 5);
   g.fillTriangle(12, 22, 20, 22, 11, 30).lineStyle(2, P.outline, 1);
   g.fillStyle(P.parchment, 1).fillCircle(13, 16, 2).fillCircle(18, 16, 2).fillCircle(23, 16, 2);
+}
+
+/** The Satchel action's HUD icon (inventory-handoff §10) — a leather pouch,
+ *  matching the "warm bark, lantern-gold buckle" palette family so it reads
+ *  at home next to Strike/Cast/etc. Distinct icon system from the DOM item
+ *  icons in inventory/icons.ts (that's 16×16 palette-char grids for the
+ *  Satchel/shop panes; this is the same 36×36-baked-texture style every other
+ *  combat action icon here uses — the "§8 UI-icon exception" the handoff notes). */
+function drawIconSatchel(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  g.lineStyle(3, P.outline, 1).lineBetween(9, 10, 27, 4); // strap
+  g.lineStyle(2, P.bark, 1).lineBetween(9, 10, 27, 4);
+  g.lineStyle(2, P.outline, 1).fillStyle(P.timber, 1);
+  g.fillRoundedRect(7, 13, 22, 18, 5).strokeRoundedRect(7, 13, 22, 18, 5); // bag body
+  g.fillStyle(P.timberLight, 1).fillRoundedRect(9, 15, 8, 6, 3); // top-left lit patch
+  g.fillStyle(P.bark, 1).fillRoundedRect(9, 11, 18, 8, 4);
+  g.lineStyle(2, P.outline, 1).strokeRoundedRect(9, 11, 18, 8, 4); // flap
+  g.fillStyle(P.lanternGold, 1).fillCircle(18, 18, 2.5);
+  g.lineStyle(1, P.outline, 1).strokeCircle(18, 18, 2.5); // buckle
 }
 
 function drawIconWait(g: Phaser.GameObjects.Graphics): void {
