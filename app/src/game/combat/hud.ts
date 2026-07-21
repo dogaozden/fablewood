@@ -12,6 +12,9 @@ import { GLOW_CAP } from './arts';
 
 const FONT = 'Georgia, serif';
 const W = 960;
+/** The banner's default screen-centre Y (its constructor position). Named so the tier-flyout
+ *  clearance logic (crucible v1 #10) and hideTierFlyout's restore always agree on one value. */
+const BANNER_Y = 446;
 
 export interface TurnChip {
   id: string;
@@ -71,7 +74,7 @@ export class CombatHud {
   constructor(scene: Phaser.Scene, roomName: string) {
     this.scene = scene;
     this.strip = scene.add.container(0, 0).setDepth(50);
-    this.banner = scene.add.container(W / 2, 446).setDepth(60).setAlpha(0);
+    this.banner = scene.add.container(W / 2, BANNER_Y).setDepth(60).setAlpha(0);
     this.toast = scene.add.container(W / 2, 210).setDepth(80).setAlpha(0);
     this.veil = scene.add.container(0, 0).setDepth(70).setVisible(false);
     this.menu = scene.add.container(0, 502).setDepth(55).setVisible(false);
@@ -282,6 +285,13 @@ export class CombatHud {
     return this.panelText.text;
   }
 
+  /** Debug: the banner's current absolute bounding box (e2e-only — crucible v1 #10: proves it
+   *  clears the tier flyout's own box rather than overlapping it at a fixed screen position). */
+  bannerBounds(): { top: number; bottom: number; left: number; right: number } {
+    const b = this.banner.getBounds();
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
+  }
+
   // ---- tier flyout (§12.2, Rank 2+) ---------------------------------------
 
   /** Recomputes an action button's screen-space centre X from the same items+width math
@@ -359,10 +369,28 @@ export class CombatHud {
 
     this.flyout.setPosition(anchorX, 502);
     this.flyout.setVisible(true);
+
+    // crucible v1 #10 — the fixed screen-centre banner (446) overlapped this dynamically-sized,
+    // differently-anchored flyout on 4 of 5 Arts (only Kindling's button sits far enough left
+    // to escape it). Clear the flyout's own top edge instead of a hardcoded position — `top` is
+    // negative, so 502+top is the flyout's real top edge, and this only ever moves the banner
+    // UP from its default, never lower. Any banner shown while the flyout is open (the
+    // "choose a tier" text itself, or a status hover-line) inherits the cleared position.
+    const flyoutTopY = 502 + top;
+    this.banner.setY(Math.min(BANNER_Y, flyoutTopY - 26));
   }
 
   hideTierFlyout(): void {
     this.flyout.setVisible(false);
+    this.banner.setY(BANNER_Y);
+  }
+
+  /** Debug: the tier flyout's current absolute bounding box, if open (e2e-only — crucible v1
+   *  #10; Phaser-drawn, not DOM, so a spec can't read this via a locator). */
+  flyoutBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    if (!this.flyout.visible) return null;
+    const b = this.flyout.getBounds();
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
   }
 }
 

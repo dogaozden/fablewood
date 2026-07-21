@@ -2245,4 +2245,14 @@ export class CombatScene extends Phaser.Scene {
   flyoutDebug(): { rows: TierRow[]; overglow: OverglowRow | null } | null {
     return this.state === 'playerTier' ? { rows: this.lastFlyoutRows, overglow: this.lastFlyoutOverglow } : null;
   }
+
+  /** Debug: the HUD banner's + tier flyout's current absolute bounding boxes (e2e-only —
+   *  crucible v1 #10: proves the "choose a tier" banner never visually overlaps the flyout). */
+  bannerBounds(): { top: number; bottom: number; left: number; right: number } {
+    return this.hud.bannerBounds();
+  }
+
+  flyoutBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    return this.hud.flyoutBounds();
+  }
 }
