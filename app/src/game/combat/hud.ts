@@ -68,6 +68,7 @@ export class CombatHud {
   private streakIcon: Phaser.GameObjects.Image | null = null;
   private rankText: Phaser.GameObjects.Text;
   private glowPips: Phaser.GameObjects.Graphics;
+  private lastMenuButtonWidth = 0;
   private lastGlowPips = -1;
   private flyout: Phaser.GameObjects.Container;
 
@@ -195,6 +196,7 @@ export class CombatHud {
     // Fit the row to the canvas: 6 actions keep the 148px button; the 7th (Smite) shrinks
     // them just enough to stay on-screen (≈129px) rather than overflow the 960px width.
     const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
+    this.lastMenuButtonWidth = bw;
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {
@@ -210,12 +212,19 @@ export class CombatHud {
       };
       draw(false);
       const icon = this.scene.add.image(-bw / 2 + 22, 0, ICON_KEYS[item.action]).setScale(0.9);
-      const label = this.scene.add.text(-bw / 2 + 40, -9, meta.label, {
+      // crucible v1 #11 — yesterday's Satchel-action commit made this an 8-button row (112px
+      // each, down from 129px at 7); 3 of 8 labels and all 8 hint lines overflowed with no
+      // visual indication of the cut. Clamp both to the button's own inner width, ellipsizing
+      // rather than letting later buttons' opaque backgrounds silently paint over the tail.
+      const availW = bw / 2 - 6 - (-bw / 2 + 40);
+      const label = this.scene.add.text(-bw / 2 + 40, -9, '', {
         fontFamily: FONT, fontSize: '13px', color: hex(item.enabled ? P.parchment : P.stoneGrey),
       });
-      const key = this.scene.add.text(-bw / 2 + 40, 5, `[${meta.hotkey}] ${item.reason ?? meta.blurb}`, {
+      fitText(label, meta.label, availW);
+      const key = this.scene.add.text(-bw / 2 + 40, 5, '', {
         fontFamily: FONT, fontSize: '9px', color: hex(item.enabled ? P.lanternGold : P.stoneGrey),
       });
+      fitText(key, `[${meta.hotkey}] ${item.reason ?? meta.blurb}`, availW);
       btn.add([bg, icon, label, key]);
       if (item.enabled) {
         btn.setInteractive(new Phaser.Geom.Rectangle(-bw / 2, -22, bw, 44), Phaser.Geom.Rectangle.Contains);
@@ -233,6 +242,18 @@ export class CombatHud {
 
   hideActionMenu(): void {
     this.menu.setVisible(false);
+  }
+
+  /** Debug: each action-menu button's rendered label/hint text + measured width vs the
+   *  button's own width (e2e-only — crucible v1 #11: proves neither ever visually overflows
+   *  its button, truncating with an ellipsis instead when the button is too narrow). */
+  actionMenuDebug(): Array<{ label: string; labelWidth: number; hint: string; hintWidth: number; buttonWidth: number }> {
+    return this.menu.list.map((btn) => {
+      const c = btn as Phaser.GameObjects.Container;
+      const label = c.getAt(2) as Phaser.GameObjects.Text;
+      const hint = c.getAt(3) as Phaser.GameObjects.Text;
+      return { label: label.text, labelWidth: label.width, hint: hint.text, hintWidth: hint.width, buttonWidth: this.lastMenuButtonWidth };
+    });
   }
 
   // ---- party panel ------------------------------------------------------
@@ -391,6 +412,19 @@ export class CombatHud {
     if (!this.flyout.visible) return null;
     const b = this.flyout.getBounds();
     return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
+  }
+}
+
+/** crucible v1 #11 — sets `label`'s text to `full`, trimming from the end with a trailing
+ *  ellipsis until it fits `maxWidth` (Phaser recomputes `.width` synchronously after
+ *  setText(), so this needs no render pass). A no-op when `full` already fits. */
+function fitText(label: Phaser.GameObjects.Text, full: string, maxWidth: number): void {
+  label.setText(full);
+  if (label.width <= maxWidth) return;
+  let trimmed = full;
+  while (trimmed.length > 1 && label.width > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+    label.setText(trimmed + '…');
   }
 }
 

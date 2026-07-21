@@ -2255,4 +2255,10 @@ export class CombatScene extends Phaser.Scene {
   flyoutBounds(): { top: number; bottom: number; left: number; right: number } | null {
     return this.hud.flyoutBounds();
   }
+
+  /** Debug: the action menu's rendered button label/hint text + widths (e2e-only — crucible
+   *  v1 #11: proves the 8-button row never overflows a button, ellipsizing instead). */
+  actionMenuDebug(): Array<{ label: string; labelWidth: number; hint: string; hintWidth: number; buttonWidth: number }> {
+    return this.hud.actionMenuDebug();
+  }
 }
