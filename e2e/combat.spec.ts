@@ -47,14 +47,16 @@ async function waitForLoggedAction(
   return null;
 }
 
-/** Answer an open free_recall (Cast) overlay with a rubric-rich answer → a Clerk pass. */
+/** Answer an open free_recall (Cast) overlay with a terse-but-correct answer → a Clerk pass. */
 async function answerCast(page: Page): Promise<void> {
   await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 10_000 });
-  // The economics-vs-control rubric is the first free_recall vc-law offers combat; a substantive
-  // answer clears the stub judge's keyword bar → a real PASS (quality 1), so the Cast lands full.
-  await page.locator('.fw-textarea').fill(
-    'Economics and control are the two things that matter in a term sheet. Economics is the investor return in a liquidity event and the terms that drive it; control is the mechanisms letting investors direct or veto company decisions.',
-  );
+  // The packless combat fixture has no packId, so runEncounter falls through to packs[0] —
+  // vc-law, the only installed pack — and this is the first free_recall it offers combat:
+  // enc.fr.economics-vs-control. Its rubric is written in the tiered house style ("Full
+  // credit for X… Partial credit for Y… No credit for Z"), and the stub judge (app/src/
+  // judge/stub.ts) grades terse answers against it by design — a bare, correct answer clears
+  // the keyword bar → a real PASS (quality 1), so the Cast lands full.
+  await page.locator('.fw-textarea').fill('Economics and control.');
   await page.getByRole('button', { name: 'Cast' }).click();
   const cont = page.getByRole('button', { name: 'Onward ▸' });
   await cont.waitFor({ state: 'visible', timeout: 15_000 });
