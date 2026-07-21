@@ -62,8 +62,23 @@ async function assertNoSilentReopen(page: Page, expectedCalls: number, ms = 1500
 
 // Same generic "answer whatever the drill offers" helper as wellspring-srs.spec.ts,
 // duplicated locally so this spec is fully self-contained (it owns no other file).
+//
+// Every kind eventually calls resolve() — via an explicit "Onward ▸" click, or (a
+// CORRECT mcq pick only, kinds.ts's renderMcq) a ~720ms auto-continue with no button at
+// all — and every resolve() tears the overlay's DOM down (overlay.ts's close(), which
+// completes before presentEncounter()'s own promise settles) before the caller can mount
+// the next one. So "this specific overlay element is gone" is the one signal that holds
+// for every kind; waiting for it (instead of a fixed settle time) is what makes this
+// robust when a judge round trip or general load pushes the real close later than usual.
+// Deliberately an ElementHandle wait, not a bare `.fw-overlay` locator wait: the NEXT
+// encounter's overlay mounts with the same class, and a plain selector-based 'detached'
+// wait can latch onto that fresh element and never see the original as gone.
 async function answerAnyOverlay(page: Page): Promise<void> {
-  await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8000 });
+  const overlay = page.locator('.fw-overlay').first();
+  await overlay.waitFor({ state: 'visible', timeout: 8000 });
+  const handle = await overlay.elementHandle();
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
+  let expectContinue = true;
   if (await page.locator('.fw-textarea').count()) {
     await page.locator('.fw-textarea').fill('the preferred shares convert at the stated ratio');
     await page.getByRole('button', { name: 'Cast' }).click();
@@ -79,12 +94,24 @@ async function answerAnyOverlay(page: Page): Promise<void> {
   } else if (await page.locator('.fw-step').count()) {
     await page.getByRole('button', { name: /Seal the Sequence/ }).click();
   } else {
-    await page.locator('.fw-opt').first().click(); // mcq or scenario
+    // mcq or scenario_branch (both use .fw-opt). scenario_branch's choose() always
+    // appends the continue button; only a CORRECT mcq pick skips it (kinds.ts's
+    // renderMcq auto-continues on its own ~720ms timer instead) — so only mcq's
+    // continue button is optional.
+    const isScenario = (await page.locator('.fw-eyebrow').innerText()).includes('Scenario');
+    await page.locator('.fw-opt').first().click();
+    expectContinue = isScenario;
   }
-  await page.waitForTimeout(300);
-  const cont = page.getByRole('button', { name: 'Onward ▸' });
+  if (expectContinue) {
+    await cont.waitFor({ state: 'visible', timeout: 15_000 });
+  } else {
+    await cont.waitFor({ state: 'visible', timeout: 2_000 }).catch(() => {});
+  }
   if (await cont.count()) await cont.click();
-  await page.waitForTimeout(250);
+  if (handle) {
+    await page.waitForFunction((el) => !el.isConnected, handle, { timeout: 10_000 });
+    await handle.dispose();
+  }
 }
 
 test.describe('hamlet dialogue close (crucible v0 #1)', () => {
@@ -162,13 +189,23 @@ test.describe('hamlet dialogue close (crucible v0 #1)', () => {
     await tapKey(page, 'e');
     await page.waitForTimeout(200);
     await tapKey(page, 'e'); // closes the intro -> doWellspring() proceeds into the drill
-    await page.waitForTimeout(300);
 
-    // answer the 3 real drill encounters through the real overlay
+    // answer the 3 real drill encounters through the real overlay. Poll for whichever
+    // comes next — the following encounter's overlay, or (after the 3rd) the outro
+    // dialogue — instead of guessing a fixed settle time: doWellspring()'s async gap
+    // (pack/fact lookups, judge setup) can run long under load, and a fixed sleep that
+    // undercounts it used to break out of this loop before the next encounter had even
+    // mounted, leaving a drill step unanswered and the outro never opening.
     for (let n = 0; n < 3; n++) {
+      await expect
+        .poll(
+          async () =>
+            (await page.locator('.fw-overlay').count()) > 0 || Boolean((await hamletPlayer(page))?.dialogueOpen),
+          { message: 'the next encounter or the outro should follow the previous step', timeout: 8000 },
+        )
+        .toBe(true);
       if (!(await page.locator('.fw-overlay').count())) break;
       await answerAnyOverlay(page);
-      await page.waitForTimeout(400); // let the next encounter (or the outro) come up
     }
 
     // the outro appears on its own once the streak save completes
@@ -178,6 +215,19 @@ test.describe('hamlet dialogue close (crucible v0 #1)', () => {
         timeout: 8000,
       })
       .toBe(true);
+
+    // DialogueBox.advance() swallows any keypress within 140ms of its OWN run()-time
+    // openedAt (dialogue/DialogueBox.ts:224) — a guard against the SAME physical tap that
+    // opens a dialogue also being read as its first advance. The intro's opening tap gets
+    // this for free (its own subsequent 250ms wait, above, safely clears 140ms). The
+    // outro instead opens ITSELF, mid-drill, with no player tap to anchor a wait against —
+    // and expect.poll's detection can (rarely) fire close enough behind openedAt that an
+    // immediate first tap here lands inside that 140ms window, gets swallowed, and shifts
+    // every subsequent tap in this sequence by one — one of them then lands as the actual
+    // close a beat early, which can misalign the closing tap this spec is built around.
+    // Waiting a beat past the swallow window before the FIRST post-open tap (irrespective
+    // of how fast or slow the poll above was) removes that race outright.
+    await page.waitForTimeout(200);
 
     // outro: 1 page, no choices — skip typewriter, then the CLOSING tap that exercises
     // crucible #1's exact mechanism at the bug report's named worst case (a silently

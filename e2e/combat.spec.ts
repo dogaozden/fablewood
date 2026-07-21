@@ -197,6 +197,18 @@ test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick be
     }
   })();
 
+  /** Read whether `.fw-opt` cards exist / have resolved (gone `disabled`) together with
+   *  the PAGE's own clock, in one round trip. A slow/loaded runner's IPC latency has no
+   *  guaranteed relationship to the browser's timeline once frames stall, so a wall-clock
+   *  sleep measured from the Node side can't be trusted to still land inside the arm
+   *  window — measuring `now` alongside the DOM read in the same evaluate() call keeps
+   *  every comparison below honest regardless of how long anything around it took. */
+  const sample = () =>
+    page.evaluate(() => {
+      const opts = Array.from(document.querySelectorAll<HTMLButtonElement>('.fw-opt'));
+      return { exists: opts.length > 0, resolved: opts.some((e) => e.disabled), now: performance.now() };
+    });
+
   try {
     // Confirm this repro actually hits the reveal cutscene it depends on (a boss room opens
     // phase 0 automatically — CombatScene sets pendingBossPhase at creation).
@@ -208,28 +220,66 @@ test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick be
       await page.waitForTimeout(30);
     }
 
-    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    // kinds.ts's renderScenario (BOSS_PARLEY_ARM_MS) arms `choose()` only ARM_MS after
+    // mount, for a forced boss phase. This ONE loop both finds the anchor and proves the
+    // window, with NOTHING else — no Playwright locator/assertion call, which are their
+    // own round trips — between capturing T0 and the very next read: measured
+    // empirically, even the overlay/eyebrow content checks sitting BEFORE this section
+    // let enough real time pass that a legitimate ~400ms resolution could land soon
+    // enough after a late anchor to look artificially early. So content checks are
+    // deferred to AFTER this section entirely (order doesn't matter for them — they're
+    // confirming we hit the right repro, not part of the timing proof), and the anchor
+    // here is the first RAW poll (no toBeVisible/toContainText machinery) to observe
+    // `.fw-opt` at all, with the mash loop hammering throughout. A resolution timestamped
+    // suspiciously close to that anchor always means the guard broke, no matter how long
+    // anything before `first` took. SAFE_MS is deliberately well under the real ARM_MS:
+    // the original bug resolved within about one frame of mount (~1-2ms, confirmed by
+    // temporarily reverting the guard), so even this much slack still catches a
+    // regression easily while tolerating this loop's own small per-sample round trip.
+    const ARM_MS = 400; // mirrors kinds.ts's BOSS_PARLEY_ARM_MS — the contract under test
+    const SAFE_MS = 100;
+    let first: { now: number } | null = null;
+    let elapsed = 0;
+    const pollCeiling = Date.now() + 15_000; // circuit breaker only, not part of the timing proof
+    while (Date.now() < pollCeiling) {
+      const s = await sample();
+      if (!first) {
+        if (!s.exists) { await page.waitForTimeout(10); continue; } // overlay not mounted yet
+        first = s;
+        continue; // next statement executed is the very next `sample()` below — no gap
+      }
+      elapsed = s.now - first.now;
+      if (s.resolved) {
+        expect(
+          elapsed,
+          `a mashed hotkey resolved the branch only ${Math.round(elapsed)}ms after the overlay became interactive (arm window is ${ARM_MS}ms) — must not resolve before the overlay has had a moment to be read`,
+        ).toBeGreaterThanOrEqual(SAFE_MS);
+        break;
+      }
+      if (elapsed >= SAFE_MS) break; // held unresolved for the full safety margin: guard proven
+      await page.waitForTimeout(20);
+    }
+    if (!first) throw new Error('the Parley overlay\'s .fw-opt cards never appeared');
+
+    // Content checks: confirm this hit the right repro. Order doesn't matter for these —
+    // they're not part of the timing proof above.
     await expect(page.locator('.fw-eyebrow'), 'the forced boss phase opens a Parley (scenario_branch)').toContainText('Parley');
     expect(sawReveal, 'the Vault-Warden reveal cutscene actually played (this bug is scoped to it)').toBe(true);
-
-    // Still well inside the overlay's arming window — mashing continues throughout — no
-    // branch may have resolved yet.
-    await page.waitForTimeout(200);
-    const opts = page.locator('.fw-opt');
-    await expect(opts.first()).toBeVisible();
-    const disabled = await opts.evaluateAll((els) => els.some((e) => (e as HTMLButtonElement).disabled));
-    expect(disabled, 'a mashed hotkey must not resolve a branch before the overlay is interactively ready').toBe(false);
   } finally {
     mashing = false;
     await mashLoop;
   }
 
   // The guard only delays, never breaks, activation: once settled, a press still picks a
-  // branch normally.
-  await page.waitForTimeout(400);
-  await page.keyboard.press('1');
-  await expect(
-    page.locator('.fw-verdict'),
-    'a deliberate press after the overlay settles still resolves the branch',
-  ).toBeVisible({ timeout: 5_000 });
+  // branch normally. Poll with repeated deliberate presses rather than one fixed sleep
+  // then a single attempt, so an occasional heavy stall past the arm window still lands
+  // it instead of racing it.
+  const pressDeadline = Date.now() + 5_000;
+  let sawVerdict = false;
+  while (Date.now() < pressDeadline) {
+    await page.keyboard.press('1');
+    if (await page.locator('.fw-verdict').count()) { sawVerdict = true; break; }
+    await page.waitForTimeout(150);
+  }
+  expect(sawVerdict, 'a deliberate press after the overlay settles still resolves the branch').toBe(true);
 });
