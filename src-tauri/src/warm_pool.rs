@@ -62,10 +62,11 @@ impl<T, F: FnMut() -> PoolEntry<T>> WarmPool<T, F> {
 
     // size()/for_each() are part of WarmPool's public surface (mirroring
     // warm-pool.ts's class API, incl. its "used for shutdown cleanup" forEach)
-    // and are exercised by the tests below. No production call site here: this
-    // port's shutdown cleanup relies on kill_on_drop RAII instead of an
-    // explicit iterate-and-kill sweep — see judge_pool.rs's module doc for why.
-    #[allow(dead_code)]
+    // and are exercised by the tests below. size() also has a real production
+    // call site now: judge_pool::prewarm reports it back to main.rs's
+    // boot-readiness log line. for_each() still has none: this port's
+    // shutdown cleanup relies on kill_on_drop RAII instead of an explicit
+    // iterate-and-kill sweep — see judge_pool.rs's module doc for why.
     pub fn size(&self) -> usize {
         self.entries.len()
     }

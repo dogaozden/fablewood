@@ -91,6 +91,94 @@ pub(crate) fn resolve_claude_bin() -> Option<PathBuf> {
     None
 }
 
+/// Build the `claude` child's entire execution context EXPLICITLY — both env
+/// and cwd — instead of letting it silently inherit whatever (possibly
+/// minimal, possibly wrong) context this process itself happened to receive.
+/// This is the root-cause fix for the Finder-launch bug (docs/tauri.md,
+/// worktree report), which turned out to be two compounding issues:
+///
+///   1. PATH: a Finder/LaunchServices launch gives this process a stripped
+///      `PATH=/usr/bin:/bin:/usr/sbin:/sbin` — enough for resolve_claude_bin()'s
+///      own candidate-list fallback to find the binary (it doesn't need PATH),
+///      but that same stripped PATH was then handed straight through to the
+///      spawned claude CHILD, measurably slowing its own startup (confirmed
+///      live: under a stripped/LaunchServices-launched env, a "warm" reused
+///      process showed NO speedup over a cold one — 11.1s vs 10.9s — vs. a
+///      full terminal env's 2.49s warm / 6.68s cold, meaning claude's own
+///      startup does real PATH-dependent work).
+///   2. cwd: a Finder/LaunchServices-launched GUI app's own cwd is typically
+///      $HOME or `/`, NOT a project directory — and with no `.current_dir()`
+///      call here, the claude child inherited THAT. Live evidence during this
+///      investigation: a Photos-library TCC prompt ("Fablewood.app would like
+///      to access your Photo Library") appeared on the user's desktop —
+///      strong evidence the child's own startup does some cwd-rooted
+///      directory scan that, rooted at $HOME or `/`, can wander into
+///      ~/Pictures, with macOS attributing the access to the responsible
+///      parent app. A hung/unanswered TCC authorization prompt for a headless
+///      child is also a very plausible mechanism for the ORIGINAL reported
+///      symptom (spins 30s+ then fails): the child blocks waiting on a prompt
+///      nobody can click, eating the full per-tier timeout.
+///
+/// Both are fixed the same way: never let this subprocess's context depend on
+/// whatever the parent happened to receive. It has no legitimate reason to
+/// read PATH tools beyond `claude` itself, and no legitimate reason to care
+/// about cwd at all (it's a pure text-in/text-out grading call) — so it gets
+/// a sane, complete PATH and a boring, dedicated cwd, always, regardless of
+/// whether we were launched from Finder or a terminal.
+pub(crate) fn configure_judge_child(cmd: &mut tokio::process::Command, bin: &std::path::Path) {
+    let home = env::var("HOME").unwrap_or_default();
+    let mut path_dirs: Vec<String> = Vec::new();
+    if let Some(dir) = bin.parent() {
+        path_dirs.push(dir.display().to_string());
+    }
+    for p in [
+        format!("{home}/.local/bin"),
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+        "/usr/bin".to_string(),
+        "/bin".to_string(),
+        "/usr/sbin".to_string(),
+        "/sbin".to_string(),
+    ] {
+        if !path_dirs.contains(&p) {
+            path_dirs.push(p);
+        }
+    }
+
+    cmd.env_clear();
+    cmd.env("PATH", path_dirs.join(":"));
+    // Pass through whatever this process itself has for these — never
+    // hardcoded, since HOME/USER/etc. are legitimately per-user/per-machine.
+    // HOME specifically must stay the REAL user home (not the pinned cwd
+    // below) — claude needs it to find its own ~/.claude auth/config — so this
+    // is a deliberate, narrow exception to "never point the child at a broad
+    // directory": it's a var claude reads for a specific known file, not a
+    // root the child scans outward from.
+    for key in ["HOME", "USER", "LOGNAME", "TMPDIR", "SHELL", "LANG", "LC_ALL"] {
+        if let Ok(v) = env::var(key) {
+            cmd.env(key, v);
+        }
+    }
+    // Keep the override itself honored end-to-end, in case claude ever
+    // re-execs based on it.
+    if let Ok(v) = env::var("FABLEWOOD_CLAUDE_BIN") {
+        cmd.env("FABLEWOOD_CLAUDE_BIN", v);
+    }
+
+    cmd.current_dir(safe_child_cwd());
+}
+
+/// A boring, deterministic cwd for the claude child — never $HOME, never `/`.
+/// Lives under the system temp dir (env::temp_dir(), which resolves via the
+/// TMPDIR we already pass through above) purely so there's a real, writable,
+/// unremarkable directory to chdir into; the child has no reason to read or
+/// write anything there. See configure_judge_child's doc for why this exists.
+fn safe_child_cwd() -> PathBuf {
+    let dir = env::temp_dir().join("fablewood-judge-cwd");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// Extract the first balanced {...} object from arbitrary text (tolerates fences).
 fn first_json_object(text: &str) -> Option<&str> {
     let bytes = text.as_bytes();
@@ -180,6 +268,7 @@ pub async fn judge_grade(
     })?;
 
     let mut cmd = tokio::process::Command::new(&bin);
+    configure_judge_child(&mut cmd, &bin);
     cmd.args([
         "-p",
         &full_prompt,
@@ -194,22 +283,36 @@ pub async fn judge_grade(
     .stderr(Stdio::piped())
     .kill_on_drop(true);
 
-    let out = tokio::time::timeout(TIMEOUT, cmd.output())
+    let mut child = cmd.spawn().map_err(|e| {
+        eprintln!("[clerk-native] fallback: spawn failed: {e}");
+        format!("spawn failed: {e}")
+    })?;
+    // See judge_pool::spawn_stderr_logger's doc: draining stderr on its own
+    // independent task (started here, before the timeout race below) is what
+    // makes a hang-then-timeout surface the child's own error text, instead of
+    // that text being discarded along with the killed Child on a cancelled wait.
+    if let Some(stderr) = child.stderr.take() {
+        crate::judge_pool::spawn_stderr_logger("fallback", stderr);
+    }
+
+    let out = tokio::time::timeout(TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {
             eprintln!("[clerk-native] fallback: judge timeout after {}ms", t1.elapsed().as_millis());
             "judge timeout".to_string()
         })?
         .map_err(|e| {
-            eprintln!("[clerk-native] fallback: spawn failed: {e}");
-            format!("spawn failed: {e}")
+            eprintln!("[clerk-native] fallback: wait failed: {e}");
+            format!("wait failed: {e}")
         })?;
 
     let ms = t1.elapsed().as_millis();
     if !out.status.success() {
-        let err: String = String::from_utf8_lossy(&out.stderr).chars().take(200).collect();
-        eprintln!("[clerk-native] fallback: claude exited {:?} after {ms}ms: {err}", out.status.code());
-        return Err(format!("claude exited {:?}: {err}", out.status.code()));
+        eprintln!(
+            "[clerk-native] fallback: claude exited {:?} after {ms}ms (see child stderr line above, if any)",
+            out.status.code()
+        );
+        return Err(format!("claude exited {:?}", out.status.code()));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     match parse_verdict(&stdout) {
@@ -272,5 +375,28 @@ mod tests {
         assert!(p.contains("RUBRIC (what earns credit): R."));
         assert!(p.contains("PLAYER'S ANSWER: A."));
         assert!(p.starts_with("You are the Laconic Clerk"));
+    }
+
+    /// Regression guard for the Photos-TCC-prompt theory (see
+    /// configure_judge_child's doc): proves the claude child's cwd is ALWAYS
+    /// pinned to a boring, dedicated directory — never $HOME, never `/` —
+    /// regardless of what this test process's own cwd happens to be. Uses
+    /// `/bin/sh -c pwd` as a deterministic stand-in for claude (same pattern
+    /// judge_pool.rs's real-process tests use), so this runs fast, with no
+    /// live CLI dependency, as part of the normal test suite.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn configure_judge_child_pins_a_safe_cwd_never_home_or_root() {
+        let bin = PathBuf::from("/bin/sh");
+        let mut cmd = tokio::process::Command::new(&bin);
+        configure_judge_child(&mut cmd, &bin);
+        let out = cmd.arg("-c").arg("pwd").output().await.expect("run /bin/sh -c pwd");
+        let cwd = String::from_utf8_lossy(&out.stdout).trim().to_string();
+
+        assert_ne!(cwd, "/", "child cwd must never be root");
+        let home = env::var("HOME").unwrap_or_default();
+        assert!(!home.is_empty(), "test setup: HOME must be set to make this assertion meaningful");
+        assert_ne!(cwd, home, "child cwd must never be $HOME");
+        assert!(cwd.contains("fablewood-judge-cwd"), "expected the pinned scratch cwd, got {cwd}");
     }
 }
