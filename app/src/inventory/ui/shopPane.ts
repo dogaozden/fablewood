@@ -9,8 +9,12 @@ import { sellPrice } from '../economy';
 import { iconUrl } from '../icons';
 import { el, openPane } from './dom';
 
-/** Short buyer-facing description of what an item does (shop-only presentation, not catalog data). */
-function effectLabel(item: ItemDef): string {
+/**
+ * Short description of what an item does (presentation, not catalog data) — shared with the
+ * combat Satchel (combatSatchelPane.ts, crucible V1-21: it used to show only `item.flavor`
+ * lore prose, no heal/Glow amount anywhere).
+ */
+export function effectLabel(item: ItemDef): string {
   const e = item.effect;
   switch (e.kind) {
     case 'heal':
@@ -31,7 +35,7 @@ function effectLabel(item: ItemDef): string {
 /** Opens Mira's shop; resolves when the pane closes (click-outside, Escape, or the Close button). */
 export function openShopPane(): Promise<void> {
   return new Promise((resolve) => {
-    const { panel, close } = openPane(resolve);
+    const { panel, close } = openPane(resolve, 'shop');
 
     const goldEl = el('span', { class: 'inv-gold' });
     const banner = el('div', {});

@@ -12,7 +12,7 @@ import { el, openPane } from './dom';
 /** Opens the Satchel; resolves when the pane closes (click-outside, Escape, or the Close button). */
 export function openInventoryPane(): Promise<void> {
   return new Promise((resolve) => {
-    const { panel, close } = openPane(resolve);
+    const { panel, close } = openPane(resolve, 'inventory');
 
     const goldEl = el('span', { class: 'inv-gold' });
     const banner = el('div', {});
@@ -46,6 +46,13 @@ export function openInventoryPane(): Promise<void> {
       }
       if (item.use === 'trial') {
         return [el('span', { class: 'inv-btn is-muted', title: 'Used in trials', text: 'Trial-bound' })];
+      }
+      if (item.use === 'combat') {
+        // V1-22: Glow items are 'combat'-only by construction (catalog.ts's item() factory) and
+        // used to fall through to an empty cell here, indistinguishable from a fully-inert
+        // trinket. Mirrors the 'trial' muted-pill treatment above so the player learns where
+        // it DOES work, instead of reading as dead weight.
+        return [el('span', { class: 'inv-btn is-muted', title: 'Used in battle', text: 'Combat-only' })];
       }
       return [];
     };

@@ -82,15 +82,52 @@ if (typeof window !== 'undefined') {
  * openPane() within REOPEN_SETTLE_MS of the last close is swallowed (opened and immediately
  * self-closed, before the browser ever paints it) rather than flashed back open — from the
  * player's side, Escape closed the pane and it stayed closed.
+ *
+ * PER-PANE SCOPING (crucible V1-15): the guard above must be scoped per PANE-TYPE, not
+ * global — Satchel/Shop/combat-Satchel are separate flows a player can legitimately
+ * alternate between (e.g. close Shop, immediately press 'I' for the Satchel), and a single
+ * shared timestamp treated that legitimate cross-pane open as a ghost reopen of the pane
+ * that just closed, silently swallowing it too. `closedAt` below is keyed by `paneId` so
+ * closing one pane never taints another pane's guard.
  */
-const REOPEN_SETTLE_MS = 150;
-let lastCloseAt = 0;
+export const REOPEN_SETTLE_MS = 150;
+const closedAt = new Map<string, number>();
 
-export function openPane(onClose: () => void): PaneHandle {
+/** Every distinct pane flow sharing this scaffold — see PER-PANE SCOPING above. */
+export type PaneId = 'inventory' | 'shop' | 'combatSatchel';
+
+/**
+ * Pure ghost-reopen decision (no DOM), factored out of openPane() so the per-pane scoping
+ * fix is unit-testable: this project's vitest runs under `environment: 'node'`
+ * (vite.config.ts), not jsdom, so openPane() itself — which touches document/window
+ * throughout — isn't directly unit-testable here, but this slice of its logic is.
+ */
+export function isGhostReopen(paneId: string, now: number, closedAt: ReadonlyMap<string, number>): boolean {
+  const last = closedAt.get(paneId);
+  return last !== undefined && now - last < REOPEN_SETTLE_MS;
+}
+
+/**
+ * V1-18: the overlay must not cover the shell's nav bar (`.tabbar`, App.tsx/App.css) — a
+ * full-viewport overlay made the tab bar's real click target the overlay instead of the
+ * button underneath it, so a click there ran click-outside-to-close instead of navigating.
+ * The overlay still has to fully cover the game canvas below the nav bar — that's the whole
+ * point of the Phaser-bleed suppression documented above — so this only shrinks the
+ * overlay's TOP inset to clear the nav bar's own rendered height; everything else about the
+ * overlay (backdrop, click-outside-close, keyboard capture) is unchanged. Measured at open
+ * time rather than hardcoded: App.tsx/App.css own the nav bar's actual size (out of bounds
+ * for this module to edit), and the shell may not even be mounted around this pane in every
+ * test/host context — 0 when `.tabbar` is absent preserves the old full-viewport behavior.
+ */
+function navBarHeight(): number {
+  return document.querySelector('.tabbar')?.getBoundingClientRect().height ?? 0;
+}
+
+export function openPane(onClose: () => void, paneId: PaneId): PaneHandle {
   ensureStyles();
-  const ghostReopen = Date.now() - lastCloseAt < REOPEN_SETTLE_MS;
+  const ghostReopen = isGhostReopen(paneId, Date.now(), closedAt);
   const panel = el('div', { class: 'inv-panel', tabIndex: -1, role: 'dialog', 'aria-modal': 'true' });
-  const root = el('div', { class: 'inv-overlay' }, [panel]);
+  const root = el('div', { class: 'inv-overlay', style: `top:${navBarHeight()}px` }, [panel]);
 
   let closed = false;
   const teardown = (): void => {
@@ -101,7 +138,7 @@ export function openPane(onClose: () => void): PaneHandle {
   const close = (): void => {
     if (closed) return;
     closed = true;
-    lastCloseAt = Date.now();
+    closedAt.set(paneId, Date.now());
     teardown();
     onClose();
   };

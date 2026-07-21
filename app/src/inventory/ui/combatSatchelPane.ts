@@ -11,6 +11,7 @@ import type { ItemDef } from '../catalog';
 import { RARITY_META } from '../catalog';
 import { iconUrl } from '../icons';
 import { el, openPane } from './dom';
+import { effectLabel } from './shopPane';
 
 export interface CombatSatchelEntry {
   item: ItemDef;
@@ -21,7 +22,7 @@ export interface CombatSatchelEntry {
 export function openCombatSatchelPane(usable: CombatSatchelEntry[], gold: number): Promise<string | null> {
   return new Promise((resolve) => {
     let picked: string | null = null;
-    const { panel, close } = openPane(() => resolve(picked));
+    const { panel, close } = openPane(() => resolve(picked), 'combatSatchel');
 
     const goldEl = el('span', { class: 'inv-gold', text: `⟡ ${gold}` });
     const body = el('div', { class: 'inv-body' });
@@ -53,7 +54,7 @@ export function openCombatSatchelPane(usable: CombatSatchelEntry[], gold: number
                 text: meta.label,
               }),
             ]),
-            el('span', { class: 'inv-flavor', text: item.flavor }),
+            el('span', { class: 'inv-flavor', text: effectLabel(item) }),
           ]),
           el('span', { class: 'inv-qty', text: `×${qty}` }),
           el('button', {
