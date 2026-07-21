@@ -12,8 +12,10 @@
 //!   STATE_DIR env  → that dir (how the author points the app at the repo's state/)
 //!   otherwise      → <app-data>/state (macOS: ~/Library/Application Support/<identifier>/state)
 //!   PACKS_DIR env  → that dir
-//!   otherwise, dev → <repo>/packs (baked from CARGO_MANIFEST_DIR; `tauri dev` only)
-//!   otherwise      → <app-data>/packs
+//!   otherwise, dev     → <repo>/packs (baked from CARGO_MANIFEST_DIR; `tauri dev` only)
+//!   otherwise, release → <resource-dir>/packs (bundled via tauri.conf.json bundle.resources —
+//!                        packs/ ships inside the .app, no install step needed)
+//!   otherwise          → <app-data>/packs (manual drop-in fallback, e.g. a hand-copied pack)
 
 use serde::Serialize;
 use serde_json::Value;
@@ -50,6 +52,15 @@ pub fn packs_dir(app: &AppHandle) -> PathBuf {
         let repo_packs = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("packs");
         if repo_packs.is_dir() {
             return repo_packs;
+        }
+    }
+    // Release bundles ship packs/ as a bundle resource (tauri.conf.json bundle.resources:
+    // "../packs/" -> "packs"), landing at <App>.app/Contents/Resources/packs on macOS.
+    // Read it straight from the bundle — no copy/install step, same as the dev branch above.
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("packs");
+        if bundled.is_dir() {
+            return bundled;
         }
     }
     app_data(app).join("packs")
@@ -127,7 +138,10 @@ fn list_packs(dir: &Path) -> Vec<PackEntry> {
 
 #[tauri::command]
 pub fn packs_list(app: AppHandle) -> Vec<PackEntry> {
-    list_packs(&packs_dir(&app))
+    let dir = packs_dir(&app);
+    let packs = list_packs(&dir);
+    println!("[packs] {} found in {}", packs.len(), dir.display());
+    packs
 }
 
 /// Join a request-supplied relative path onto the assets root, admitting only

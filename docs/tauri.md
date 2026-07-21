@@ -48,7 +48,10 @@ is what the bundled app does.
 | | default | override |
 | --- | --- | --- |
 | state | `~/Library/Application Support/realm.ledger.fablewood/state/` | `STATE_DIR=<dir>` |
-| packs | dev: `<repo>/packs` · bundled: `~/Library/Application Support/realm.ledger.fablewood/packs/` | `PACKS_DIR=<dir>` |
+| packs | dev: `<repo>/packs` · bundled: `<App>.app/Contents/Resources/packs/` (shipped via `tauri.conf.json` `bundle.resources`, read-only) — falls back to `~/Library/Application Support/realm.ledger.fablewood/packs/` if the bundle has none | `PACKS_DIR=<dir>` |
+
+`packs_list` prints one line to stdout every call — `[packs] N found in <dir>` — so a
+terminal launch of the bundle proves at a glance whether it saw the bundled content.
 
 **Carrying over the existing save** (the repo's `state/`): launch with the env var —
 
