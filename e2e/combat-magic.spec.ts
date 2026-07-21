@@ -257,7 +257,9 @@ test('Overglow toggle greys for Lanternfall at Rank 3 (burst spells cannot be up
   // next to the Keeper so tier 3's own row reads enabled (isolating the assertion to Overglow).
   await debugSetPos(page, 'keeper', 5, 3);
   await debugSetPos(page, 'wisp-0', 6, 3);
-  await debugSetGlow(page, 2); // Lanternfall itself costs ◈2; canOverglow only needs rank≥2 AND ≥1 pip
+  await debugSetGlow(page, 3); // Lanternfall costs ◈2; since V1-9 the Overglow row only renders when
+  // the POST-cost remainder can fund it (2+1=3 in hand) — at exactly-cost Glow the row is absent by
+  // design (no silent fizzle), which would make this burst-greying assertion vacuous.
   await page.keyboard.press('2'); // open the Kindling flyout — Rank 3 default-focuses tier 3 (Lanternfall)
   await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling (helpers.ts's tapKey doc)
   expect((await snap(page))?.state).toBe('playerTier');
