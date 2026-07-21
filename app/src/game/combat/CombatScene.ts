@@ -122,6 +122,11 @@ export class CombatScene extends Phaser.Scene {
   // mirrors the hamlet's debug reads; inert in normal play (nothing sets the preference).
   private debugPrefer: ActionKind | null = null;
   private actionLog: Array<{ action: string; dmg: number; overlay: boolean }> = [];
+  // crucible #10 drift-hunt instrumentation: a monotonic count of refreshParty() calls and
+  // the most recent party-hp mutation, so an e2e poll can prove whether an apparent hp/HUD
+  // mismatch is a genuine desync or just two separate reads straddling one synchronous update.
+  private refreshSeq = 0;
+  private lastHpEvent: { unitId: string; kind: 'damage' | 'heal'; amount: number; seq: number } | null = null;
 
   // §4 board mechanics (Phase 1 — magic-combat-depth.md)
   /** tile Image refs so a lit brazier can swap its texture to `tile.lantern` in place. */
@@ -206,6 +211,8 @@ export class CombatScene extends Phaser.Scene {
     this.graceAvailable = true;
     this.debugPrefer = null;
     this.actionLog = [];
+    this.refreshSeq = 0;
+    this.lastHpEvent = null;
     this.allFactIds.clear();
     this.tagToIds.clear();
     this.roomTags = [];
@@ -1400,6 +1407,16 @@ export class CombatScene extends Phaser.Scene {
     target.hp = Math.min(target.maxHp, target.hp + amount);
     if (target.hp > before) this.floatText(target, `+${target.hp - before}`, P.moss);
     this.drawHpBar(target);
+    // crucible #10 hardening — healUnit is a SECOND hp-mutation path alongside damageUnit.
+    // Every heal effect in today's content targets the enemy (Injunction-bad's own "mend"),
+    // so this was never observed live, but nothing in the type system stopped a future
+    // party-targeting heal from raising hp here while the sidebar stayed silent — the exact
+    // failure class this spec exists to catch. Route party targets through the same choke
+    // point damageUnit already uses.
+    if (target.team === 'party') {
+      this.refreshParty();
+      this.lastHpEvent = { unitId: target.id, kind: 'heal', amount, seq: this.refreshSeq };
+    }
   }
 
   private applyOutcome(actor: UnitState, action: ActionKind, tile: Coord, o: ReturnType<typeof resolveAction>, target: UnitState | null): void {
@@ -1883,7 +1900,10 @@ export class CombatScene extends Phaser.Scene {
     // (enemy strikes, opportunity strikes, status ticks, self-chip); refreshParty here
     // (rather than only at scattered call sites) keeps the sidebar honest through the
     // enemy's own turn too, so a fainted ally can never still read "healthy" on it.
-    if (unit.team === 'party') this.refreshParty();
+    if (unit.team === 'party') {
+      this.refreshParty();
+      this.lastHpEvent = { unitId: unit.id, kind: 'damage', amount, seq: this.refreshSeq };
+    }
   }
 
   private damageParty(amount: number, prefer?: UnitState): void {
@@ -2126,6 +2146,7 @@ export class CombatScene extends Phaser.Scene {
   // ---- small helpers ----------------------------------------------------
 
   private refreshParty(): void {
+    this.refreshSeq++; // crucible #10 drift-hunt: every HUD-text write bumps this
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
     let streak = 0;
@@ -2186,6 +2207,34 @@ export class CombatScene extends Phaser.Scene {
    *  reflects live hp rather than a stale pre-damage snapshot). */
   hudPartyText(): string {
     return this.hud.partyPanelText();
+  }
+
+  /** Debug: single-`page.evaluate()` atomic read of both units' live hp + the HUD's raw text
+   *  (e2e-only — crucible #10, 2026-07-21 drift-hunt: the ORIGINAL version of this spec read
+   *  unitDebug('keeper'), unitDebug('mira'), and hudPartyText() as three SEPARATE
+   *  page.evaluate() round trips via Promise.all. That's not atomic — each is an independent
+   *  CDP call, and a legitimate enemy-turn damageUnit→refreshParty update can land in the real
+   *  gap between them, making an older hp read look "ahead of" a newer, fully-correct hud-text
+   *  read. Confirmed live: a 3-call poll caught keeper hp=3 (pre-hit) against hud text "2/10"
+   *  (post-hit) — refreshSeq had advanced from 15 to 16 strictly between the two reads, proving
+   *  a real damageUnit call landed in the gap, not a genuine desync. This getter is the fix:
+   *  ONE synchronous function (no await inside) reading everything in the same tick, so it can
+   *  never straddle a damageUnit/healUnit→refreshParty update the way split reads can. */
+  hudDriftDebug(): {
+    keeperHp: number | null; miraHp: number | null; hudText: string; refreshSeq: number;
+    lastHpEvent: { unitId: string; kind: string; amount: number; seq: number } | null;
+    pool: number; state: string; activeId: string;
+  } {
+    return {
+      keeperHp: this.unitById('keeper')?.hp ?? null,
+      miraHp: this.unitById('mira')?.hp ?? null,
+      hudText: this.hud.partyPanelText(),
+      refreshSeq: this.refreshSeq,
+      lastHpEvent: this.lastHpEvent,
+      pool: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
+      state: this.state,
+      activeId: this.activeId,
+    };
   }
 
   /** Debug: the encounterId the most recently resolved encounter answered against

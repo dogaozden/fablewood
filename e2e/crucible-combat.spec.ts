@@ -17,6 +17,14 @@ type UnitDebug = {
   statuses: Array<{ id: string; turnsLeft: number; magnitude: number }>;
 } | null;
 
+/** crucible #10 (2026-07-21 drift-hunt): the atomic single-evaluate() bundle hudDriftDebug()
+ *  returns — see the CombatScene method for why this replaced a 3-call split poll. */
+type HudDrift = {
+  keeperHp: number | null; miraHp: number | null; hudText: string; refreshSeq: number;
+  lastHpEvent: { unitId: string; kind: string; amount: number; seq: number } | null;
+  pool: number; state: string; activeId: string;
+} | null;
+
 type Layout = { tiles: string[][]; braziers: unknown[]; mist: unknown[] } | null;
 
 type Save = { scene?: string; hp?: number; streak?: number; dungeon?: { roomIndex: number; cleared: string[] } };
@@ -46,11 +54,15 @@ async function layoutDebug(page: Page): Promise<Layout> {
   });
 }
 
-async function hudPartyText(page: Page): Promise<string> {
+/** crucible #10 (2026-07-21 drift-hunt): ONE page.evaluate() reading both units' live hp
+ *  AND the HUD's raw text in the same synchronous scene call — see CombatScene.hudDriftDebug
+ *  for why this replaced the original hudPartyText()+unitDebug()×2 split-read poll (three
+ *  independent CDP round trips could straddle a legitimate enemy-turn hp update). */
+async function hudDriftDebug(page: Page): Promise<HudDrift> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-    const s = g?.scene?.getScene?.('combat') as { hudPartyText?(): string } | undefined;
-    return s?.hudPartyText?.() ?? '';
+    const s = g?.scene?.getScene?.('combat') as { hudDriftDebug?(): unknown } | undefined;
+    return (s?.hudDriftDebug?.() ?? null) as HudDrift;
   });
 }
 
@@ -215,6 +227,24 @@ test('crucible #16: a dead unit is depth-sorted below any living unit on its row
 // stale there until the player's own next action happened to trigger a refresh. The fix
 // wires refreshParty into damageUnit itself (the one choke point every hp change funnels
 // through), so the sidebar can never legitimately drift from the live unit state.
+//
+// 2026-07-21 drift-hunt (intermittent failure in full-suite runs, e.g. "Keeper real=5
+// shown=4 at state=enemy"): root-caused to this SPEC, not the engine. The original poll
+// read unitDebug('keeper'), unitDebug('mira'), and hudPartyText() as three SEPARATE
+// page.evaluate() round trips via Promise.all — not one atomic read. Each is an
+// independent CDP call, so a legitimate enemy-turn damageUnit→refreshParty update could
+// land in the real-time gap BETWEEN them, making an older hp read look "ahead of" a newer
+// (and fully correct) hud-text read. Caught live with refreshSeq instrumentation: a 3-call
+// poll read keeper hp=3 (pre-hit) against hud text "2/10" (post-hit) — refreshSeq had
+// already advanced from 15 to 16 strictly between the two reads (lastHpEvent confirmed a
+// real 1-dmg hit on keeper), while a same-instant atomic read showed keeperHp=2 matching
+// the hud text exactly (1 failure in 25 loop runs before this fix, isolated to an own-server
+// repro harness). Fixed by reading everything through ONE evaluate() (hudDriftDebug, below)
+// instead of splitting the read across three round trips. While tracing every hp-mutation path for
+// this, also found (and hardened) a SECOND real gap: healUnit (the spell-heal path) mutated
+// hp directly without calling refreshParty, unlike damageUnit — unreachable by this specific
+// test today (no heal ever fires here) but a real violation of the "one choke point" the
+// comment above claims; healUnit now refreshes for party targets too (see CombatScene.ts).
 // ---------------------------------------------------------------------------------------
 function parseHudHp(text: string, name: 'Keeper' | 'Mira'): { hp: number; max: number } | null {
   const m = text.match(new RegExp(`${name}\\s+[▰▱]+\\s+(\\d+)\\/(\\d+)`));
@@ -236,20 +266,19 @@ test('crucible #10: the party HUD sidebar never drifts from live unit hp, even m
   while (Date.now() - start < 25_000) {
     const s = await snap(page);
     if (!s || s.state === 'over' || (await currentScene(page)) !== 'combat') break;
-    const [keeper, mira, text] = await Promise.all([
-      unitDebug(page, 'keeper'),
-      unitDebug(page, 'mira'),
-      hudPartyText(page),
-    ]);
-    const shownKeeper = parseHudHp(text, 'Keeper');
-    const shownMira = parseHudHp(text, 'Mira');
-    if (keeper && shownKeeper && keeper.hp !== shownKeeper.hp) {
-      mismatch = `Keeper real=${keeper.hp} shown=${shownKeeper.hp} at state=${s.state}`;
-      break;
-    }
-    if (mira && shownMira && mira.hp !== shownMira.hp) {
-      mismatch = `Mira real=${mira.hp} shown=${shownMira.hp} at state=${s.state}`;
-      break;
+    // ONE evaluate() reading both units' live hp AND the HUD text together (see
+    // hudDriftDebug's doc comment) — this can never straddle a damageUnit/healUnit→
+    // refreshParty update the way the original 3-call split poll could.
+    const d = await hudDriftDebug(page);
+    if (d) {
+      const shownKeeper = parseHudHp(d.hudText, 'Keeper');
+      const shownMira = parseHudHp(d.hudText, 'Mira');
+      if (d.keeperHp !== null && shownKeeper && d.keeperHp !== shownKeeper.hp) {
+        mismatch = `Keeper real=${d.keeperHp} shown=${shownKeeper.hp} at state=${d.state} (lastHpEvent=${JSON.stringify(d.lastHpEvent)})`;
+      } else if (d.miraHp !== null && shownMira && d.miraHp !== shownMira.hp) {
+        mismatch = `Mira real=${d.miraHp} shown=${shownMira.hp} at state=${d.state} (lastHpEvent=${JSON.stringify(d.lastHpEvent)})`;
+      }
+      if (mismatch) break;
     }
     if (s.state === 'playerMove') await page.keyboard.press('7'); // Wait — never refreshes on its own
     await page.waitForTimeout(120);
