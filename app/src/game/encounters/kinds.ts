@@ -228,7 +228,17 @@ const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
   const cards: HTMLButtonElement[] = [];
   let answered = false;
   let armed = ctx.context !== 'boss';
-  if (!armed) setTimeout(() => { armed = true; }, BOSS_PARLEY_ARM_MS);
+  // The countdown must start from a PRESENTED frame, not from render time: a bare
+  // setTimeout can elapse entirely while a stalled device (throttling, GC, backgrounded
+  // tab) has painted nothing — arming blind for the exact impatient-mash the guard
+  // exists to stop. Double-rAF guarantees at least one real paint before the clock runs.
+  if (!armed) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTimeout(() => { armed = true; }, BOSS_PARLEY_ARM_MS);
+      });
+    });
+  }
 
   const choose = (idx: number) => {
     if (answered || !armed) return;
