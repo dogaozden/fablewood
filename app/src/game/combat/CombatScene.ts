@@ -876,7 +876,14 @@ export class CombatScene extends Phaser.Scene {
     // spells decision: burst spells can't multiply).
     const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
     const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
-    const overglow: OverglowRow | null = canOverglow(this.rank, this.glow)
+    // crucible v1 #9 — gate on the tier's OWN POST-COST remainder, not the wholesale total:
+    // castGatedSpell already rechecks canOverglow against glowSpend's post-cost state (line
+    // ~1123 below), so a wholesale-total gate here silently disagreed exactly when
+    // glow.pips === focusSpell.glowCost — the flyout armed a toggle castGatedSpell would then
+    // drop with no warning. Offering it only when a real pip survives paying the tier's own
+    // cost keeps the two checks (and the player's expectation) in sync.
+    const focusRemainder: GlowState = { pips: this.glow.pips - focusSpell.glowCost };
+    const overglow: OverglowRow | null = canOverglow(this.rank, focusRemainder)
       ? {
           enabled: focusSpell.shape !== 'burst1',
           on: this.overglowOn,
@@ -907,7 +914,11 @@ export class CombatScene extends Phaser.Scene {
     const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
     const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
     const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
-    if (!canOverglow(this.rank, this.glow) || focusSpell.shape === 'burst1') return; // greyed — no-op
+    // crucible v1 #9 — same post-cost-remainder gate as renderFlyout's Overglow row, so a
+    // toggle keyed off a stale (still-armed) row can never fire this once the row itself has
+    // been correctly regreyed.
+    const focusRemainder: GlowState = { pips: this.glow.pips - focusSpell.glowCost };
+    if (!canOverglow(this.rank, focusRemainder) || focusSpell.shape === 'burst1') return; // greyed — no-op
     this.overglowOn = !this.overglowOn;
     this.renderFlyout(unit, action);
   }
