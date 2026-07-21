@@ -444,7 +444,13 @@ export class CombatScene extends Phaser.Scene {
       g.fillStyle(P.waterBlue, 0.95).fillRect(-w / 2, y + 6, wardPx, 2);
     }
 
-    this.drawStatusChips(u, v, y + (warded ? 10 : 7));
+    // crucible v1 #23 — chips are center-anchored (Phaser Images default), so their true top
+    // edge is chipY minus half their own 10px height; y+7 (the pre-fix base case) left that
+    // edge 3px above the HP bar's own bottom edge (y+5) instead of flush with/below it. The
+    // Warded case's y+10 was already correct (it also has to clear the ward underline drawn at
+    // y+6..y+8) — using that same offset unconditionally fixes the base case too, with no
+    // visible change to the Warded case it was already right for.
+    this.drawStatusChips(u, v, y + 10);
     this.updateDanger(u);
   }
 
@@ -2303,5 +2309,18 @@ export class CombatScene extends Phaser.Scene {
    *  banner's wording reflects the actual outcome rather than a static template). */
   bannerText(): string {
     return this.hud.bannerText();
+  }
+
+  /** Debug: the first status chip's true (center-anchored) top edge vs the HP bar's own
+   *  bottom edge, both in the unit's container-LOCAL coordinate space so they're directly
+   *  comparable (e2e-only — crucible v1 #23: proves the chip row no longer overlaps the bar).
+   *  null if the unit has no chip rendered (no status applied). */
+  chipHpGapDebug(id: string): { chipTopY: number; hpBarBottomY: number } | null {
+    const v = this.views.get(id);
+    if (!v || !v.chips.length) return null;
+    const chip = v.chips[0];
+    const chipTopY = chip.y - chip.displayHeight / 2; // Images/Text both default-origin at 0.5 vertically
+    const hpBarBottomY = Math.round(v.sprite.y - v.sprite.displayHeight - 6) + 5; // mirrors drawHpBar's own y + bar height
+    return { chipTopY, hpBarBottomY };
   }
 }

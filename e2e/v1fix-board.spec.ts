@@ -68,6 +68,16 @@ async function setPilot(page: Page, kind: string | null): Promise<void> {
   }, kind);
 }
 
+type ChipGap = { chipTopY: number; hpBarBottomY: number } | null;
+
+async function chipHpGapDebug(page: Page, id: string): Promise<ChipGap> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { chipHpGapDebug?(id: string): unknown } | undefined;
+    return (s?.chipHpGapDebug?.(uid) ?? null) as ChipGap;
+  }, id);
+}
+
 async function layoutDebug(page: Page): Promise<{ tiles: string[][] } | null> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
@@ -194,4 +204,42 @@ test("crucible v1 #7: a Staggered turn still decays a co-applied status (Weakene
   expect(after!.statuses.some((s) => s.id === 'staggered'), 'Staggered itself is consumed').toBe(false);
   const weakened = after!.statuses.find((s) => s.id === 'weakened');
   expect(weakened?.turnsLeft, 'Weakened decayed to 1 even though the turn was skipped by Staggered').toBe(1);
+});
+
+// ---------------------------------------------------------------------------------------
+// crucible v1 #23: drawHpBar's base case offset the status-chip row by y+7, correct only if
+// chips were top-anchored — Phaser Images default center-anchored, so the true top edge sat
+// 3px above (numerically less than) the HP bar's own bottom edge. The Warded case's y+10 was
+// already correct (it also has to clear the ward underline). Fixed by using +10 unconditionally.
+// ---------------------------------------------------------------------------------------
+test('crucible v1 #23: status chips no longer overlap the HP bar (base case), Warded stays correct', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  const reached = await waitForActive(page, 'keeper');
+  expect(reached).toBe(true);
+
+  // Base case: an ordinary (non-Warded) status.
+  await debugApplyStatus(page, 'wisp-0', 'inked', 3);
+  await page.waitForTimeout(150);
+  const gapBase = await chipHpGapDebug(page, 'wisp-0');
+  expect(gapBase, 'wisp-0 has a chip rendered (Inked applied)').not.toBeNull();
+  await page.screenshot({ path: `${EV}/v1fix23-chip-hpbar-1280x800.png` });
+  expect(
+    gapBase!.chipTopY,
+    `chip top (${gapBase!.chipTopY}) must sit at/below (numerically ≥) the HP bar's bottom edge (${gapBase!.hpBarBottomY}) — no overlap`,
+  ).toBeGreaterThanOrEqual(gapBase!.hpBarBottomY);
+
+  // Warded case — was already correct pre-fix; confirm unifying the offset didn't regress it.
+  await debugApplyStatus(page, 'wisp-1', 'warded', -1, 2);
+  await page.waitForTimeout(150);
+  const gapWarded = await chipHpGapDebug(page, 'wisp-1');
+  expect(gapWarded, 'wisp-1 has a chip rendered (Warded applied)').not.toBeNull();
+  expect(gapWarded!.chipTopY, 'Warded case: still no overlap').toBeGreaterThanOrEqual(gapWarded!.hpBarBottomY);
+
+  // Screenshot evidence at the 960x600 minimum window too, per the verification brief.
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${EV}/v1fix23-chip-hpbar-960x600.png` });
 });
