@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, waitHamletPlayer, warpHamletTo, tapKey } from './helpers';
+import { waitReady, waitHamletPlayer, waitProvincesLoaded, warpHamletTo, tapKey } from './helpers';
 
 /**
  * Crucible V1-15: openPane()'s ghost-reopen guard (REOPEN_SETTLE_MS=150ms, inventory/ui/
@@ -31,6 +31,7 @@ test("closing Mira's Shop then opening the Satchel within 150ms opens it, not sw
   await page.goto('/?scene=hamlet&seed=7');
   await waitReady(page, 'hamlet');
   await waitHamletPlayer(page);
+  await waitProvincesLoaded(page); // else Mira's conversation takes the pack-less branch — no shop
 
   await openMiraShop(page);
   await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
