@@ -348,12 +348,6 @@ export class VaultView {
     this.scene.tweens.add({ targets: node, x: x0 + 6, duration: 55, yoyo: true, repeat: 3, onComplete: () => node.setX(x0) });
   }
 
-  focusNode(index: number): void {
-    const node = this.roomNodes[index];
-    if (!node) return;
-    this.scene.tweens.add({ targets: node, scale: { from: 1, to: 1.18 }, duration: 420, yoyo: true, repeat: 1, ease: 'Sine.inOut' });
-  }
-
   // ---- cards ----------------------------------------------------------------
 
   // Parchment card matching encounters/styles.ts .fw-panel: lit top-left gradient,

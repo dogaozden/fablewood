@@ -277,6 +277,72 @@ describe('SaveStore', () => {
   });
 });
 
+describe('SaveStore — hp coercion (crucible V1-2)', () => {
+  it('coerces a non-numeric hp on load to the full-health default', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { scene: 'vaults', hp: 'banana', streak: 2 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(16);
+    expect(s.get().scene).toBe('vaults'); // untouched fields survive
+  });
+
+  it('clamps an out-of-range numeric hp on load', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: 999 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(16);
+  });
+
+  it('clamps a negative numeric hp on load to 0, not below', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: -50 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(0);
+  });
+
+  it('keeps a valid numeric hp unchanged on load', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: 9 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(9);
+  });
+
+  it('a null hp on load coerces to 0 (matches the pre-fix "null trips the guard" control)', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: null });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(0);
+  });
+
+  it('coerces garbage hp on a save() merge too, not just on load', async () => {
+    const b = new FakeBridge();
+    const s = new SaveStore(b);
+    await s.ready(); // fresh store, cache = defaults (hp:16)
+    // simulate a direct PUT (or another tab) corrupting hp on disk between our load and this save
+    b.seed('save.json', { hp: 'banana', scene: 'vaults' });
+    await s.save({ streak: 3 });
+    expect(s.get().hp).toBe(16); // coerced, not "banana" or NaN
+    const disk = b.raw('save.json') as any;
+    expect(disk.hp).toBe(16); // self-heals the on-disk value too
+    expect(disk.streak).toBe(3);
+  });
+
+  it('never leaves NaN reachable through get().hp regardless of input shape', async () => {
+    for (const bad of ['banana', NaN, undefined, {}, [], true, '12abc']) {
+      const b = new FakeBridge();
+      b.seed('save.json', { hp: bad });
+      const s = new SaveStore(b);
+      await s.ready();
+      expect(Number.isFinite(s.get().hp), `hp for input ${JSON.stringify(bad)}`).toBe(true);
+    }
+  });
+});
+
 describe('SettingsStore', () => {
   it('persists the mute toggle and merges over disk', async () => {
     const b = new FakeBridge();

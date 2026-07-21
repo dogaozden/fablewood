@@ -97,40 +97,40 @@ async function pollUntil<T>(fn: () => Promise<T>, pred: (v: T) => boolean, timeo
 }
 
 // ---------------------------------------------------------------------------------------
-// crucible #7 (sev3): re-entering a room (and therefore combat) at 0 pooled HP used to skip
-// the turn engine straight into an unwinnable instant defeat (checkEnd sees no living party
-// unit before the player can ever act — the launch-time applyPoolHp split gives both units
-// exactly 0 hp). DungeonScene now refuses to launch at hp<=0 — same "the Fade closes in"
-// recovery the dungeon already uses at every other hp-exhausted point (runGate, a real
-// battle's own retreat branch) — least-surprising fit for an already-established rule.
+// crucible #7 (sev3), superseded by crucible V1-1: re-entering a room (and therefore combat)
+// at 0 pooled HP used to skip the turn engine straight into an unwinnable instant defeat
+// (checkEnd sees no living party unit before the player can ever act — the launch-time
+// applyPoolHp split gives both units exactly 0 hp), so DungeonScene must still never launch
+// combat at hp<=0. #7's original fix bounced the player to hamlet with a generic toast, but
+// that bounce was itself a dead end (V1-1): hamlet shows no HP indicator, so a player who
+// wandered back in at 0 HP saw nothing wrong, and the vaults' own halo affordance points
+// straight back at the same "wrong" node, looping forever. DungeonScene now heals in place
+// via onCamp()'s existing heal-and-toast instead of bouncing — the wrong click becomes the
+// fix (auto-drivers get persist:true, same as runAuto()'s own 'camp' case, so this never
+// blocks on a click that will never come).
 // ---------------------------------------------------------------------------------------
-test('crucible #7: entering a room at 0 pooled HP refuses to launch combat, sends Keeper to camp', async ({ page }) => {
+test('crucible #7/V1-1: entering a room at 0 pooled HP never launches combat, heals in place instead of bouncing to hamlet', async ({ page }) => {
   test.setTimeout(90_000);
   const before = await readState<Save>(page, 'save.json');
   try {
     await page.request.put('/api/state/save.json', { data: { scene: 'vaults', hp: 0, streak: 0, lastPlayed: '' } });
 
     await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
-    // Deliberately no waitReady(page,'vaults') here: under auto=win, markReadyOnce() for
-    // 'vaults' only fires AFTER runAuto()'s enterRoom() call resolves — and a REAL (non-sim)
-    // combat launch's promise never resolves at all (the scene tears down first), so that
-    // intermediate ready signal is unreliable on both the buggy and fixed paths. Poll scene
-    // identity directly instead, recording every value seen: the old bug ALSO eventually
-    // lands on 'hamlet' (combat's own retreat path sends it there too), so only checking the
-    // final scene can't tell "refused to launch" apart from "instantly lost a real battle".
+    // Deliberately no waitReady(page,'vaults') here: markReadyOnce() timing across the old
+    // and new behavior isn't the thing under test — polling scene identity directly, recording
+    // every value seen, is the robust way to prove 'combat' was never entered even transiently.
     const seen = new Set<string>();
     const start = Date.now();
-    while (Date.now() - start < 20_000) {
+    while (Date.now() - start < 8_000) {
       const sc = await currentScene(page);
       if (sc) seen.add(sc);
-      if (sc === 'hamlet') break;
       await page.waitForTimeout(40);
     }
-    expect(await currentScene(page), 'landed on hamlet').toBe('hamlet');
     expect([...seen], 'combat scene was never entered at all').not.toContain('combat');
+    expect(await currentScene(page), 'V1-1: stays in vaults — no more bounce to hamlet').toBe('vaults');
 
     const save = await readState<Save>(page, 'save.json');
-    expect(save?.hp ?? -1, 'hp stays 0 — no phantom battle ran against it').toBe(0);
+    expect(save?.hp ?? -1, 'V1-1: healed in place (onCamp) instead of being stranded at 0').toBe(16);
     expect(save?.dungeon?.cleared ?? [], 'no room was falsely marked cleared').toEqual([]);
   } finally {
     await page.request.put('/api/state/save.json', { data: before ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });

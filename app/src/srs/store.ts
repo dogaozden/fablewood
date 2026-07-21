@@ -161,16 +161,24 @@ class ObjectStore<T extends Record<string, unknown>> {
   private async load(): Promise<void> {
     const raw = await this.bridge.getState<unknown>(this.file);
     if (raw === null) {
-      this.cache = { ...this.defaults };
+      this.cache = this.sanitize({ ...this.defaults });
       return;
     }
     if (!isPlainObject(raw)) {
       await this.bridge.putState(corruptName(this.file, Date.now()), raw);
       console.warn(`[srs] state/${this.file} had an unexpected shape; backed up and reset to defaults.`);
-      this.cache = { ...this.defaults };
+      this.cache = this.sanitize({ ...this.defaults });
       return;
     }
-    this.cache = { ...this.defaults, ...(raw as Partial<T>) };
+    this.cache = this.sanitize({ ...this.defaults, ...(raw as Partial<T>) });
+  }
+
+  /** Hook for subclasses to coerce/clamp individual fields after a merge — the shape
+   *  check above only guards the whole object, never per-field types (crucible V1-2: a
+   *  corrupt-but-still-object field, e.g. a non-numeric hp, would otherwise sail through
+   *  untouched into live state). Identity by default. */
+  protected sanitize(value: T): T {
+    return value;
   }
 
   get(): T {
@@ -183,7 +191,7 @@ class ObjectStore<T extends Record<string, unknown>> {
       const base: T = isPlainObject(remote)
         ? { ...this.defaults, ...(remote as Partial<T>) }
         : this.cache;
-      const merged: T = { ...base, ...patch };
+      const merged: T = this.sanitize({ ...base, ...patch });
       const ok = await this.bridge.putState(this.file, merged);
       if (!ok) this.warnOnce();
       this.cache = merged;
@@ -203,6 +211,26 @@ export class SaveStore extends ObjectStore<SaveData & Record<string, unknown>> {
   constructor(bridge: Bridge = realBridge) {
     super(SAVE_FILE, DEFAULT_SAVE as SaveData & Record<string, unknown>, bridge);
   }
+
+  /** crucible V1-2 — a save.json corrupted directly on disk (e.g. hp:"banana") used to
+   *  sail through as a string: `"banana" <= 0` is false, so DungeonScene's 0-HP guard
+   *  never fired, and CombatScene's splitPooledHp produced NaN unit hp that resolved
+   *  every fight as an instant retreat, forever (the corrupt value was never touched).
+   *  Coerce/clamp hp here — the ONE place every consumer's get() funnels through —
+   *  instead of hardening each call site individually. */
+  protected sanitize(
+    value: SaveData & Record<string, unknown>,
+  ): SaveData & Record<string, unknown> {
+    return { ...value, hp: coerceHp(value.hp) };
+  }
+}
+
+/** Finite number, clamped to the party pool range; anything else (NaN, non-numeric
+ *  strings, objects…) falls back to the full-health default rather than sailing into
+ *  live state. */
+function coerceHp(hp: unknown): number {
+  const n = Number(hp);
+  return Number.isFinite(n) ? Math.max(0, Math.min(DEFAULT_SAVE.hp, n)) : DEFAULT_SAVE.hp;
 }
 
 export class SettingsStore extends ObjectStore<{ muted: boolean; volume: number } & Record<string, unknown>> {

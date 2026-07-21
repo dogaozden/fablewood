@@ -127,6 +127,10 @@ export function wellspringIntro(): Conversation {
       'The pool shivers, and three fables rise glimmering to the surface.',
       'Recall them true, and the waters will reward you.',
     ],
+    choices: [
+      { label: 'Recall them', value: 'begin' },
+      { label: 'Let them settle', value: '__cancel__' },
+    ],
   };
 }
 

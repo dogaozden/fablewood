@@ -595,7 +595,13 @@ export class HamletScene extends Phaser.Scene {
       await this.dialogue.run(wellspringEmpty());
       return;
     }
-    await this.dialogue.run(wellspringIntro());
+    // crucible V1-17 — the resolved choice used to be discarded entirely, so Escape (or
+    // any other close) proceeded into the graded drill exactly like choosing to begin —
+    // the one place in the hamlet where "never mind" silently committed you anyway,
+    // writing an unconsented SRS grade. Capture it and bail on cancel, like doGate()/
+    // doFactor() already do.
+    const choice = await this.dialogue.run(wellspringIntro());
+    if (!choice || choice === '__cancel__') return;
     try {
       const pv = this.provinces.find((p) => p.id === this.packId);
       const baseFactIds = pv?.factIds ?? [];
