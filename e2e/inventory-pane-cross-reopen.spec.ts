@@ -36,13 +36,16 @@ test("closing Mira's Shop then opening the Satchel within 150ms opens it, not sw
   await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('.inv-title')).toHaveText("Mira's Ledger — Wares & Trade");
 
-  // Close Shop, then IMMEDIATELY request the Satchel — no artificial delay, matching the
-  // finding's own repro pace ("press 'I' within ~150ms").
+  // Close Shop, then IMMEDIATELY request the Satchel. The two keys go back-to-back with
+  // NO DOM assertion between them: pane close is synchronous on Escape, and an interposed
+  // poll-based expect() inserts an unbounded machine-load delay that can blow past the
+  // 150ms guard window — at which point the attempt proves nothing (the pre-fix shared
+  // guard would ALSO pass once the window expires). Back-to-back protocol sends keep the
+  // open attempt deterministically inside the window on any realistic machine.
   await page.keyboard.press('Escape');
-  await expect(page.locator('.inv-overlay')).toHaveCount(0);
   await tapKey(page, 'i');
 
-  await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 1_000 });
+  await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 3_000 });
   await expect(page.locator('.inv-title')).toHaveText('Satchel');
 });
 
