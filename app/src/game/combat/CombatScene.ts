@@ -47,8 +47,23 @@ import {
   ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus,
   type ArtRanks, type GlowState,
 } from './arts';
+import { mulberry32, layoutSeed } from './rng';
+import { partitionByRecency, seededShuffle } from '../recency';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
+
+/**
+ * Recency memory for dueFactIds() (director: "am I not over-asked the same things
+ * in a row?"). Module-level (not an instance field) so it survives across battles —
+ * CombatScene is added to Phaser's scene manager once (PhaserGame.tsx) and reused via
+ * scene.start() for every fight, but a shell tab-away-and-back tears the whole
+ * Phaser.Game down and rebuilds it, which re-evaluates this module fresh. That's the
+ * intended lifetime: "this page session," never persisted (state/ untouched, absent
+ * from SaveData) — a hard reload starts empty. Only ever grows via record() below;
+ * partitionByRecency deprioritizes, it never excludes, so a saturated set just
+ * degrades to the prior (due/shuffled) order rather than breaking anything.
+ */
+const sessionRecentFactIds = new Set<string>();
 
 type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'playerTier' | 'resolving' | 'enemy' | 'over';
 
@@ -2062,6 +2077,17 @@ export class CombatScene extends Phaser.Scene {
 
   // ---- content resolution ----------------------------------------------
 
+  /**
+   * §recency — due queue still drives selection (overdue-first, never hidden), but
+   * once it runs dry mid-session the old code fell back to `arr` in raw pack-
+   * declaration order with zero memory of what was just asked, so the same few
+   * facts repeated back-to-back for the rest of the battle. Now: shuffle the empty-
+   * queue fallback with this battle's own seed (varied across battles, reproducible
+   * within one — mirrors buildLayout's layoutSeed discipline in grid.ts) instead of
+   * pack order, then in BOTH branches stable-partition recently-asked ids behind
+   * fresh ones. partitionByRecency only reorders — a due fact that was just asked
+   * still appears, just after other due facts that weren't.
+   */
   private dueFactIds(tags?: string[]): string[] {
     const cand = new Set<string>();
     for (const t of tags ?? []) {
@@ -2070,10 +2096,10 @@ export class CombatScene extends Phaser.Scene {
     }
     if (cand.size === 0) for (const id of this.allFactIds) cand.add(id);
     const arr = [...cand];
-    try {
-      const due = services.srs.dueQueue(this.launch.packId, arr);
-      return due.length ? due : arr;
-    } catch { return arr; }
+    let due: string[] = [];
+    try { due = services.srs.dueQueue(this.launch.packId, arr); } catch { due = []; }
+    const ordered = due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
+    return partitionByRecency(ordered, sessionRecentFactIds);
   }
 
   private miraBonusActive(): boolean {
@@ -2092,6 +2118,10 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private async record(result: EncounterResult): Promise<void> {
+    // §recency — the fact was asked regardless of whether the SRS write below
+    // succeeds, so this is unconditional (mirrors "recording is best-effort" not
+    // extending to whether we remember it was just asked).
+    for (const id of result.factIds) sessionRecentFactIds.add(id);
     try {
       await Promise.all(result.factIds.map((id) => services.srs.record(id, result.quality, result.encounterId)));
     } catch { /* recording is best-effort; combat proceeds */ }

@@ -39,6 +39,7 @@ import {
   wellspringOutro,
   type Province,
 } from './content';
+import { partitionByRecency, seededShuffle } from '../../recency';
 
 type Facing = 'up' | 'down' | 'left' | 'right';
 type Key = Phaser.Input.Keyboard.Key;
@@ -49,6 +50,16 @@ const HH = 5;
 const FOOT = 5; // collision box sits around the feet
 const INTERACT_DIST = 22;
 const LABEL_FONT = 'Georgia, "Times New Roman", serif';
+
+/**
+ * §recency (parity with CombatScene.dueFactIds() — see game/recency.ts) — facts
+ * asked at the Wellspring this page session, across visits. Module-level so it
+ * outlives any one doWellspring() call the same way CombatScene's session set
+ * outlives any one battle; NOT persisted (state/ untouched, absent from SaveData).
+ * Fixes the 3-round drill repeating a fact verbatim once the live due queue empties
+ * mid-burst and falls back to the (otherwise static) initialDue/baseFactIds snapshot.
+ */
+const wellspringRecentFactIds = new Set<string>();
 
 interface RawPack {
   meta?: { id?: string; title?: string };
@@ -611,16 +622,29 @@ export class HamletScene extends Phaser.Scene {
         // pass so the burst advances through DISTINCT facts — a fact recorded below
         // drops out of "due" next pass. If the live queue empties (fewer than three
         // due), fall back to the initial queue so the burst gracefully repeats due
-        // facts rather than stalling on nothing.
+        // facts rather than stalling on nothing; if that's ALSO empty (nothing was
+        // due/unseen even at the start), seed-shuffle the raw pack order instead of
+        // handing it out verbatim (mirrors CombatScene.dueFactIds()'s fallback).
+        // §recency — whichever tier wins, push anything asked already this drill (or
+        // a prior Wellspring visit this session) behind fresh alternatives, so a
+        // stale initialDue snapshot can't just re-ask what pass 1 already covered.
         const live = services.srs.dueQueue(this.packId, baseFactIds);
-        const factIds = live.length ? live : initialDue.length ? initialDue : baseFactIds;
+        const ordered = live.length
+          ? live
+          : initialDue.length
+            ? initialDue
+            : seededShuffle(baseFactIds, mulberry32(this.seed ^ 0x5eed));
+        const factIds = partitionByRecency(ordered, wellspringRecentFactIds);
         const res = await services.runEncounter({
           context: 'drill',
           packId: this.packId,
           seed: (this.seed + i * 7 + 1) >>> 0,
           factIds,
         });
-        for (const fid of res.factIds) await services.srs.record(fid, res.quality, res.encounterId);
+        for (const fid of res.factIds) {
+          await services.srs.record(fid, res.quality, res.encounterId);
+          wellspringRecentFactIds.add(fid);
+        }
       }
       const s = services.save.get();
       await services.save.save({ streak: s.streak + 1, lastPlayed: new Date().toISOString() });
