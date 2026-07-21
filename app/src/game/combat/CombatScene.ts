@@ -836,8 +836,20 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** One flyout row: greys with a reason via Rank, Glow, then target availability, in that order. */
-  private tierRow(unit: UnitState, spell: SpellDef): TierRow {
+  /** crucible v1 #19 — the Warden's shield absorbs every non-Attestation action (boss.ts
+   *  wardenAbsorbs); excluding shield-absorbed targets here — instead of only discovering that
+   *  after Glow is already spent — keeps a T2/T3 cast from being armed against a target it can
+   *  never actually damage. Attestation ('cast') still pierces normally, since wardenAbsorbs
+   *  itself already exempts it. A no-op whenever no target is a shielded boss (every other
+   *  Art/room), so this changes nothing outside a shielded boss fight. */
+  private strikableTargets(targets: UnitState[], action: ActionKind): UnitState[] {
+    return targets.filter((t) => !wardenAbsorbs(action, t.isBoss, this.shields));
+  }
+
+  /** One flyout row: greys with a reason via Rank, Glow, shield, then target availability, in
+   *  that order. `action` is the Art's own anchor ActionKind (needed only for the shield gate —
+   *  §9's rule stays string-matched on it, same as every other wardenAbsorbs call site). */
+  private tierRow(unit: UnitState, spell: SpellDef, action: ActionKind): TierRow {
     const costText = spell.glowCost === 0 ? 'free' : `◈${spell.glowCost}`;
     if (spell.tier > this.rank) {
       return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs Rank ${spell.tier}` };
@@ -848,10 +860,18 @@ export class CombatScene extends Phaser.Scene {
     if (spell.shape === 'self') {
       return { tier: spell.tier, label: spell.label, costText, enabled: true };
     }
-    const targets = this.validTargetsForSpell(unit, spell);
-    return targets.length
-      ? { tier: spell.tier, label: spell.label, costText, enabled: true }
-      : { tier: spell.tier, label: spell.label, costText, enabled: false, reason: 'no foe within reach' };
+    const rawTargets = this.validTargetsForSpell(unit, spell);
+    const targets = this.strikableTargets(rawTargets, action);
+    if (targets.length) return { tier: spell.tier, label: spell.label, costText, enabled: true };
+    // "shielded" (not a longer sentence): the flyout row's trailing-reason slot is right-
+    // anchored in a fixed ~196px row (hud.ts addRow) — a longer string here visibly collided
+    // with the label text, the exact kind of legibility bug crucible v1 #10 already covers
+    // for this same flyout. Short reasons ("no foe within reach", "won't multiply a burst")
+    // already established the width budget this stays inside.
+    return {
+      tier: spell.tier, label: spell.label, costText, enabled: false,
+      reason: rawTargets.length ? 'shielded' : 'no foe within reach',
+    };
   }
 
   /** Rank≥2 pressing an Art opens this instead of casting T1 directly. Phaser-drawn (container,
@@ -868,7 +888,7 @@ export class CombatScene extends Phaser.Scene {
 
   private renderFlyout(unit: UnitState, action: ActionKind): void {
     const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
-    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s));
+    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s, action));
     // §12.2 — the Overglow toggle is offered "when a damaging tier is highlighted"; this
     // flyout has no live hover-tracking, so the default/focus tier is the highest one
     // currently unlocked (rank-derived) — matches spec's own worked example (Rank 3 Kindling
@@ -928,7 +948,7 @@ export class CombatScene extends Phaser.Scene {
     const action = this.flyoutAction;
     const spell = spellsForArt(SPELLBOOK[action as SpellId].art).find((s) => s.tier === tier);
     if (!spell) return;
-    const row = this.tierRow(unit, spell);
+    const row = this.tierRow(unit, spell, action);
     if (!row.enabled) return;
     const overglow = this.overglowOn;
     this.flyoutAction = null;
@@ -943,7 +963,11 @@ export class CombatScene extends Phaser.Scene {
       void this.runPlayerAction(unit, action, { c: unit.c, r: unit.r });
       return;
     }
-    const targets = this.validTargetsForSpell(unit, spell);
+    // crucible v1 #19 — the SAME shield filter tierRow's greying used to decide row.enabled;
+    // in a mixed fight (shielded boss + other valid targets) the row can be enabled while the
+    // boss's own tile must still never be offered as a clickable target for a non-Attestation
+    // spell (else Glow spends against it anyway, just via a different foe making the row live).
+    const targets = this.strikableTargets(this.validTargetsForSpell(unit, spell), action);
     this.enterTargeting(action, targets);
   }
 

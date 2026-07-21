@@ -86,6 +86,16 @@ async function bannerText(page: Page): Promise<string> {
   });
 }
 
+type UnitDbg = { c: number; r: number; alive: boolean; hp: number; maxHp: number } | null;
+
+async function unitDebug(page: Page, id: string): Promise<UnitDbg> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { unitDebug?(id: string): unknown } | undefined;
+    return (s?.unitDebug?.(uid) ?? null) as UnitDbg;
+  }, id);
+}
+
 /** Poll until the Keeper's own turn opens for manual control (no ?demo, so nothing else drives it). */
 async function waitForKeeperTurn(page: Page, timeout = 20_000): Promise<Snap> {
   const start = Date.now();
@@ -249,4 +259,63 @@ test('crucible v1 #14 control: Lantern-Brand at ample headroom still reads as an
   expect(after?.glow, 'the full nominal +2 landed, uncapped').toBe(2);
   const banner = await bannerText(page);
   expect(banner, 'a genuine full gain keeps the plain, undisclosed-amount banner').toBe('Lantern-Brand — the wick brightens.');
+});
+
+// ---------------------------------------------------------------------------------------
+// crucible v1 #19: while the Vault-Warden is shielded, only Attestation ('cast') pierces
+// (boss.ts wardenAbsorbs) — every other Art's tier flyout used to offer no greying/reason at
+// all, letting a T2/T3 cast spend Glow up front against a target it could never actually
+// damage (banner still read as a full success alongside the "shielded" float-text). The
+// standalone boss fixture (?boss=1) spawns exactly one trash mob (wisp-0) alongside the
+// Warden — parked out of range here so Binding's ONLY reachable target is the shielded boss.
+// ---------------------------------------------------------------------------------------
+test('crucible v1 #19: a shielded boss greys a non-Attestation tier row instead of wasting Glow on cast', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7&boss=1&rank=3');
+  await waitReady(page, 'combat');
+
+  // Resolve phase 0 (any branch) — shields start at 3 (fixtures.ts), so even 'good' (-1) leaves 2.
+  await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 20_000 });
+  await page.waitForTimeout(600); // boss-reveal input-arming guard settle (combat.spec.ts's own idiom)
+  await page.keyboard.press('1');
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
+  await cont.waitFor({ state: 'visible', timeout: 10_000 });
+  await cont.click();
+  await page.waitForTimeout(500);
+
+  // waitForKeeperTurn just polls state==='playerMove' — works for whichever party unit's turn
+  // opens next (Keeper or Mira; both can open a tier flyout identically).
+  const opened = await waitForKeeperTurn(page);
+  expect(opened?.state, 'a party turn opened for manual control').toBe('playerMove');
+  const active = opened?.activeId;
+  expect(active, 'an active party unit id is readable').toBeTruthy();
+
+  await debugSetPos(page, active!, 5, 3);
+  await debugSetPos(page, 'warden', 6, 3); // range 1 — within every Binding tier's reach (max 3)
+  await debugSetPos(page, 'wisp-0', 1, 1); // distance 6 from (5,3) — beyond even Binding's widest tier (range 3)
+  await debugSetGlow(page, 2); // covers every Binding tier's own cost (0/1/2), isolating the shield gate
+
+  const bossBefore = await unitDebug(page, 'warden');
+  expect(bossBefore?.hp).toBeGreaterThan(0);
+
+  await page.keyboard.press('3'); // Binding (Weave) — a non-Attestation Art
+  await page.waitForTimeout(150);
+  expect((await snap(page))?.state).toBe('playerTier');
+  const fd = await flyoutDebug(page);
+  await page.screenshot({ path: `${EV}/v1fix19-boss-shield-greyed.png` });
+  for (const row of fd?.rows ?? []) {
+    expect(row, `tier ${row.tier} must grey with a shield-specific reason, not silently offer a doomed cast`).toMatchObject({
+      enabled: false, reason: 'shielded',
+    });
+  }
+  expect(fd?.rows.length, 'all 3 Binding tiers rendered').toBe(3);
+
+  // Pressing a tier's own hotkey on a greyed row must be a no-op: no Glow spent, no HP change.
+  const beforeGlow = (await snap(page))?.glow;
+  await page.keyboard.press('1');
+  await page.waitForTimeout(400);
+  const afterGlow = (await snap(page))?.glow;
+  const bossAfter = await unitDebug(page, 'warden');
+  expect(afterGlow, 'Glow stays untouched — never spent against a target it can never damage').toBe(beforeGlow);
+  expect(bossAfter?.hp, "the Warden's hp is unaffected").toBe(bossBefore?.hp);
 });
