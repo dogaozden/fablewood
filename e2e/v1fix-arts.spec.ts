@@ -166,6 +166,7 @@ test("crucible v1 #9: Overglow does not arm when a tier's own cost would exhaust
 // ---------------------------------------------------------------------------------------
 test('crucible v1 #10: the tier-choose banner never overlaps the flyout (worst case: Attestation, Rank 3, Overglow offered)', async ({ page }) => {
   test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1280, height: 800 });
   await seedFreshSave(page);
   await page.goto('/?scene=combat&seed=7&rank=3');
   await waitReady(page, 'combat');
@@ -202,6 +203,17 @@ test('crucible v1 #10: the tier-choose banner never overlaps the flyout (worst c
   expect(flyout2).not.toBeNull();
   await page.screenshot({ path: `${EV}/v1fix10-banner-flyout-binding-rank3.png` });
   expect(rectsOverlap(banner2, flyout2!), `banner ${JSON.stringify(banner2)} must not overlap flyout ${JSON.stringify(flyout2)}`).toBe(false);
+
+  // The game's internal 960x540 canvas is Scale.FIT (viewport-independent geometry), but the
+  // verification brief calls for evidence at the 960x600 minimum window too — re-check the
+  // same still-open Binding flyout there.
+  await page.setViewportSize({ width: 960, height: 600 });
+  await page.waitForTimeout(150);
+  const banner3 = await bannerBounds(page);
+  const flyout3 = await flyoutBounds(page);
+  expect(flyout3).not.toBeNull();
+  await page.screenshot({ path: `${EV}/v1fix10-banner-flyout-binding-rank3-960x600.png` });
+  expect(rectsOverlap(banner3, flyout3!), `at 960x600: banner ${JSON.stringify(banner3)} must not overlap flyout ${JSON.stringify(flyout3)}`).toBe(false);
 });
 
 // ---------------------------------------------------------------------------------------
