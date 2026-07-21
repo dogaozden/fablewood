@@ -120,22 +120,57 @@ trait GradeWorker {
 struct ClaudeChild(Result<tokio::process::Child, String>);
 
 fn spawn_claude_child() -> PoolEntry<ClaudeChild> {
-    let outcome: Result<tokio::process::Child, String> = match crate::judge::resolve_claude_bin() {
+    let mut outcome: Result<tokio::process::Child, String> = match crate::judge::resolve_claude_bin() {
         None => Err("claude CLI not found (set FABLEWOOD_CLAUDE_BIN)".to_string()),
-        Some(bin) => tokio::process::Command::new(&bin)
-            .args(SPAWN_ARGS.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("spawn failed: {e}")),
+        Some(bin) => {
+            let mut cmd = tokio::process::Command::new(&bin);
+            crate::judge::configure_judge_child(&mut cmd, &bin);
+            cmd.args(SPAWN_ARGS.iter().copied())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| format!("spawn failed: {e}"))
+        }
     };
+    // Drain stderr independently of grade()'s own lifetime (see
+    // spawn_stderr_logger's doc) — previously piped but never read at all,
+    // so a claude-side error or warning sat invisibly in the OS pipe buffer.
+    if let Ok(child) = &mut outcome {
+        if let Some(stderr) = child.stderr.take() {
+            spawn_stderr_logger("warm", stderr);
+        }
+    }
     let alive = outcome.is_ok();
     PoolEntry {
         proc: ClaudeChild(outcome),
         alive,
     }
+}
+
+/// Independently drains a child's stderr to EOF and logs it once (only if
+/// non-empty), decoupled from whatever future is racing the child's stdout
+/// protocol. This matters specifically for the timeout case: judge_pool's
+/// grade_with_pool wraps `entry.proc.grade(prompt)` in its own
+/// `tokio::time::timeout`, and when that elapses the grade() future
+/// (including the Child it owns) is DROPPED — kill_on_drop fires, but any
+/// reasoning inside grade() about what the child said on stderr never runs,
+/// because the future carrying it was cancelled, not returned. Spawning this
+/// logger up front, before grade() ever starts, means it lives as its own
+/// independent tokio task tied only to the stderr pipe's fd, so it keeps
+/// draining (and eventually logs) even when the caller times out and the
+/// Child itself is dropped/killed out from under a cancelled grade().
+pub(crate) fn spawn_stderr_logger(tag: &'static str, mut stderr: tokio::process::ChildStderr) {
+    tokio::spawn(async move {
+        let mut buf = String::new();
+        let _ = tokio::io::AsyncReadExt::read_to_string(&mut stderr, &mut buf).await;
+        let trimmed = buf.trim();
+        if !trimmed.is_empty() {
+            let head: String = trimmed.chars().take(500).collect();
+            eprintln!("[clerk-native] {tag} child stderr: {head}");
+        }
+    });
 }
 
 impl GradeWorker for ClaudeChild {
@@ -180,9 +215,12 @@ impl GradeWorker for ClaudeChild {
 /// ClaudeJudgePool's field type readable.
 type ClaudeChildFactory = fn() -> PoolEntry<ClaudeChild>;
 
-/// Tauri-managed state: a small pool of pre-warmed Clerk processes, lazily
-/// started on first grade (an empty pool just pays the same cold cost as
-/// today's per-call spawn — see grade_with_warm_worker).
+/// Tauri-managed state: a small pool of pre-warmed Clerk processes. Starts
+/// empty; main.rs's setup() calls prewarm() once at boot so the first real
+/// grade doesn't pay a cold cost, but that's a latency optimization, not a
+/// correctness requirement — an empty pool (e.g. in a test, or if prewarm()
+/// hasn't finished yet) still self-heals via grade_with_warm_worker's own
+/// take()-or-spawn_fresh() fallback.
 pub struct ClaudeJudgePool {
     inner: Mutex<WarmPool<ClaudeChild, ClaudeChildFactory>>,
 }
@@ -210,6 +248,21 @@ pub async fn grade_with_warm_worker(pool: &ClaudeJudgePool, prompt: &str) -> Res
     grade_with_pool(&pool.inner, prompt.to_string(), WARM_TIMEOUT)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Eagerly top the pool up to its target size — called once from main.rs's
+/// setup() so the FIRST real grade in a session already has a warm spare,
+/// instead of always paying the lazy/cold cost described above. Idempotent
+/// and not required for correctness (an empty pool still self-heals via
+/// grade_with_warm_worker's own take()-or-spawn_fresh() fallback) — this
+/// only shaves latency off the first grade, and gives main.rs a size to log
+/// for the boot-time smoke check (`[clerk-native] warm pool ready`), so a
+/// future bundle can be sanity-checked from a terminal in seconds without
+/// needing to trigger a real grade through the UI first.
+pub async fn prewarm(pool: &ClaudeJudgePool) -> usize {
+    let mut guard = pool.inner.lock().await;
+    guard.replenish();
+    guard.size()
 }
 
 /// Generic core, parametrized over the worker type so tests can supply a fake
@@ -429,5 +482,47 @@ mod tests {
         let second = grade_with_warm_worker(&pool, prompt).await;
         println!("[smoke] grade #2 (should hit a pre-warmed spare) in {:?}: {second:?}", t1.elapsed());
         assert!(second.is_ok(), "second warm grade failed: {second:?}");
+    }
+
+    /// Ignored by default: spawns a REAL claude process (no API key, real
+    /// wall-clock time) using configure_judge_child's explicit environment —
+    /// the actual fix for the live Finder-launch bug (docs/tauri.md, and
+    /// judge.rs's configure_judge_child doc comment): a GUI launch hands this
+    /// whole process a stripped `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, and
+    /// prior to this fix that stripped PATH was inherited straight through to
+    /// the spawned claude child instead of being repaired. This test doesn't
+    /// need this PROCESS's own env to be stripped to prove the fix: it calls
+    /// configure_judge_child exactly as production does and asserts the
+    /// resulting child completes a full stream-json protocol handshake within
+    /// the same WARM_TIMEOUT production uses — a regression guard that goes
+    /// red if configure_judge_child ever stops constructing a sufficient
+    /// environment (e.g. a future edit drops the HOME passthrough or narrows
+    /// the PATH below what claude needs). Re-verify with:
+    ///   cargo test --ignored claude_child_completes_handshake_with_configured_env -- --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn claude_child_completes_handshake_with_configured_env() {
+        let bin = crate::judge::resolve_claude_bin().expect("claude CLI must be installed to run this test");
+
+        let mut cmd = tokio::process::Command::new(&bin);
+        crate::judge::configure_judge_child(&mut cmd, &bin);
+        let child = cmd
+            .args(SPAWN_ARGS.iter().copied())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn claude with the configured (not inherited) env");
+        let worker = ClaudeChild(Ok(child));
+
+        let t0 = std::time::Instant::now();
+        let prompt = "Respond with STRICT JSON only, no prose, no markdown fence: \
+                       {\"verdict\":\"pass\",\"line\":\"ok\"}";
+        let result = tokio::time::timeout(WARM_TIMEOUT, worker.grade(prompt.to_string())).await;
+        println!("[smoke] configured-env child completed in {:?}: {result:?}", t0.elapsed());
+
+        assert!(result.is_ok(), "timed out under WARM_TIMEOUT — configured env is not enough");
+        assert!(result.unwrap().is_ok(), "grade itself failed");
     }
 }

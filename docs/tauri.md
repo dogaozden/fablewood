@@ -29,7 +29,20 @@ parse, same fallback contract (any judge failure → deterministic stub + "the C
 is momentarily away from his desk"). No API keys anywhere: the Clerk is the
 subscription `claude` CLI, resolved from FABLEWOOD_CLAUDE_BIN → PATH →
 `~/.local/bin/claude` → `/opt/homebrew/bin/claude` → `/usr/local/bin/claude` →
-`~/.claude/local/claude` (a Finder-launched .app has a minimal PATH).
+`~/.claude/local/claude` (a Finder-launched .app has a minimal PATH). Finding
+the binary isn't enough, though: `judge.rs`'s `configure_judge_child()` also
+builds the spawned child's PATH/HOME/USER/etc. and pins its cwd to a
+dedicated temp dir EXPLICITLY, rather than letting it inherit this process's
+own (minimal, Finder-given) env and (typically $HOME or `/`) cwd — a GUI
+launch's stripped-down execution context was measurably slowing the child's
+own startup and, via a cwd-rooted scan wandering into `~/Pictures`, could
+trigger a Photos-library TCC prompt attributed to Fablewood.
+
+At boot, `main.rs` eagerly warms the Clerk pool and logs
+`[clerk-native] warm pool ready (N workers, claude at <path>)` — grep for
+that line (terminal for a dev/direct launch, `log stream`/Console.app for a
+real Finder launch) as the one-line smoke check that a new bundle's Clerk is
+healthy, no UI interaction required.
 
 ## Running
 
