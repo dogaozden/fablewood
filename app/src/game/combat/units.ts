@@ -32,7 +32,13 @@ const ENEMY_LABEL: Record<EnemyArchetype, string> = {
   wisp: 'Fade-Wisp',
   wraith: 'Anti-Wraith',
   construct: 'Vault-Construct',
-  warden: 'The Vault-Warden',
+  // Regular (non-boss) label only — makeBoss() below always uses spec.name instead, so this
+  // never renames an actual boss. Was 'The Vault-Warden' (boss-kill-lens finding): a room's
+  // regular archetype:'warden' trash enemy (app/src/game/scenes/dungeon/__fixtures__/dev.dungeon.json's
+  // "under-boss" room, an 8hp mob distinct from the boss unit) rendered under the SAME name the
+  // real boss carries elsewhere, reading in every turn/strike banner as if the boss itself were
+  // a second, lesser copy of itself. Stats (ENEMY_STATS.warden) are unchanged — cosmetic only.
+  warden: 'Root-Husk',
 };
 
 function base(partial: Partial<UnitState> & Pick<UnitState, 'id' | 'name' | 'team' | 'kind' | 'c' | 'r' | 'hp' | 'maxHp' | 'move' | 'speed'>): UnitState {
