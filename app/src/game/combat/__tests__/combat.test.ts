@@ -244,6 +244,18 @@ describe('flanking geometry — isFlanked (§4.1)', () => {
     const ally = makeKeeper(5, 2);
     expect(isFlanked({ c: 5, r: 5 }, { c: 5, r: 3 }, 'party', [ally])).toBe(false); // distance 2
   });
+
+  it("regression (crucible v1 #6): flank must be evaluated against the VACATED tile, not a mover's later landing tile", () => {
+    // Pincer: attacker at (5,4), ally at (5,2) — flanks a target AT the vacated tile (5,3)
+    // (opposite = (5,3)+((5,3)-(5,4)) = (5,2), where the ally stands). The same attacker/ally
+    // pair does NOT flank a target that has already moved on to (6,3) (opposite becomes
+    // (7,2), empty) — proving the two positions are not interchangeable: CombatScene's
+    // opportunity-strike resolution used to pass the mover's already-mutated (landing)
+    // position instead of the vacated one it should evaluate against.
+    const ally = makeKeeper(5, 2);
+    expect(isFlanked({ c: 5, r: 4 }, { c: 5, r: 3 }, 'party', [ally]), 'flanked when checked against the vacated tile').toBe(true);
+    expect(isFlanked({ c: 5, r: 4 }, { c: 6, r: 3 }, 'party', [ally]), 'NOT flanked when (wrongly) checked against the landing tile').toBe(false);
+  });
 });
 
 describe('boss reducers', () => {

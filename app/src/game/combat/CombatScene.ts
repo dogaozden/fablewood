@@ -970,7 +970,12 @@ export class CombatScene extends Phaser.Scene {
       if (!mover.alive) return;
       for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
         if (!mover.alive) break;
-        const flank = isFlanked(striker, mover, striker.team, this.units);
+        // crucible v1 #6 — flank must be evaluated against the tile `mover` is leaving
+        // (`vacated`), not `mover`'s live c/r — both call sites (movePlayerTo, the enemy-move
+        // branch of runEnemyTurn) already mutate unit.c/r to the LANDING tile before calling
+        // this method, so `mover` here reads as already-arrived; passing `vacated` instead
+        // restores "flank geometry evaluated relative to the tile being left" (§4.1/§4.2).
+        const flank = isFlanked(striker, vacated, striker.team, this.units);
         const result = computeHit({
           base: 1, attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false,
@@ -2190,6 +2195,16 @@ export class CombatScene extends Phaser.Scene {
     if (v) {
       const p = this.tileToScreen(u);
       v.container.setPosition(p.x, p.y).setDepth(10 + r);
+    }
+    // e2e test setup (crucible v1 #6 verification): repositioning the unit whose move menu is
+    // ALREADY open would otherwise leave moveField/reachable stale (computed from the
+    // pre-teleport tile) — refresh them so a test can debugSetPos the active unit into a
+    // specific pincer/geometry and then click a real move destination relative to its new spot.
+    if (id === this.activeId && this.state === 'playerMove') {
+      this.moveField = computeMoveField(u, this.moveBudgetFor(u), this.layout.tiles, this.blockedFor(u.id));
+      this.reachable.clear();
+      for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
+      this.drawMoveRange();
     }
   }
 
