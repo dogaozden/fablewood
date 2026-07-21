@@ -182,6 +182,32 @@ describe('decayTurnEnd (§3 rule 3)', () => {
   });
 });
 
+describe('regression (crucible v1 #7): a skipped (Staggered) turn must still run turn-end decay', () => {
+  it('tickTurnStart (consumes Staggered) followed by decayTurnEnd still decrements a co-applied duration status', () => {
+    // Mirrors Parley-good's real shape: Staggered(1) + Weakened(2) applied together. The
+    // fix this locks in is CombatScene calling endTurnDecay from the staggered branch
+    // (before its early return) instead of skipping it for a turn the unit never acted on —
+    // composing the two functions in that exact order must decrement Weakened by one.
+    const u = {
+      ...makeKeeper(0, 0),
+      statuses: [
+        { id: 'staggered', turnsLeft: 1, magnitude: 0 } as StatusInstance,
+        { id: 'weakened', turnsLeft: 2, magnitude: 1 } as StatusInstance,
+      ],
+    };
+    const tick = tickTurnStart(u);
+    expect(tick.ops, 'staggered alone: consumed, no damage op').toEqual([{ op: 'consume' }]);
+    expect(tick.statuses, 'weakened survives staggered\'s own consumption, untouched so far').toEqual([
+      { id: 'weakened', turnsLeft: 2, magnitude: 1 },
+    ]);
+
+    const afterDecay = decayTurnEnd(tick.statuses);
+    expect(afterDecay, "weakened decayed by 1 — the round was NOT skipped for it").toEqual([
+      { id: 'weakened', turnsLeft: 1, magnitude: 1 },
+    ]);
+  });
+});
+
 describe('effectiveMove — bound-still-acts & dimmed floor (§3)', () => {
   it('Bound zeroes move (acting is a separate, unaffected concern — Bound is not Silenced)', () => {
     expect(effectiveMove(4, [{ id: 'bound', turnsLeft: 1, magnitude: 0 }])).toBe(0);

@@ -608,6 +608,12 @@ export class CombatScene extends Phaser.Scene {
     }
     if (!unit.alive) { this.time.delayedCall(420, () => this.advanceTurn()); return; }
     if (staggered) {
+      // crucible v1 #7 — a skipped (Staggered) turn never reached endPlayerTurn/doAttack (the
+      // only other callers of endTurnDecay), so any status CO-APPLIED with Staggered (e.g.
+      // Parley-good's own Staggered(1)+Weakened(2)) missed a full round of turn-end decay.
+      // §3 rule 3 has no carve-out for a skipped turn — decay still runs at this unit's own
+      // turn end, whether or not it got to act.
+      this.endTurnDecay(unit);
       this.hud.showBanner(`${unit.name} is staggered — it loses its turn.`, P.duskPeach);
       this.time.delayedCall(650, () => this.advanceTurn());
       return;

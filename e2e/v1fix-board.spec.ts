@@ -59,6 +59,15 @@ async function debugApplyStatus(page: Page, id: string, statusId: string, turns:
   );
 }
 
+/** Force the ?demo autopilot to prefer one action kind (combat-status.spec.ts's own idiom). */
+async function setPilot(page: Page, kind: string | null): Promise<void> {
+  await page.evaluate((k) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { setPilotPreference?(k: string | null): void } | undefined;
+    s?.setPilotPreference?.(k);
+  }, kind);
+}
+
 async function layoutDebug(page: Page): Promise<{ tiles: string[][] } | null> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
@@ -73,6 +82,17 @@ async function waitForActive(page: Page, id: string, timeout = 20_000): Promise<
   while (Date.now() - start < timeout) {
     const s = await snap(page);
     if (s?.activeId === id) return true;
+    await page.waitForTimeout(120);
+  }
+  return false;
+}
+
+/** Poll until it is no longer `id`'s turn (its turn concluded), or the fight resolves first. */
+async function waitForTurnEnd(page: Page, id: string, timeout = 20_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const s = await snap(page);
+    if (!s || s.activeId !== id) return true;
     await page.waitForTimeout(120);
   }
   return false;
@@ -142,4 +162,36 @@ test('crucible v1 #6: an opportunity strike flanks off the VACATED tile, not the
   const dmg = before!.hp - after!.hp;
   // Flanked: 1 base + 1 flank = 2 per striker × 2 strikers = 4. Unflanked (the bug): 1×2 = 2.
   expect(dmg, 'both pincering strikes landed flanked (2 each, 4 total) — not unflanked (1 each, 2 total)').toBe(4);
+});
+
+// ---------------------------------------------------------------------------------------
+// crucible v1 #7: advanceTurn's Staggered branch banners + reschedules WITHOUT ever calling
+// endTurnDecay (which only runs from endPlayerTurn/doAttack — neither reached on a skipped
+// turn), so any status co-applied with Staggered (Parley-good's own Staggered(1)+Weakened(2))
+// used to last one extra round. debugApplyStatus mirrors Parley-good's exact shape directly,
+// same as combat-status.spec.ts's own Bound test.
+// ---------------------------------------------------------------------------------------
+test("crucible v1 #7: a Staggered turn still decays a co-applied status (Weakened) at turn end", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7&demo=1');
+  await waitReady(page, 'combat');
+  await setPilot(page, 'strike'); // free, no-overlay action — keeps the party's turns moving
+
+  await debugApplyStatus(page, 'wisp-0', 'staggered', 1);
+  await debugApplyStatus(page, 'wisp-0', 'weakened', 2);
+  const before = await unitDebug(page, 'wisp-0');
+  expect(before?.statuses.find((s) => s.id === 'staggered')).toBeTruthy();
+  expect(before?.statuses.find((s) => s.id === 'weakened')?.turnsLeft, 'Weakened(2) applied').toBe(2);
+
+  const reachedTurn = await waitForActive(page, 'wisp-0');
+  expect(reachedTurn, "wisp-0's own turn arrived (staggered turns are still 'reached', just skipped)").toBe(true);
+  const concluded = await waitForTurnEnd(page, 'wisp-0');
+  expect(concluded, "wisp-0's (skipped) turn concluded").toBe(true);
+
+  const after = await unitDebug(page, 'wisp-0');
+  expect(after, 'wisp-0 still tracked (never acted, so never took retaliation damage)').not.toBeNull();
+  expect(after!.alive).toBe(true);
+  expect(after!.statuses.some((s) => s.id === 'staggered'), 'Staggered itself is consumed').toBe(false);
+  const weakened = after!.statuses.find((s) => s.id === 'weakened');
+  expect(weakened?.turnsLeft, 'Weakened decayed to 1 even though the turn was skipped by Staggered').toBe(1);
 });
