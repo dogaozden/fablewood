@@ -76,6 +76,25 @@ describe('Glow (§5)', () => {
     expect(canOverglow(2, { pips: 1 })).toBe(true);
     expect(canOverglow(3, { pips: 1 })).toBe(true);
   });
+
+  it("regression (crucible v1 #9): canOverglow must be checked against a tier's POST-COST remainder, not the wholesale total", () => {
+    // Glow pips == exactly a tier's own cost (e.g. 1 pip for a 1-cost T2 spell): the
+    // WHOLESALE total alone still reads as "enough" (canOverglow only ever checked pips>=1),
+    // but paying the tier's own cost first leaves a remainder of 0 — Overglow must gate off
+    // against THAT, matching castGatedSpell's own post-glowSpend recheck (the two disagreeing
+    // exactly at this boundary is what let Overglow arm in the flyout and then silently fail
+    // to apply on cast).
+    const totalGlow: GlowState = { pips: 1 };
+    const tierCost = 1;
+    expect(canOverglow(2, totalGlow), 'the wholesale total alone misreads this as enough').toBe(true);
+    const remainder: GlowState = { pips: totalGlow.pips - tierCost };
+    expect(canOverglow(2, remainder), "the tier's own cost exhausts Glow — remainder is 0, must gate off").toBe(false);
+
+    // Control: one pip BANKED ABOVE the tier's cost survives the same remainder check.
+    const bankedExtra: GlowState = { pips: 2 };
+    const remainderWithExtra: GlowState = { pips: bankedExtra.pips - tierCost };
+    expect(canOverglow(2, remainderWithExtra), 'a genuine spare pip still offers Overglow').toBe(true);
+  });
 });
 
 describe('dueRenewalSurge (§5.1 source 4 — the SRS due queue as the mana engine, trap 14)', () => {

@@ -444,7 +444,13 @@ export class CombatScene extends Phaser.Scene {
       g.fillStyle(P.waterBlue, 0.95).fillRect(-w / 2, y + 6, wardPx, 2);
     }
 
-    this.drawStatusChips(u, v, y + (warded ? 10 : 7));
+    // crucible v1 #23 — chips are center-anchored (Phaser Images default), so their true top
+    // edge is chipY minus half their own 10px height; y+7 (the pre-fix base case) left that
+    // edge 3px above the HP bar's own bottom edge (y+5) instead of flush with/below it. The
+    // Warded case's y+10 was already correct (it also has to clear the ward underline drawn at
+    // y+6..y+8) — using that same offset unconditionally fixes the base case too, with no
+    // visible change to the Warded case it was already right for.
+    this.drawStatusChips(u, v, y + 10);
     this.updateDanger(u);
   }
 
@@ -608,6 +614,12 @@ export class CombatScene extends Phaser.Scene {
     }
     if (!unit.alive) { this.time.delayedCall(420, () => this.advanceTurn()); return; }
     if (staggered) {
+      // crucible v1 #7 — a skipped (Staggered) turn never reached endPlayerTurn/doAttack (the
+      // only other callers of endTurnDecay), so any status CO-APPLIED with Staggered (e.g.
+      // Parley-good's own Staggered(1)+Weakened(2)) missed a full round of turn-end decay.
+      // §3 rule 3 has no carve-out for a skipped turn — decay still runs at this unit's own
+      // turn end, whether or not it got to act.
+      this.endTurnDecay(unit);
       this.hud.showBanner(`${unit.name} is staggered — it loses its turn.`, P.duskPeach);
       this.time.delayedCall(650, () => this.advanceTurn());
       return;
@@ -830,8 +842,20 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** One flyout row: greys with a reason via Rank, Glow, then target availability, in that order. */
-  private tierRow(unit: UnitState, spell: SpellDef): TierRow {
+  /** crucible v1 #19 — the Warden's shield absorbs every non-Attestation action (boss.ts
+   *  wardenAbsorbs); excluding shield-absorbed targets here — instead of only discovering that
+   *  after Glow is already spent — keeps a T2/T3 cast from being armed against a target it can
+   *  never actually damage. Attestation ('cast') still pierces normally, since wardenAbsorbs
+   *  itself already exempts it. A no-op whenever no target is a shielded boss (every other
+   *  Art/room), so this changes nothing outside a shielded boss fight. */
+  private strikableTargets(targets: UnitState[], action: ActionKind): UnitState[] {
+    return targets.filter((t) => !wardenAbsorbs(action, t.isBoss, this.shields));
+  }
+
+  /** One flyout row: greys with a reason via Rank, Glow, shield, then target availability, in
+   *  that order. `action` is the Art's own anchor ActionKind (needed only for the shield gate —
+   *  §9's rule stays string-matched on it, same as every other wardenAbsorbs call site). */
+  private tierRow(unit: UnitState, spell: SpellDef, action: ActionKind): TierRow {
     const costText = spell.glowCost === 0 ? 'free' : `◈${spell.glowCost}`;
     if (spell.tier > this.rank) {
       return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs Rank ${spell.tier}` };
@@ -842,10 +866,18 @@ export class CombatScene extends Phaser.Scene {
     if (spell.shape === 'self') {
       return { tier: spell.tier, label: spell.label, costText, enabled: true };
     }
-    const targets = this.validTargetsForSpell(unit, spell);
-    return targets.length
-      ? { tier: spell.tier, label: spell.label, costText, enabled: true }
-      : { tier: spell.tier, label: spell.label, costText, enabled: false, reason: 'no foe within reach' };
+    const rawTargets = this.validTargetsForSpell(unit, spell);
+    const targets = this.strikableTargets(rawTargets, action);
+    if (targets.length) return { tier: spell.tier, label: spell.label, costText, enabled: true };
+    // "shielded" (not a longer sentence): the flyout row's trailing-reason slot is right-
+    // anchored in a fixed ~196px row (hud.ts addRow) — a longer string here visibly collided
+    // with the label text, the exact kind of legibility bug crucible v1 #10 already covers
+    // for this same flyout. Short reasons ("no foe within reach", "won't multiply a burst")
+    // already established the width budget this stays inside.
+    return {
+      tier: spell.tier, label: spell.label, costText, enabled: false,
+      reason: rawTargets.length ? 'shielded' : 'no foe within reach',
+    };
   }
 
   /** Rank≥2 pressing an Art opens this instead of casting T1 directly. Phaser-drawn (container,
@@ -862,7 +894,7 @@ export class CombatScene extends Phaser.Scene {
 
   private renderFlyout(unit: UnitState, action: ActionKind): void {
     const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
-    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s));
+    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s, action));
     // §12.2 — the Overglow toggle is offered "when a damaging tier is highlighted"; this
     // flyout has no live hover-tracking, so the default/focus tier is the highest one
     // currently unlocked (rank-derived) — matches spec's own worked example (Rank 3 Kindling
@@ -870,7 +902,14 @@ export class CombatScene extends Phaser.Scene {
     // spells decision: burst spells can't multiply).
     const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
     const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
-    const overglow: OverglowRow | null = canOverglow(this.rank, this.glow)
+    // crucible v1 #9 — gate on the tier's OWN POST-COST remainder, not the wholesale total:
+    // castGatedSpell already rechecks canOverglow against glowSpend's post-cost state (line
+    // ~1123 below), so a wholesale-total gate here silently disagreed exactly when
+    // glow.pips === focusSpell.glowCost — the flyout armed a toggle castGatedSpell would then
+    // drop with no warning. Offering it only when a real pip survives paying the tier's own
+    // cost keeps the two checks (and the player's expectation) in sync.
+    const focusRemainder: GlowState = { pips: this.glow.pips - focusSpell.glowCost };
+    const overglow: OverglowRow | null = canOverglow(this.rank, focusRemainder)
       ? {
           enabled: focusSpell.shape !== 'burst1',
           on: this.overglowOn,
@@ -901,7 +940,11 @@ export class CombatScene extends Phaser.Scene {
     const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
     const focusTier = Math.min(this.rank, 3) as 1 | 2 | 3;
     const focusSpell = spells.find((s) => s.tier === focusTier) ?? spells[0];
-    if (!canOverglow(this.rank, this.glow) || focusSpell.shape === 'burst1') return; // greyed — no-op
+    // crucible v1 #9 — same post-cost-remainder gate as renderFlyout's Overglow row, so a
+    // toggle keyed off a stale (still-armed) row can never fire this once the row itself has
+    // been correctly regreyed.
+    const focusRemainder: GlowState = { pips: this.glow.pips - focusSpell.glowCost };
+    if (!canOverglow(this.rank, focusRemainder) || focusSpell.shape === 'burst1') return; // greyed — no-op
     this.overglowOn = !this.overglowOn;
     this.renderFlyout(unit, action);
   }
@@ -911,7 +954,7 @@ export class CombatScene extends Phaser.Scene {
     const action = this.flyoutAction;
     const spell = spellsForArt(SPELLBOOK[action as SpellId].art).find((s) => s.tier === tier);
     if (!spell) return;
-    const row = this.tierRow(unit, spell);
+    const row = this.tierRow(unit, spell, action);
     if (!row.enabled) return;
     const overglow = this.overglowOn;
     this.flyoutAction = null;
@@ -926,7 +969,11 @@ export class CombatScene extends Phaser.Scene {
       void this.runPlayerAction(unit, action, { c: unit.c, r: unit.r });
       return;
     }
-    const targets = this.validTargetsForSpell(unit, spell);
+    // crucible v1 #19 — the SAME shield filter tierRow's greying used to decide row.enabled;
+    // in a mixed fight (shielded boss + other valid targets) the row can be enabled while the
+    // boss's own tile must still never be offered as a clickable target for a non-Attestation
+    // spell (else Glow spends against it anyway, just via a different foe making the row live).
+    const targets = this.strikableTargets(this.validTargetsForSpell(unit, spell), action);
     this.enterTargeting(action, targets);
   }
 
@@ -970,7 +1017,12 @@ export class CombatScene extends Phaser.Scene {
       if (!mover.alive) return;
       for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
         if (!mover.alive) break;
-        const flank = isFlanked(striker, mover, striker.team, this.units);
+        // crucible v1 #6 — flank must be evaluated against the tile `mover` is leaving
+        // (`vacated`), not `mover`'s live c/r — both call sites (movePlayerTo, the enemy-move
+        // branch of runEnemyTurn) already mutate unit.c/r to the LANDING tile before calling
+        // this method, so `mover` here reads as already-arrived; passing `vacated` instead
+        // restores "flank geometry evaluated relative to the tile being left" (§4.1/§4.2).
+        const flank = isFlanked(striker, vacated, striker.team, this.units);
         const result = computeHit({
           base: 1, attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false,
@@ -1503,9 +1555,22 @@ export class CombatScene extends Phaser.Scene {
         this.returnToActionMenu(unit);
         return;
       }
+      const beforePips = this.glow.pips;
       this.glow = glowGain(this.glow, id === 'lantern-brand' ? 'lantern-brand' : 'wick-tallow');
+      const gained = this.glow.pips - beforePips;
       this.refreshParty();
-      this.hud.showBanner(`${item.name} — the wick brightens.`, P.lanternGold);
+      // crucible v1 #14 — mirror the sibling heal branch's own pattern below (dynamic banner
+      // text + a floating amount keyed off the ACTUAL, possibly cap-clamped gain) instead of a
+      // static template that reads as a full success even when the cap silently absorbed part
+      // of the item's value (e.g. +2 into a cap 1 pip away nets only +1).
+      this.floatText(unit, `+${gained}`, P.lanternGold);
+      const clamped = gained < item.effect.amount;
+      this.hud.showBanner(
+        clamped
+          ? `${item.name} — the wick brightens, but the lantern was nearly full (+${gained} glow).`
+          : `${item.name} — the wick brightens.`,
+        P.lanternGold,
+      );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
       this.time.delayedCall(560, () => this.endPlayerTurn());
       return;
@@ -2191,6 +2256,16 @@ export class CombatScene extends Phaser.Scene {
       const p = this.tileToScreen(u);
       v.container.setPosition(p.x, p.y).setDepth(10 + r);
     }
+    // e2e test setup (crucible v1 #6 verification): repositioning the unit whose move menu is
+    // ALREADY open would otherwise leave moveField/reachable stale (computed from the
+    // pre-teleport tile) — refresh them so a test can debugSetPos the active unit into a
+    // specific pincer/geometry and then click a real move destination relative to its new spot.
+    if (id === this.activeId && this.state === 'playerMove') {
+      this.moveField = computeMoveField(u, this.moveBudgetFor(u), this.layout.tiles, this.blockedFor(u.id));
+      this.reachable.clear();
+      for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
+      this.drawMoveRange();
+    }
   }
 
   /** Debug: current layout — tiles grid + brazier/mist coords (e2e-only; screenshots and the
@@ -2212,5 +2287,40 @@ export class CombatScene extends Phaser.Scene {
    *  "needs Rank 3", Overglow greyed for Lanternfall — without depending on click side effects). */
   flyoutDebug(): { rows: TierRow[]; overglow: OverglowRow | null } | null {
     return this.state === 'playerTier' ? { rows: this.lastFlyoutRows, overglow: this.lastFlyoutOverglow } : null;
+  }
+
+  /** Debug: the HUD banner's + tier flyout's current absolute bounding boxes (e2e-only —
+   *  crucible v1 #10: proves the "choose a tier" banner never visually overlaps the flyout). */
+  bannerBounds(): { top: number; bottom: number; left: number; right: number } {
+    return this.hud.bannerBounds();
+  }
+
+  flyoutBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    return this.hud.flyoutBounds();
+  }
+
+  /** Debug: the action menu's rendered button label/hint text + widths (e2e-only — crucible
+   *  v1 #11: proves the 8-button row never overflows a button, ellipsizing instead). */
+  actionMenuDebug(): Array<{ label: string; labelWidth: number; hint: string; hintWidth: number; buttonWidth: number }> {
+    return this.hud.actionMenuDebug();
+  }
+
+  /** Debug: the HUD banner's current text (e2e-only — crucible v1 #14/#19: proves the
+   *  banner's wording reflects the actual outcome rather than a static template). */
+  bannerText(): string {
+    return this.hud.bannerText();
+  }
+
+  /** Debug: the first status chip's true (center-anchored) top edge vs the HP bar's own
+   *  bottom edge, both in the unit's container-LOCAL coordinate space so they're directly
+   *  comparable (e2e-only — crucible v1 #23: proves the chip row no longer overlaps the bar).
+   *  null if the unit has no chip rendered (no status applied). */
+  chipHpGapDebug(id: string): { chipTopY: number; hpBarBottomY: number } | null {
+    const v = this.views.get(id);
+    if (!v || !v.chips.length) return null;
+    const chip = v.chips[0];
+    const chipTopY = chip.y - chip.displayHeight / 2; // Images/Text both default-origin at 0.5 vertically
+    const hpBarBottomY = Math.round(v.sprite.y - v.sprite.displayHeight - 6) + 5; // mirrors drawHpBar's own y + bar height
+    return { chipTopY, hpBarBottomY };
   }
 }

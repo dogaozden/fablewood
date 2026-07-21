@@ -12,6 +12,9 @@ import { GLOW_CAP } from './arts';
 
 const FONT = 'Georgia, serif';
 const W = 960;
+/** The banner's default screen-centre Y (its constructor position). Named so the tier-flyout
+ *  clearance logic (crucible v1 #10) and hideTierFlyout's restore always agree on one value. */
+const BANNER_Y = 446;
 
 export interface TurnChip {
   id: string;
@@ -65,13 +68,14 @@ export class CombatHud {
   private streakIcon: Phaser.GameObjects.Image | null = null;
   private rankText: Phaser.GameObjects.Text;
   private glowPips: Phaser.GameObjects.Graphics;
+  private lastMenuButtonWidth = 0;
   private lastGlowPips = -1;
   private flyout: Phaser.GameObjects.Container;
 
   constructor(scene: Phaser.Scene, roomName: string) {
     this.scene = scene;
     this.strip = scene.add.container(0, 0).setDepth(50);
-    this.banner = scene.add.container(W / 2, 446).setDepth(60).setAlpha(0);
+    this.banner = scene.add.container(W / 2, BANNER_Y).setDepth(60).setAlpha(0);
     this.toast = scene.add.container(W / 2, 210).setDepth(80).setAlpha(0);
     this.veil = scene.add.container(0, 0).setDepth(70).setVisible(false);
     this.menu = scene.add.container(0, 502).setDepth(55).setVisible(false);
@@ -167,6 +171,13 @@ export class CombatHud {
     this.scene.tweens.add({ targets: this.banner, alpha: 0, delay: 1900, duration: 400 });
   }
 
+  /** Debug: the banner's current raw text (e2e-only — crucible v1 #14/#19: proves the
+   *  banner's wording reflects the actual outcome rather than a static template regardless
+   *  of it, e.g. a cap-clamped Glow gain or an honest non-success message). */
+  bannerText(): string {
+    return (this.banner.getAt(1) as Phaser.GameObjects.Text | undefined)?.text ?? '';
+  }
+
   showToast(text: string, tint: number = P.lanternGold): void {
     this.toast.removeAll(true);
     const label = this.scene.add.text(0, 0, text, {
@@ -192,6 +203,7 @@ export class CombatHud {
     // Fit the row to the canvas: 6 actions keep the 148px button; the 7th (Smite) shrinks
     // them just enough to stay on-screen (≈129px) rather than overflow the 960px width.
     const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
+    this.lastMenuButtonWidth = bw;
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {
@@ -207,12 +219,19 @@ export class CombatHud {
       };
       draw(false);
       const icon = this.scene.add.image(-bw / 2 + 22, 0, ICON_KEYS[item.action]).setScale(0.9);
-      const label = this.scene.add.text(-bw / 2 + 40, -9, meta.label, {
+      // crucible v1 #11 — yesterday's Satchel-action commit made this an 8-button row (112px
+      // each, down from 129px at 7); 3 of 8 labels and all 8 hint lines overflowed with no
+      // visual indication of the cut. Clamp both to the button's own inner width, ellipsizing
+      // rather than letting later buttons' opaque backgrounds silently paint over the tail.
+      const availW = bw / 2 - 6 - (-bw / 2 + 40);
+      const label = this.scene.add.text(-bw / 2 + 40, -9, '', {
         fontFamily: FONT, fontSize: '13px', color: hex(item.enabled ? P.parchment : P.stoneGrey),
       });
-      const key = this.scene.add.text(-bw / 2 + 40, 5, `[${meta.hotkey}] ${item.reason ?? meta.blurb}`, {
+      fitText(label, meta.label, availW);
+      const key = this.scene.add.text(-bw / 2 + 40, 5, '', {
         fontFamily: FONT, fontSize: '9px', color: hex(item.enabled ? P.lanternGold : P.stoneGrey),
       });
+      fitText(key, `[${meta.hotkey}] ${item.reason ?? meta.blurb}`, availW);
       btn.add([bg, icon, label, key]);
       if (item.enabled) {
         btn.setInteractive(new Phaser.Geom.Rectangle(-bw / 2, -22, bw, 44), Phaser.Geom.Rectangle.Contains);
@@ -230,6 +249,18 @@ export class CombatHud {
 
   hideActionMenu(): void {
     this.menu.setVisible(false);
+  }
+
+  /** Debug: each action-menu button's rendered label/hint text + measured width vs the
+   *  button's own width (e2e-only — crucible v1 #11: proves neither ever visually overflows
+   *  its button, truncating with an ellipsis instead when the button is too narrow). */
+  actionMenuDebug(): Array<{ label: string; labelWidth: number; hint: string; hintWidth: number; buttonWidth: number }> {
+    return this.menu.list.map((btn) => {
+      const c = btn as Phaser.GameObjects.Container;
+      const label = c.getAt(2) as Phaser.GameObjects.Text;
+      const hint = c.getAt(3) as Phaser.GameObjects.Text;
+      return { label: label.text, labelWidth: label.width, hint: hint.text, hintWidth: hint.width, buttonWidth: this.lastMenuButtonWidth };
+    });
   }
 
   // ---- party panel ------------------------------------------------------
@@ -280,6 +311,13 @@ export class CombatHud {
    *  live hp rather than a stale snapshot, e.g. crucible #10's enemy-turn refresh gap). */
   partyPanelText(): string {
     return this.panelText.text;
+  }
+
+  /** Debug: the banner's current absolute bounding box (e2e-only — crucible v1 #10: proves it
+   *  clears the tier flyout's own box rather than overlapping it at a fixed screen position). */
+  bannerBounds(): { top: number; bottom: number; left: number; right: number } {
+    const b = this.banner.getBounds();
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
   }
 
   // ---- tier flyout (§12.2, Rank 2+) ---------------------------------------
@@ -359,10 +397,41 @@ export class CombatHud {
 
     this.flyout.setPosition(anchorX, 502);
     this.flyout.setVisible(true);
+
+    // crucible v1 #10 — the fixed screen-centre banner (446) overlapped this dynamically-sized,
+    // differently-anchored flyout on 4 of 5 Arts (only Kindling's button sits far enough left
+    // to escape it). Clear the flyout's own top edge instead of a hardcoded position — `top` is
+    // negative, so 502+top is the flyout's real top edge, and this only ever moves the banner
+    // UP from its default, never lower. Any banner shown while the flyout is open (the
+    // "choose a tier" text itself, or a status hover-line) inherits the cleared position.
+    const flyoutTopY = 502 + top;
+    this.banner.setY(Math.min(BANNER_Y, flyoutTopY - 26));
   }
 
   hideTierFlyout(): void {
     this.flyout.setVisible(false);
+    this.banner.setY(BANNER_Y);
+  }
+
+  /** Debug: the tier flyout's current absolute bounding box, if open (e2e-only — crucible v1
+   *  #10; Phaser-drawn, not DOM, so a spec can't read this via a locator). */
+  flyoutBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    if (!this.flyout.visible) return null;
+    const b = this.flyout.getBounds();
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
+  }
+}
+
+/** crucible v1 #11 — sets `label`'s text to `full`, trimming from the end with a trailing
+ *  ellipsis until it fits `maxWidth` (Phaser recomputes `.width` synchronously after
+ *  setText(), so this needs no render pass). A no-op when `full` already fits. */
+function fitText(label: Phaser.GameObjects.Text, full: string, maxWidth: number): void {
+  label.setText(full);
+  if (label.width <= maxWidth) return;
+  let trimmed = full;
+  while (trimmed.length > 1 && label.width > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+    label.setText(trimmed + '…');
   }
 }
 
