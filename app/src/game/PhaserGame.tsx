@@ -29,6 +29,33 @@ export function PhaserGame() {
 
     window.__FABLEWOOD_READY = false;
 
+    // V1-5 fix: Phaser's VisibilityHandler (node_modules/phaser/src/core/
+    // VisibilityHandler.js:65) unconditionally does a bare
+    // `document.addEventListener('visibilitychange', onChange, false)` on every `new
+    // Phaser.Game()`, keeps that `onChange` closure nowhere reachable, and
+    // `game.destroy()` never removes it (confirmed: Game.js's runDestroy has no
+    // matching removeEventListener) — an upstream gap, not something fixable via
+    // config. Left alone, every mount/unmount cycle of this component (e.g. a shell tab
+    // switch away from and back to "Realms") leaks one more document-level listener
+    // forever, each pinning its destroyed Game's whole object graph against GC. Since
+    // Phaser stores no reference to it, the only way to remove the RIGHT listener is to
+    // intercept the one addEventListener call that installs it and capture it here.
+    // (Confirmed no other code, in this app or in Phaser itself, registers a document
+    // 'visibilitychange' listener, so this narrow interception can't grab the wrong one.)
+    let visibilityListener: EventListenerOrEventListenerObject | null = null;
+    const nativeAddEventListener = document.addEventListener.bind(document);
+    document.addEventListener = function (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ): void {
+      if (type === 'visibilitychange' && !visibilityListener) {
+        visibilityListener = listener;
+        document.addEventListener = nativeAddEventListener; // one-shot: stop intercepting
+      }
+      nativeAddEventListener(type, listener, options);
+    } as typeof document.addEventListener;
+
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent,
@@ -72,6 +99,13 @@ export function PhaserGame() {
       game.destroy(true);
       window.__FABLEWOOD_READY = false;
       window.__FABLEWOOD_GAME = undefined;
+      // Undo the interception above (defensive no-op if VisibilityHandler's call
+      // already restored it) and remove the exact listener Phaser leaked, so
+      // remounting this component doesn't grow document's listener count unbounded.
+      document.addEventListener = nativeAddEventListener;
+      if (visibilityListener) {
+        document.removeEventListener('visibilitychange', visibilityListener);
+      }
     };
   }, []);
 
