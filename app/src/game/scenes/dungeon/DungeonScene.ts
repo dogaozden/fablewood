@@ -33,6 +33,7 @@ import {
 } from './roomFlow';
 import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText } from './specResolve';
 import { VaultView, type NodeHandlers } from './VaultView';
+import { FIXTURE_PACK_ID } from '../../combat/fixtures';
 import devSpecJson from './__fixtures__/dev.dungeon.json';
 import devFactsJson from './__fixtures__/dev.facts.json';
 
@@ -79,8 +80,19 @@ export class DungeonScene extends Phaser.Scene {
     const simParam = params.get('sim');
     this.sim = simParam !== null ? simParam === '1' : this.dev; // sim closes the loop on the packless dev path
     this.auto = params.get('auto');
-    this.packId =
-      data?.packId ?? (this.registry.get(PACKID_KEY) as string | undefined) ?? null;
+    // crucible V1-16 — dev=1 always resolves rooms/boss content from the packless
+    // fixture (loadSpecAndFacts below), regardless of any real packId handed in
+    // (HamletScene's chosen province, or one left in the registry from an earlier
+    // real session). Letting that real id survive here used to form a fixture/real
+    // hybrid: a fixture-only branchEncounterId requested against a real pack that
+    // never defines it, silently substituting an unrelated real encounter mid-fight
+    // (encounters/engine.ts's pick() candidates[0] fallback). Force the SAME fixture
+    // marker CombatScene's own dev-boss reconciler already recognizes (crucible #11,
+    // FIXTURE_PACK_ID) instead — never a stale real id — so doCombat/runGate below
+    // always launch an all-fixture or all-real object, never a mix.
+    this.packId = this.dev
+      ? null
+      : (data?.packId ?? (this.registry.get(PACKID_KEY) as string | undefined) ?? null);
     this.busy = false;
     this.didReady = false;
     this.facts = new Map();
@@ -258,8 +270,10 @@ export class DungeonScene extends Phaser.Scene {
     );
     const name = this.spec.rooms[idx]?.name ?? 'the descent';
     void this.view.showResumeChoice(name).then((choice) => {
+      // crucible V1-20 — 'continue' used to only focusNode() (a cosmetic pulse tween)
+      // instead of actually entering the room, leaving scene/progress unchanged.
       if (choice === 'camp') void this.onCamp();
-      else this.view.focusNode(idx);
+      else void this.enterRoom(idx);
     });
   }
 
@@ -267,22 +281,25 @@ export class DungeonScene extends Phaser.Scene {
 
   private async enterRoom(index: number, opts: { mode?: 'card' | 'drive' } = {}): Promise<void> {
     if (this.busy) return;
-    this.busy = true;
 
     // crucible #7 — re-entering a room (and thus combat) at 0 pooled HP used to skip the
     // turn engine straight into an unwinnable instant defeat (checkEnd sees no living party
-    // unit before the player can ever act). The dungeon already treats 0 HP as "the Fade
-    // closes in" everywhere else it can happen mid-crawl (runGate's HP-exhausted branch,
-    // resolveCombat's retreat branch below) — refusing to launch at all is the least-
-    // surprising fit for that established rule, rather than inventing a never-seen
-    // "clamp to a minimum viable spawn" behavior inside combat.
+    // unit before the player can ever act), so combat must never launch at 0 HP.
+    // crucible V1-1 — bouncing the player all the way to hamlet here (as runGate's and
+    // resolveCombat's retreat branches correctly do when the Fade wins mid-crawl) used to be
+    // a dead-end signpost-wise instead: hamlet shows no HP indicator, so a player who wandered
+    // back in at 0 HP saw nothing wrong, and the vaults' own halo affordance points straight
+    // back at this exact "wrong" node. Route through onCamp()'s own heal-and-toast in place
+    // instead (it owns `busy` for the card it shows) — the wrong click becomes the fix.
     if (services.save.get().hp <= 0) {
-      this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
-      await this.wait(1000);
-      this.scene.start('hamlet', { seed: this.seed });
+      this.view.toast("The Fade recoils at the threshold — it carries you back to the camp's hearth.", 'warn');
+      // dev auto-drivers (?auto=) must never block on a click that will never come — mirrors
+      // runAuto()'s own 'camp' case, which passes persist:true for the same reason.
+      await this.onCamp({ persist: !!this.auto });
       return;
     }
 
+    this.busy = true;
     const room = this.spec.rooms[index];
     const facts = this.teachingFacts(room);
 
@@ -323,7 +340,7 @@ export class DungeonScene extends Phaser.Scene {
           this.registry.set(PENDING_KEY, { roomId: room.id, outcome } as Pending);
         });
         const launch: CombatLaunch = {
-          packId: this.packId ?? 'dev',
+          packId: this.packId ?? FIXTURE_PACK_ID,
           room,
           seed: this.seed,
           returnScene: 'vaults',
@@ -347,12 +364,23 @@ export class DungeonScene extends Phaser.Scene {
     await this.applyHp(-outcome.hpLost);
 
     if (outcome.outcome === 'retreat') {
+      // crucible V1-3 — persist scene:'hamlet' BEFORE starting the scene (bossVictory's
+      // pattern below), so a reload in the ~1s toast window resumes hamlet, matching what
+      // the player actually sees, instead of reopening the resume-choice dialog in vaults.
+      await services.save.save({ scene: 'hamlet' });
       // progress was persisted before combat — only the loot roll is forfeit (never story)
       this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
       await this.wait(1000);
       this.scene.start('hamlet', { seed: this.seed });
       return { transitioned: true };
     }
+
+    // crucible V1-12 — credit the combat win (mark + persist) immediately, before any
+    // gate runs, so a gate wipe (HP exhausted mid-drill, below) can never re-litigate a
+    // fight already won (Fable_SPEC.md:31 — wipes cost the loot roll, never story
+    // progress). Idempotent, so bossVictory's own final save just carries this forward.
+    this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
+    await services.save.save({ dungeon: this.progress });
 
     // gate door must open before the node can clear
     if (room.gate) {
@@ -361,12 +389,11 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     if (room.boss) {
-      await this.bossVictory(room);
+      await this.bossVictory();
       return { transitioned: true };
     }
 
-    // normal / gate room cleared → mark, persist, unlock next, loot (inventory-handoff §4)
-    this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
+    // normal / gate room cleared → bump the streak, unlock next, loot (inventory-handoff §4)
     // crucible #5 — the hearth streak used to bump independently inside CombatScene the
     // instant victory was declared (persisted well before this resume-only settlement could
     // ever run), so a reload in that gap kept the streak but lost this room's progress/loot.
@@ -405,7 +432,7 @@ export class DungeonScene extends Phaser.Scene {
         context: 'drill',
         encounterId: gate.encounterId,
         kinds: ['free_recall'],
-        packId: this.packId ?? 'dev',
+        packId: this.packId ?? FIXTURE_PACK_ID,
         seed: this.seed + attempt,
       });
       // Record the gate drill to SRS on BOTH paths, before branching — a failed ward
@@ -420,6 +447,10 @@ export class DungeonScene extends Phaser.Scene {
       this.refreshStatus();
       this.view.toast(`The door holds fast. (-${GATE_FAIL_HP} HP)`, 'warn');
       if (services.save.get().hp <= 0) {
+        // crucible V1-3 — persist scene:'hamlet' before scene.start (bossVictory's
+        // pattern), so a reload in the ~1s toast window resumes hamlet, not a
+        // resume-choice dialog back in vaults.
+        await services.save.save({ scene: 'hamlet' });
         this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
         await this.wait(1000);
         this.scene.start('hamlet', { seed: this.seed });
@@ -431,8 +462,8 @@ export class DungeonScene extends Phaser.Scene {
     return { transitioned: false };
   }
 
-  private async bossVictory(room: DungeonRoom): Promise<void> {
-    this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
+  private async bossVictory(): Promise<void> {
+    // already marked + persisted by resolveCombat right after combat victory (crucible V1-12)
     const streak = services.save.get().streak + 1;
     const reward = (this.pack ? rewardText(bossQuest(this.pack)) : null) ?? DEV_REWARD;
 
