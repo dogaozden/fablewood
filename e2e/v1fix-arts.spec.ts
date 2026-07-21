@@ -76,6 +76,16 @@ function rectsOverlap(a: Rect, b: Rect): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
+/** Debug: the HUD banner's current text (e2e-only — crucible v1 #14/#19: proves the banner's
+ *  wording reflects the actual outcome rather than a static template regardless of it). */
+async function bannerText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { bannerText?(): string } | undefined;
+    return s?.bannerText?.() ?? '';
+  });
+}
+
 /** Poll until the Keeper's own turn opens for manual control (no ?demo, so nothing else drives it). */
 async function waitForKeeperTurn(page: Page, timeout = 20_000): Promise<Snap> {
   const start = Date.now();
@@ -182,4 +192,61 @@ test('crucible v1 #10: the tier-choose banner never overlaps the flyout (worst c
   expect(flyout2).not.toBeNull();
   await page.screenshot({ path: `${EV}/v1fix10-banner-flyout-binding-rank3.png` });
   expect(rectsOverlap(banner2, flyout2!), `banner ${JSON.stringify(banner2)} must not overlap flyout ${JSON.stringify(flyout2)}`).toBe(false);
+});
+
+// ---------------------------------------------------------------------------------------
+// crucible v1 #14: Lantern-Brand (+2 Glow) at exactly 1 pip below the 3-cap clamps to +1 and
+// fully consumes the item, but the banner used to read the same static "the wick brightens"
+// regardless — no disclosure that only half the item's value landed. The sibling heal branch
+// (combat.spec.ts's own Satchel test) already discloses a clamped amount dynamically; this
+// mirrors that pattern for Glow.
+// ---------------------------------------------------------------------------------------
+test('crucible v1 #14: Lantern-Brand discloses a CLAMPED Glow gain instead of a static full-success banner', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.request.put('/api/state/save.json', { data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });
+  await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 20, stacks: { 'lantern-brand': 2 } } });
+
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  const opened = await waitForKeeperTurn(page);
+  expect(opened?.state).toBe('playerMove');
+  await debugSetGlow(page, 2); // 1 pip shy of the 3-cap — Lantern-Brand's nominal +2 would overshoot it
+
+  await page.keyboard.press('q'); // Satchel
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('.inv-row').getByRole('button', { name: 'Use' }).first().click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+  await page.waitForTimeout(250); // let useSatchelItem's glow branch land + the banner render
+
+  const after = await snap(page);
+  expect(after?.glow, 'clamped at the 3-pip cap, not the nominal +2 (which would read 4)').toBe(3);
+
+  const banner = await bannerText(page);
+  await page.screenshot({ path: `${EV}/v1fix14-lantern-brand-clamped.png` });
+  expect(banner, `banner "${banner}" must disclose the actual clamped amount (+1), not a blanket success line`).toContain('+1');
+});
+
+test('crucible v1 #14 control: Lantern-Brand at ample headroom still reads as an undisclosed-amount-free full success', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.request.put('/api/state/save.json', { data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });
+  await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 20, stacks: { 'lantern-brand': 1 } } });
+
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  const opened = await waitForKeeperTurn(page);
+  expect(opened?.state).toBe('playerMove');
+  expect(opened?.glow, 'Glow starts at 0 — full headroom for a +2 gain').toBe(0);
+
+  await page.keyboard.press('q');
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  await page.locator('.inv-row').getByRole('button', { name: 'Use' }).first().click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+  await page.waitForTimeout(250);
+
+  const after = await snap(page);
+  expect(after?.glow, 'the full nominal +2 landed, uncapped').toBe(2);
+  const banner = await bannerText(page);
+  expect(banner, 'a genuine full gain keeps the plain, undisclosed-amount banner').toBe('Lantern-Brand — the wick brightens.');
 });

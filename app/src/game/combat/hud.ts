@@ -171,6 +171,13 @@ export class CombatHud {
     this.scene.tweens.add({ targets: this.banner, alpha: 0, delay: 1900, duration: 400 });
   }
 
+  /** Debug: the banner's current raw text (e2e-only — crucible v1 #14/#19: proves the
+   *  banner's wording reflects the actual outcome rather than a static template regardless
+   *  of it, e.g. a cap-clamped Glow gain or an honest non-success message). */
+  bannerText(): string {
+    return (this.banner.getAt(1) as Phaser.GameObjects.Text | undefined)?.text ?? '';
+  }
+
   showToast(text: string, tint: number = P.lanternGold): void {
     this.toast.removeAll(true);
     const label = this.scene.add.text(0, 0, text, {

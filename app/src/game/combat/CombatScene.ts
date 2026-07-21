@@ -1525,9 +1525,22 @@ export class CombatScene extends Phaser.Scene {
         this.returnToActionMenu(unit);
         return;
       }
+      const beforePips = this.glow.pips;
       this.glow = glowGain(this.glow, id === 'lantern-brand' ? 'lantern-brand' : 'wick-tallow');
+      const gained = this.glow.pips - beforePips;
       this.refreshParty();
-      this.hud.showBanner(`${item.name} — the wick brightens.`, P.lanternGold);
+      // crucible v1 #14 — mirror the sibling heal branch's own pattern below (dynamic banner
+      // text + a floating amount keyed off the ACTUAL, possibly cap-clamped gain) instead of a
+      // static template that reads as a full success even when the cap silently absorbed part
+      // of the item's value (e.g. +2 into a cap 1 pip away nets only +1).
+      this.floatText(unit, `+${gained}`, P.lanternGold);
+      const clamped = gained < item.effect.amount;
+      this.hud.showBanner(
+        clamped
+          ? `${item.name} — the wick brightens, but the lantern was nearly full (+${gained} glow).`
+          : `${item.name} — the wick brightens.`,
+        P.lanternGold,
+      );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
       this.time.delayedCall(560, () => this.endPlayerTurn());
       return;
@@ -2260,5 +2273,11 @@ export class CombatScene extends Phaser.Scene {
    *  v1 #11: proves the 8-button row never overflows a button, ellipsizing instead). */
   actionMenuDebug(): Array<{ label: string; labelWidth: number; hint: string; hintWidth: number; buttonWidth: number }> {
     return this.hud.actionMenuDebug();
+  }
+
+  /** Debug: the HUD banner's current text (e2e-only — crucible v1 #14/#19: proves the
+   *  banner's wording reflects the actual outcome rather than a static template). */
+  bannerText(): string {
+    return this.hud.bannerText();
   }
 }
