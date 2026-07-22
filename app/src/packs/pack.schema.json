@@ -68,7 +68,9 @@
         "source_version": { "type": "string", "minLength": 1 },
         "tags": { "type": "array", "items": { "type": "string" } },
         "difficulty": { "type": "integer", "minimum": 1, "maximum": 5 },
-        "prereqs": { "type": "array", "items": { "type": "string" } }
+        "prereqs": { "type": "array", "items": { "type": "string" } },
+        "supersedes": { "type": "string" },
+        "superseded_by": { "type": "string" }
       }
     },
     "source_ref": {

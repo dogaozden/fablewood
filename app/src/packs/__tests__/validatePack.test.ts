@@ -46,6 +46,22 @@ describe('validatePack', () => {
     expect(validatePack(nonInt).valid).toBe(false);
   });
 
+  it('accepts a fact carrying supersedes/superseded_by (additive, optional — vision §3b/§9.3)', () => {
+    const pack = clone();
+    pack.facts[0].superseded_by = 'mf-002';
+    pack.facts[1].supersedes = 'mf-001';
+    const result = validatePack(pack);
+    expect(result.errors).toEqual([]);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects a non-string supersedes value', () => {
+    const pack = clone();
+    pack.facts[0].supersedes = 42;
+    const result = validatePack(pack);
+    expect(result.valid).toBe(false);
+  });
+
   it('enforces encounter kind requirements (mcq needs an answer)', () => {
     const pack = clone();
     delete pack.encounters[0].answer; // me-001 is mcq

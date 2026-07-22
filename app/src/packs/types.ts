@@ -44,6 +44,26 @@ export interface Fact {
   tags?: string[];
   difficulty: number; // 1..5
   prereqs?: string[];
+  /**
+   * Supersession protocol (docs/design/knowledge-platform-vision.md §3b, §9.3):
+   * id of the single old fact this fact replaces (knowledge moved — a law
+   * amended, a number changed, advice aged out). v1 is one-for-one; folding
+   * several old facts into one new fact (one-to-many consolidation) is a
+   * flagged future extension, not built here. Schema + validator layer only —
+   * fact ids are never reused or deleted, and the engine treats a superseded
+   * fact exactly as it does today until the game-event (amended-Ledger
+   * re-teach) design lands separately.
+   */
+  supersedes?: string;
+  /**
+   * Supersession protocol (docs/design/knowledge-platform-vision.md §3b, §9.3):
+   * stored back-pointer to the fact that supersedes this one. Kept explicit in
+   * pack.json (not derived at read time) for human readability; the validator
+   * enforces perfect bidirectional consistency with the successor's
+   * `supersedes`. Purely additive metadata — no selection/SRS/scene logic
+   * reads this field yet.
+   */
+  superseded_by?: string;
 }
 
 export interface EncounterBranch {
