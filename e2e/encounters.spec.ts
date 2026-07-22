@@ -1,9 +1,77 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { openOverlay } from './helpers';
 
 // Drives the encounter overlay + Laconic Clerk judge (JUDGE_MODE=stub) through the ?overlay=
 // dev harness — all five kinds + teaching, correct and wrong answers, asserting the quality→
 // verdict mapping the combat layer relies on. Deterministic (fixture data + seed 7 + stub judge).
+
+interface VerdictRevealProbe {
+  beforeScrollTop: number;
+  revealScrollTop: number;
+  panelScrollHeight: number;
+  panelClientHeight: number;
+  verdictTop: number;
+  verdictBottom: number;
+  viewportHeight: number;
+}
+
+/**
+ * Observe the reveal mutation itself. An end-state-only visibility check missed the original
+ * regression because native button focus had already snapped the panel to its final position.
+ */
+async function armVerdictRevealProbe(page: Page, verdictSelector: string): Promise<void> {
+  await page.evaluate((selector) => {
+    const panel = document.querySelector<HTMLElement>('.fw-panel');
+    if (!panel) throw new Error('encounter panel missing');
+    delete panel.dataset.verdictRevealProbe;
+
+    let beforeScrollTop = panel.scrollTop;
+    panel.addEventListener('click', () => { beforeScrollTop = panel.scrollTop; }, {
+      capture: true,
+      once: true,
+    });
+
+    const observer = new MutationObserver(() => {
+      const verdict = panel.querySelector<HTMLElement>(selector);
+      if (!verdict) return;
+      const rect = verdict.getBoundingClientRect();
+      const result: VerdictRevealProbe = {
+        beforeScrollTop,
+        revealScrollTop: panel.scrollTop,
+        panelScrollHeight: panel.scrollHeight,
+        panelClientHeight: panel.clientHeight,
+        verdictTop: rect.top,
+        verdictBottom: rect.bottom,
+        viewportHeight: window.innerHeight,
+      };
+      observer.disconnect();
+      panel.dataset.verdictRevealProbe = JSON.stringify(result);
+    });
+    observer.observe(panel, { childList: true, subtree: true });
+  }, verdictSelector);
+}
+
+async function expectStableVerdictReveal(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => document.querySelector<HTMLElement>('.fw-panel')?.dataset.verdictRevealProbe,
+  );
+  const reveal = await page.locator('.fw-panel').evaluate((panel) => (
+    JSON.parse((panel as HTMLElement).dataset.verdictRevealProbe ?? '') as VerdictRevealProbe
+  ));
+
+  expect(
+    reveal.panelScrollHeight,
+    'the fixture must overflow so this exercises the focus-scroll regression',
+  ).toBeGreaterThan(reveal.panelClientHeight);
+  expect(
+    Math.abs(reveal.revealScrollTop - reveal.beforeScrollTop),
+    'the panel must not snap when the verdict first appears',
+  ).toBeLessThanOrEqual(3);
+  expect(reveal.verdictTop, 'the verdict top is inside the viewport at reveal').toBeGreaterThanOrEqual(0);
+  expect(reveal.verdictBottom, 'the full verdict is inside the viewport at reveal').toBeLessThanOrEqual(
+    reveal.viewportHeight,
+  );
+}
 
 test.describe('encounter overlay — all kinds', () => {
   test('mcq (Smite): correct answer → pass verdict', async ({ page }) => {
@@ -17,10 +85,12 @@ test.describe('encounter overlay — all kinds', () => {
   test('mcq (Smite): wrong answer → fail verdict + teach-on-miss reveals the answer', async ({ page }) => {
     await openOverlay(page, 'mcq');
     await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+    await armVerdictRevealProbe(page, '.fw-verdict.fail');
     await page.locator('.fw-opt', { hasText: 'It never glows' }).click();
     await expect(page.locator('.fw-verdict.fail')).toBeVisible();
     // teach-on-miss shows the correct answer + the fact statement
     await expect(page.locator('.fw-teach')).toContainText('The third week');
+    await expectStableVerdictReveal(page);
   });
 
   test('free_recall (Cast From Memory): good answer → stub judge pass', async ({ page }) => {
@@ -78,6 +148,26 @@ test.describe('encounter overlay — all kinds', () => {
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
   });
 
+  test('match (Binding Weave): miss reveals a stable verdict card', async ({ page }) => {
+    // At this height, the pre-answer weave fits but its verdict + teach reveal overflows.
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await openOverlay(page, 'match');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+    const pair = async (left: string, right: string) => {
+      await page.locator('.fw-chip', { hasText: left }).click();
+      await page.locator('.fw-chip', { hasText: right }).click();
+    };
+    await pair('Lantern-moss', 'song');
+    await pair('Whispermoss', 'balm');
+    await pair('Dampmoss', 'glow');
+
+    await armVerdictRevealProbe(page, '.fw-verdict.fail');
+    await page.getByRole('button', { name: 'Seal the Weave' }).click();
+    await expect(page.locator('.fw-verdict.fail')).toBeVisible();
+    await expect(page.locator('.fw-teach')).toContainText('The true binding');
+    await expectStableVerdictReveal(page);
+  });
+
   test('order (Ritual Sequence): sorted correctly → pass verdict', async ({ page }) => {
     await openOverlay(page, 'order');
     const target = ['Wait for the frost-bell', 'Gather at first light', 'Dry in lantern-glow', 'Bind with reed'];
@@ -94,6 +184,19 @@ test.describe('encounter overlay — all kinds', () => {
     await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.getByRole('button', { name: 'Seal the Sequence' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
+  });
+
+  test('order (Ritual Sequence): miss reveals a stable verdict card', async ({ page }) => {
+    // At this height, the pre-answer sequence fits but its verdict + teach reveal overflows.
+    await page.setViewportSize({ width: 1280, height: 520 });
+    await openOverlay(page, 'order');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+    // reskin() guarantees the initial sequence is not already solved.
+    await armVerdictRevealProbe(page, '.fw-verdict:not(.pass)');
+    await page.getByRole('button', { name: 'Seal the Sequence' }).click();
+    await expect(page.locator('.fw-verdict:not(.pass)')).toBeVisible();
+    await expect(page.locator('.fw-teach')).toContainText('The proper order');
+    await expectStableVerdictReveal(page);
   });
 
   // Crucible finding #12 (sev2, input-mangler): the panel is a tabIndex=-1 "programmatic
