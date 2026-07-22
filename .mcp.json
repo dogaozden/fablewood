@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fablewood-ledger": {
+      "command": "node",
+      "args": ["ledger/server.mjs"]
+    }
+  }
+}
