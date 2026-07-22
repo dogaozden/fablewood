@@ -311,18 +311,21 @@
   border: 1px solid rgba(0, 0, 0, 0.35);
   color: var(--bark-shadow);
 }
-/* box strength ramp: fragile ember → welded green */
+/* box strength ramp: fragile ember → welded green → mastered gold (0-8, lifetime ladder) */
 .box0 { background: #6b6158; color: var(--parchment); }
 .box1 { background: var(--ember); }
 .box2 { background: var(--amber); }
 .box3 { background: var(--lantern); }
 .box4 { background: var(--leaf-hi); }
 .box5 { background: var(--moss); color: var(--parchment); }
+.box6 { background: #5f8f5a; color: var(--parchment); }
+.box7 { background: #3c6e52; color: var(--parchment); }
+.box8 { background: #d9b64c; color: var(--bark-shadow); }
 
 /* -------------------------------------------------------- Dashboard additions */
 
 /* Per-domain mastery: one stacked bar per installed pack, segments colored by the
-   same box0-box5 ramp as the Library's badges (one visual language across panes). */
+   same box0-box8 ramp as the Library's badges (one visual language across panes). */
 .dash-domain {
   margin-bottom: 0.9rem;
 }
