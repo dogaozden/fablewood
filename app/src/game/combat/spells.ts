@@ -107,6 +107,9 @@ export interface ResolveSpellOpts {
   overglow?: boolean;
   /** §5.5 the weld edge — already decided (capture-before-record) by the caller. */
   weld?: boolean;
+  /** difficulty-rewards.md §4 the rider — already decided (quality===1 gate, packReady check)
+   *  by the caller. */
+  rider?: boolean;
   /** Mira's mastery bonus, folded into a landed primary hit only (never a whiff, never aoe). */
   miraBonus?: number;
   /** targeting the boss — gates Verbatim Decree's vsBossHits and (via the adapter) extraShield. */
@@ -402,6 +405,7 @@ function primaryAmount(base: number, opts: ResolveSpellOpts): number {
     flank: false,
     overglow: !!opts.overglow,
     weld: !!opts.weld,
+    rider: !!opts.rider,
   });
   return hpDamage + (opts.miraBonus ?? 0);
 }

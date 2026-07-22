@@ -7,6 +7,7 @@
 
 export type Quality = 0 | 0.5 | 1;
 export type EncounterKind = 'mcq' | 'free_recall' | 'scenario_branch' | 'match' | 'order';
+export type EncounterDifficulty = 1 | 2 | 3;
 
 export interface EncounterRequest {
   /** where this fires from — affects presentation + kind defaults */
@@ -19,6 +20,8 @@ export interface EncounterRequest {
   encounterId?: string;
   /** spell title for the overlay eyebrow ("✦ Cinder-Rebuke · Multiple Choice") — T2+ casts only */
   flair?: string;
+  /** casting spell's tier — biases pick()'s difficulty filter. Absent (Strike/Satchel) = no filtering. */
+  spellTier?: 1 | 2 | 3;
   packId: string;
   seed: number;
 }
@@ -32,6 +35,11 @@ export interface EncounterResult {
   detail?: string;
   /** scenario_branch only: machine-readable branch outcome tag (e.g. 'good'|'bad'|'neutral') */
   branchTag?: string;
+  /**
+   * Drawn encounter's resolved difficulty. Optional only for the empty-archive edge case;
+   * callers read `result.difficulty ?? 2` defensively.
+   */
+  difficulty?: EncounterDifficulty;
 }
 
 /** Opens the encounter overlay (DOM over canvas), resolves when answered. Combat pauses meanwhile. */

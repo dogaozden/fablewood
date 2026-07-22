@@ -143,3 +143,18 @@ export function seenDueIds(dueQueueResult: string[], boxOf: (id: string) => numb
 export function weldBonus(allFactBoxes: number[]): 0 | 1 {
   return allFactBoxes.length > 0 && allFactBoxes.every((b) => b >= 4) ? 1 : 0;
 }
+
+/**
+ * difficulty-rewards.md §4's reward rider: q1 on a draw harder than the caster's own spell
+ * tier grants +1 primary damage. `packReady` (`PackMeta.difficultyClassified`) hard-gates the
+ * mechanic before any pack is classified, so it currently returns 0 in real play by design;
+ * P1 ships dormant math, with live wiring deferred. Tier 3 can never receive a rider because
+ * drawnDifficulty > 3 is impossible, which is intentional rather than a bug.
+ */
+export function riderBonus(
+  spellTier: 1 | 2 | 3,
+  drawnDifficulty: 1 | 2 | 3,
+  packReady: boolean,
+): 0 | 1 {
+  return packReady && drawnDifficulty > spellTier ? 1 : 0;
+}

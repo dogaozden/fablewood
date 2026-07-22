@@ -158,6 +158,9 @@ export interface ComputeHitInput {
   overglow: boolean;
   /** §5.5 — the weld edge; 0-plumbed in Phase 1 (always false until rank/weld exist) */
   weld: boolean;
+  /** difficulty-rewards.md §4 — the reward rider; 0-plumbed until a pack's
+   *  difficultyClassified flag flips true (a later phase, not this one). */
+  rider: boolean;
 }
 
 export interface ComputeHitResult {
@@ -171,19 +174,20 @@ export interface ComputeHitResult {
 
 /**
  * The ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack:
- *   base + emboldened(+1) − weakened(−1) + flank(+1) + overglow(+1) + weld(+1)
+ *   base + emboldened(+1) − weakened(−1) + flank(+1) + overglow(+1) + weld(+1) + rider(+1)
  *   → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
  * Inked amplifies only a real (nonzero, post-floor) hit — a 0 stays 0.
  */
 export function computeHit(input: ComputeHitInput): ComputeHitResult {
-  const { base, attackerStatuses, targetStatuses, flank, overglow, weld } = input;
+  const { base, attackerStatuses, targetStatuses, flank, overglow, weld, rider } = input;
 
   let dmg = base
     + statusMagnitude(attackerStatuses, 'emboldened')
     - statusMagnitude(attackerStatuses, 'weakened')
     + (flank ? 1 : 0)
     + (overglow ? 1 : 0)
-    + (weld ? 1 : 0);
+    + (weld ? 1 : 0)
+    + (rider ? 1 : 0);
   dmg = Math.max(0, dmg);
   if (dmg > 0) dmg += statusMagnitude(targetStatuses, 'inked');
 
