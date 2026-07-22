@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readState, writeState } from '../bridge/plugin';
 import type { Bridge } from './store';
 import { SaveStore, SettingsStore, SrsStore } from './store';
 
@@ -173,10 +177,10 @@ describe('SrsStore — serialized writes (no lost updates)', () => {
     const proms = [0, 1, 2, 3, 4].map((i) => s.record('f', 1, `enc-${i}`, NOW));
     await Promise.all(proms);
 
-    // unseen →2→3→4→5→5 : five corrects land at box 5, all five in history
-    expect(s.boxOf('f')).toBe(5);
+    // unseen →2→3→4→5→6 : five corrects land at box 6, all five in history
+    expect(s.boxOf('f')).toBe(6);
     const disk = b.raw('srs.json') as any;
-    expect(disk.facts.f.box).toBe(5);
+    expect(disk.facts.f.box).toBe(6);
     expect(disk.facts.f.history).toHaveLength(5);
   });
 
@@ -363,5 +367,54 @@ describe('interval sanity through the store', () => {
     await s.record('f', 1, 'e', NOW);
     const disk = b.raw('srs.json') as any;
     expect(disk.facts.f.next_due).toBe(NOW + 3 * DAY); // box 2 interval
+  });
+});
+
+describe('SrsStore — real JSON persistence above box 5', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fw-srs-store-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('round-trips boxes 6, 7, and 8 without changing the SrsState shape', async () => {
+    const bridge: Bridge = {
+      async getState<T = unknown>(name: string): Promise<T | null> {
+        return (await readState(tmp, name)) as T | null;
+      },
+      async putState(name: string, data: unknown): Promise<boolean> {
+        await writeState(tmp, name, data);
+        return true;
+      },
+    };
+    const s = new SrsStore(bridge);
+    await s.ready();
+
+    const targets = [
+      { id: 'number-fact', factType: 'number', answers: 5, expectedBox: 6 },
+      { id: 'rule-fact', factType: 'rule', answers: 6, expectedBox: 7 },
+      { id: 'concept-fact', factType: 'concept', answers: 7, expectedBox: 8 },
+    ] as const;
+    for (const target of targets) {
+      for (let i = 0; i < target.answers; i++) {
+        await s.record(target.id, 1, `${target.id}-${i}`, NOW + i * DAY, target.factType);
+      }
+    }
+
+    const raw = JSON.parse(fs.readFileSync(path.join(tmp, 'srs.json'), 'utf8')) as {
+      version: number;
+      facts: Record<string, { box: number }>;
+    };
+    expect(Object.keys(raw).sort()).toEqual(['facts', 'version']);
+    expect(raw.version).toBe(1);
+    expect(targets.map(({ id }) => raw.facts[id].box)).toEqual([6, 7, 8]);
+    for (const target of targets) {
+      expect(raw.facts[target.id].box).toBe(target.expectedBox);
+      expect(raw.facts[target.id].box).toBeGreaterThan(5);
+    }
   });
 });

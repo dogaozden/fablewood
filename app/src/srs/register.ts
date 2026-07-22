@@ -42,8 +42,8 @@ services.srs = {
     const meta = factMetaByPack.get(packId) ?? new Map<string, FactMeta>();
     return dueQueue(srsStore.snapshot(), factIds, meta, now);
   },
-  record(factId, quality, encounterId) {
-    return srsStore.record(factId, quality, encounterId);
+  record(factId, quality, encounterId, factType) {
+    return srsStore.record(factId, quality, encounterId, Date.now(), factType);
   },
   boxOf(factId) {
     return srsStore.boxOf(factId);

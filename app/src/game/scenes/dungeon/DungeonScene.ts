@@ -438,7 +438,9 @@ export class DungeonScene extends Phaser.Scene {
       // Record the gate drill to SRS on BOTH paths, before branching — a failed ward
       // is exactly the Leitner demotion signal, and it was being dropped. (Combat
       // records its own encounters; the gate is the one encounter we run ourselves.)
-      for (const fid of res.factIds) await services.srs.record(fid, res.quality, res.encounterId);
+      for (const fid of res.factIds) {
+        await services.srs.record(fid, res.quality, res.encounterId, this.facts.get(fid)?.type);
+      }
       if (res.quality >= 0.5) {
         this.view.toast('The ward yields. The door grinds open.', 'good');
         return { transitioned: false };

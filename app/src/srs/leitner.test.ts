@@ -40,15 +40,45 @@ describe('record — box transitions', () => {
     expect(r.next_due).toBe(NOW + 1 * DAY);
   });
 
-  it('promotes one box per correct answer and caps at box 5', () => {
-    // walk 1→2→3→4→5→5 with successive correct answers
+  it('promotes one box per correct answer and caps at box 8 when factType is omitted', () => {
+    // Legacy no-type path walks the full ladder and then holds at box 8.
     const boxesSeen: number[] = [];
     let e: SrsEntry | undefined = undefined;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 9; i++) {
       e = record(e, 1, NOW, `e${i}`);
       boxesSeen.push(e.box);
     }
-    expect(boxesSeen).toEqual([2, 3, 4, 5, 5, 5]); // cap holds at 5
+    expect(boxesSeen).toEqual([2, 3, 4, 5, 6, 7, 8, 8, 8]);
+  });
+
+  it.each([
+    ['number', 6],
+    ['rule', 7],
+    ['concept', 8],
+    ['unrecognized-type', 8],
+  ] as const)('%s facts stop exactly at box %i and use that box interval', (factType, cap) => {
+    let e: SrsEntry | undefined;
+    const boxesSeen: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      e = record(e, 1, NOW, `e${i}`, factType);
+      boxesSeen.push(e.box);
+    }
+
+    expect(boxesSeen.every((box) => box <= cap)).toBe(true);
+    expect(boxesSeen.at(-1)).toBe(cap);
+    expect(e!.next_due).toBe(NOW + BOX_INTERVALS[cap] * DAY);
+  });
+
+  it('never demotes a box-8 fact when a correct answer is recorded with a lower type cap', () => {
+    const r = record(entry(8, NOW), 1, NOW, 'e1', 'number');
+    expect(r.box).toBe(8);
+    expect(r.next_due).toBe(NOW + 365 * DAY);
+  });
+
+  it('resets a box-8 fact to box 1 on a miss regardless of its type cap', () => {
+    const r = record(entry(8, NOW), 0, NOW, 'e1', 'number');
+    expect(r.box).toBe(1);
+    expect(r.next_due).toBe(NOW + 1 * DAY);
   });
 
   it('partial credit holds the current box but reschedules next_due', () => {
@@ -59,22 +89,22 @@ describe('record — box transitions', () => {
   });
 
   it('a miss resets any box to 1 with a 1-day interval', () => {
-    for (const box of [2, 3, 4, 5]) {
+    for (const box of [2, 3, 4, 5, 6, 7, 8]) {
       const r = record(entry(box, NOW + 999 * DAY), 0, NOW, 'e1');
       expect(r.box).toBe(1);
       expect(r.next_due).toBe(NOW + 1 * DAY);
     }
   });
 
-  it('clamps a corrupted box back into 1-5 so next_due never goes NaN', () => {
+  it('clamps a corrupted box back into 1-8 so next_due never goes NaN', () => {
     // box 9 (or "3", or NaN) has no BOX_INTERVALS entry — without clamping,
     // next_due = now + undefined * DAY = NaN and the schedule corrupts further.
-    const partial = record(entry(9, 0), 0.5, NOW, 'e'); // partial holds ground → clamp to 5
-    expect(partial.box).toBe(5);
-    expect(partial.next_due).toBe(NOW + BOX_INTERVALS[5] * DAY);
+    const partial = record(entry(9, 0), 0.5, NOW, 'e'); // partial holds ground → clamp to 8
+    expect(partial.box).toBe(8);
+    expect(partial.next_due).toBe(NOW + BOX_INTERVALS[8] * DAY);
 
     const promoted = record(entry(99, 0), 1, NOW, 'e');
-    expect(promoted.box).toBe(5);
+    expect(promoted.box).toBe(8);
 
     const nonNumeric = record({ box: Number.NaN, next_due: 0, history: [] }, 0.5, NOW, 'e');
     expect(nonNumeric.box).toBe(1); // unusable box → treated as box 1
@@ -82,12 +112,74 @@ describe('record — box transitions', () => {
   });
 
   it('sets next_due to the correct interval for every resulting box', () => {
-    // box result → the interval that produced it
-    expect(record(entry(1, 0), 1, NOW, 'e').next_due).toBe(NOW + 3 * DAY); // →2
-    expect(record(entry(2, 0), 1, NOW, 'e').next_due).toBe(NOW + 7 * DAY); // →3
-    expect(record(entry(3, 0), 1, NOW, 'e').next_due).toBe(NOW + 14 * DAY); // →4
-    expect(record(entry(4, 0), 1, NOW, 'e').next_due).toBe(NOW + 30 * DAY); // →5
-    expect(record(entry(5, 0), 1, NOW, 'e').next_due).toBe(NOW + 30 * DAY); // stays 5
+    const documentedIntervals = [1, 3, 7, 14, 30, 90, 180, 365];
+    for (const [index, intervalDays] of documentedIntervals.entries()) {
+      const resultingBox = index + 1;
+      const r = resultingBox === 1
+        ? record(entry(8, 0), 0, NOW, 'e')
+        : record(entry(resultingBox - 1, 0), 1, NOW, 'e');
+      expect(r.box).toBe(resultingBox);
+      expect(r.next_due).toBe(NOW + intervalDays * DAY);
+    }
+  });
+});
+
+describe('record — lifetime review load', () => {
+  it('keeps 500 capped facts in a sane annual review band below the old ladder', () => {
+    const START = 1_700_000_000_000;
+    const WINDOW_DAYS = 365;
+    const OLD_BOX_FIVE_INTERVAL_DAYS = 30;
+    // Exact roughly-even split: 167 number, 167 rule, and 166 concept facts.
+    const split = [
+      { factType: 'number', cap: 6, count: 167 },
+      { factType: 'rule', cap: 7, count: 167 },
+      { factType: 'concept', cap: 8, count: 166 },
+    ] as const;
+    const facts = split.flatMap(({ factType, cap, count }) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `${factType}-${i}`,
+        factType,
+        cap,
+        entry: record(undefined, 1, START, `${factType}-${i}-0`, factType),
+      })),
+    );
+
+    let now = START;
+    let rampBatches = 0;
+    while (facts.some((fact) => fact.entry.box !== fact.cap) && rampBatches < 100) {
+      now = Math.min(...facts.map((fact) => fact.entry.next_due));
+      for (const fact of facts) {
+        if (fact.entry.next_due <= now) {
+          fact.entry = record(fact.entry, 1, now, `${fact.id}-ramp-${rampBatches}`, fact.factType);
+        }
+      }
+      rampBatches++;
+    }
+    expect(facts.every((fact) => fact.entry.box === fact.cap)).toBe(true);
+
+    const steadyStateStart = now;
+    const windowEnd = steadyStateStart + WINDOW_DAYS * DAY;
+    let totalAnnualReviews = 0;
+    while (true) {
+      const nextDue = Math.min(...facts.map((fact) => fact.entry.next_due));
+      if (nextDue > windowEnd) break;
+      now = nextDue;
+      for (const fact of facts) {
+        if (fact.entry.next_due <= now) {
+          fact.entry = record(fact.entry, 1, now, `${fact.id}-annual-${totalAnnualReviews}`, fact.factType);
+          totalAnnualReviews++;
+        }
+      }
+    }
+
+    const oldLadderAnnualReviews = facts.length * (WINDOW_DAYS / OLD_BOX_FIVE_INTERVAL_DAYS);
+    console.log(
+      `Leitner lifetime simulation: totalAnnualReviews=${totalAnnualReviews}; ` +
+        `oldLadderAnnualReviews=${oldLadderAnnualReviews}`,
+    );
+    expect(totalAnnualReviews).toBeLessThan(oldLadderAnnualReviews);
+    expect(totalAnnualReviews).toBeGreaterThan(100);
+    expect(totalAnnualReviews).toBeLessThan(5000);
   });
 });
 

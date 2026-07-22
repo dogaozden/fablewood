@@ -2,11 +2,11 @@
  * Leitner spaced-repetition core — PURE, no I/O. Ported from the Bar repo per
  * Fable_SPEC.md §2 and slice-blueprint §2, with the wave-2 partial-credit rule.
  *
- * Boxes 1-5. Correct promotes (cap 5); partial holds ground; miss resets to 1.
- * An unseen fact is treated as sitting in box 1, so its first answer lands at
- * box 2 (correct) or box 1 (partial / miss). `boxOf` still reports 0 for unseen
- * facts — that is a display concern (contracts: "0 = unseen"), separate from the
- * transition math here.
+ * Boxes 1-8. Correct promotes up to the fact type's ceiling; partial holds
+ * ground; miss resets to 1. An unseen fact is treated as sitting in box 1, so
+ * its first answer lands at box 2 (correct) or box 1 (partial / miss). `boxOf`
+ * still reports 0 for unseen facts — that is a display concern (contracts:
+ * "0 = unseen"), separate from the transition math here.
  *
  * All functions are deterministic given `now`; time is always injected.
  */
@@ -15,10 +15,40 @@ import type { Quality } from '../game/contracts';
 const DAY_MS = 86_400_000;
 
 /** Review interval (days) for each box. Longer box = longer until next due. */
-export const BOX_INTERVALS: Record<number, number> = { 1: 1, 2: 3, 3: 7, 4: 14, 5: 30 };
+export const BOX_INTERVALS: Record<number, number> = {
+  1: 1,
+  2: 3,
+  3: 7,
+  4: 14,
+  5: 30,
+  6: 90,
+  7: 180,
+  8: 365,
+};
 
 export const MIN_BOX = 1;
-export const MAX_BOX = 5;
+export const MAX_BOX = 8;
+
+/**
+ * V1 tuning knob for promotion ceilings. Perishable knowledge (statute numbers,
+ * current-law rules) must resurface more often than durable concepts, so a
+ * fact's type ceilings how far up the ladder it can climb. Everything not
+ * explicitly listed defaults to the full ladder.
+ */
+export const FACT_TYPE_PROMOTION_CAPS: Readonly<Record<string, number>> = {
+  number: 6,
+  rule: 7,
+};
+
+/** Return a safe promotion cap for any fact type, including malformed input. */
+export function capFor(factType?: string): number {
+  const configured = factType !== undefined &&
+    Object.prototype.hasOwnProperty.call(FACT_TYPE_PROMOTION_CAPS, factType)
+    ? FACT_TYPE_PROMOTION_CAPS[factType]
+    : MAX_BOX;
+  if (!Number.isFinite(configured)) return MAX_BOX;
+  return Math.min(Math.max(Math.trunc(configured), MIN_BOX), MAX_BOX);
+}
 
 export interface HistoryItem {
   /** ISO-8601 timestamp of the answer. */
@@ -28,7 +58,7 @@ export interface HistoryItem {
 }
 
 export interface SrsEntry {
-  /** Leitner box 1-5. A persisted entry always has box >= 1 (it has been seen). */
+  /** Leitner box 1-8. A persisted entry always has box >= 1 (it has been seen). */
   box: number;
   /** Epoch ms when this fact is next due for review. */
   next_due: number;
@@ -52,7 +82,7 @@ export function boxOf(state: SrsState, factId: string): number {
   return state.facts[factId]?.box ?? 0;
 }
 
-/** Average box across facts (unseen counts as 0), 0-5. Empty set → 0. */
+/** Average box across facts (unseen counts as 0), 0-8. Empty set → 0. */
 export function masteryAvg(state: SrsState, factIds: string[]): number {
   if (factIds.length === 0) return 0;
   let sum = 0;
@@ -65,7 +95,7 @@ export function masteryAvg(state: SrsState, factIds: string[]): number {
  * is not mutated). `entry === undefined` means the fact has never been seen; it
  * is treated as box 1 before the transition.
  *
- *   quality 1   (correct) → box + 1, capped at 5
+ *   quality 1   (correct) → box + 1, capped by fact type (never demotes)
  *   quality 0.5 (partial) → box unchanged (holds ground, but reschedules)
  *   quality 0   (miss)    → box 1
  *
@@ -77,6 +107,7 @@ export function record(
   quality: Quality,
   now: number,
   encounterId: string,
+  factType?: string,
 ): SrsEntry {
   // unseen == box 1 for transition purposes; a corrupted box (out of range /
   // non-numeric from a mangled state file) is clamped so BOX_INTERVALS[newBox]
@@ -86,7 +117,7 @@ export function record(
     ? Math.min(Math.max(rawBox as number, MIN_BOX), MAX_BOX)
     : MIN_BOX;
   let newBox: number;
-  if (quality === 1) newBox = Math.min(curBox + 1, MAX_BOX);
+  if (quality === 1) newBox = Math.max(curBox, Math.min(curBox + 1, capFor(factType)));
   else if (quality === 0.5) newBox = curBox;
   else newBox = MIN_BOX;
 
