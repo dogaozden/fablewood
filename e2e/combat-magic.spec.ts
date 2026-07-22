@@ -203,6 +203,7 @@ test('T2 cast (Cinder-Rebuke) spends a Glow pip and passes flair to the overlay 
   await page.screenshot({ path: `${EV}/e2e-magic-pips-spent.png` });
 
   // Resolve the encounter (either branch) so the turn concludes cleanly.
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   await page.locator('.fw-opt').first().click();
   const onward = page.getByRole('button', { name: 'Onward ▸' });
   try {

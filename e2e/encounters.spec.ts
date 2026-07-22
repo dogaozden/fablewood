@@ -9,12 +9,14 @@ test.describe('encounter overlay — all kinds', () => {
   test('mcq (Smite): correct answer → pass verdict', async ({ page }) => {
     await openOverlay(page, 'mcq');
     await expect(page.locator('.fw-eyebrow')).toContainText('Smite');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-opt', { hasText: 'The third week' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
   });
 
   test('mcq (Smite): wrong answer → fail verdict + teach-on-miss reveals the answer', async ({ page }) => {
     await openOverlay(page, 'mcq');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-opt', { hasText: 'It never glows' }).click();
     await expect(page.locator('.fw-verdict.fail')).toBeVisible();
     // teach-on-miss shows the correct answer + the fact statement
@@ -24,6 +26,7 @@ test.describe('encounter overlay — all kinds', () => {
   test('free_recall (Cast From Memory): good answer → stub judge pass', async ({ page }) => {
     await openOverlay(page, 'free_recall');
     await expect(page.locator('.fw-eyebrow')).toContainText('Cast From Memory');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-textarea').fill('wait for the frost-bell before harvesting whispermoss');
     await page.getByRole('button', { name: 'Cast' }).click();
     // stub judge is deterministic + instant; a verdict banner + Clerk line renders
@@ -50,6 +53,7 @@ test.describe('encounter overlay — all kinds', () => {
   test('scenario_branch (Parley): correct branch → pass verdict + consequence', async ({ page }) => {
     await openOverlay(page, 'scenario_branch');
     await expect(page.locator('.fw-eyebrow')).toContainText('Parley');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-opt', { hasText: 'Shoo it gently' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
     await expect(page.locator('.fw-verdict.pass')).toContainText('spared');
@@ -62,6 +66,7 @@ test.describe('encounter overlay — all kinds', () => {
     // must be domain-neutral, never this fixture's own 'Moss'/'Gift' vocabulary.
     await expect(page.locator('.fw-colhead').nth(0)).toHaveText('Claim');
     await expect(page.locator('.fw-colhead').nth(1)).toHaveText('True Name');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     const pair = async (left: string, right: string) => {
       await page.locator('.fw-chip', { hasText: left }).click();
       await page.locator('.fw-chip', { hasText: right }).click();
@@ -86,6 +91,7 @@ test.describe('encounter overlay — all kinds', () => {
         await page.waitForTimeout(60);
       }
     }
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.getByRole('button', { name: 'Seal the Sequence' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
   });
@@ -99,6 +105,7 @@ test.describe('encounter overlay — all kinds', () => {
   // keyboard dismissal (a mouse click on the button itself still worked).
   test('overlay: a stray click on inert content must not defocus Onward (Enter still advances)', async ({ page }) => {
     await openOverlay(page, 'mcq');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-opt', { hasText: 'It never glows' }).click(); // miss on purpose
     await expect(page.locator('.fw-verdict.fail')).toBeVisible();
 

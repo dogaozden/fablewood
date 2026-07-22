@@ -71,7 +71,7 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
   let answered = false;
 
   const choose = (idx: number) => {
-    if (answered) return;
+    if (answered || !o.isArmed()) return;
     answered = true;
     const correct = options[idx] === answer;
     cards.forEach((c, i) => {
@@ -141,7 +141,7 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
 
   let submitting = false;
   const submit = async () => {
-    if (submitting) return;
+    if (submitting || !o.isArmed()) return;
     const answer = ta.value.trim();
     if (!answer) {
       ta.focus();
@@ -209,39 +209,13 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
 
 // --- scenario_branch · Parley ------------------------------------------------
 
-/**
- * BUG #4 (crucible sev3): a forced boss phase opens with a ~1.2-1.4s non-interactive
- * reveal cutscene (CombatScene.showBossReveal) *before* this overlay ever mounts. The
- * onKey handler below used to arm the instant renderScenario ran — a full frame before
- * focus (the requestAnimationFrame cards[0]?.focus() below) ever settled inside the
- * overlay — so a hotkey mashed continuously through the cutscene could land right after
- * mount and commit branch 1 before the player had any chance to read it. Arm choice
- * activation only after a short delay, and ONLY for the forced boss phase (the one
- * caller that opens with `context: 'boss'`, CombatScene.openBossPhase) — the dev harness
- * and a normal player-chosen Parley (`context: 'parley'`/'drill') keep resolving on the
- * very first press, so no friction is added to a real, deliberate answer.
- */
-const BOSS_PARLEY_ARM_MS = 400;
-
-const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
+const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   const branches = enc.branches ?? [];
   const cards: HTMLButtonElement[] = [];
   let answered = false;
-  let armed = ctx.context !== 'boss';
-  // The countdown must start from a PRESENTED frame, not from render time: a bare
-  // setTimeout can elapse entirely while a stalled device (throttling, GC, backgrounded
-  // tab) has painted nothing — arming blind for the exact impatient-mash the guard
-  // exists to stop. Double-rAF guarantees at least one real paint before the clock runs.
-  if (!armed) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => { armed = true; }, BOSS_PARLEY_ARM_MS);
-      });
-    });
-  }
 
   const choose = (idx: number) => {
-    if (answered || !armed) return;
+    if (answered || !o.isArmed()) return;
     answered = true;
     const b = branches[idx];
     const tag = b.correct === true ? 'good' : b.correct === false ? 'bad' : 'neutral';
@@ -353,13 +327,13 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   };
 
   const clickLeft = (li: number) => {
-    if (done) return;
+    if (done || !o.isArmed()) return;
     if (pairOf.has(li)) pairOf.delete(li); // re-pick
     activeLeft = li;
     refresh();
   };
   const clickRight = (ri: number) => {
-    if (done || activeLeft === null) return;
+    if (done || !o.isArmed() || activeLeft === null) return;
     for (const [l, r] of pairOf) if (r === ri) pairOf.delete(l); // right can only serve one left
     pairOf.set(activeLeft, ri);
     activeLeft = null;
@@ -367,7 +341,7 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   };
 
   const submit = () => {
-    if (done || pairOf.size !== left.length) return;
+    if (done || !o.isArmed() || pairOf.size !== left.length) return;
     done = true;
     const userPairs = [...pairOf].map(([li, ri]) => [left[li], right[ri]] as [string, string]);
     const quality = scoreMatch(userPairs, answerPairs);
@@ -490,7 +464,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   }
 
   const submit = () => {
-    if (done) return;
+    if (done || !o.isArmed()) return;
     done = true;
     const quality = scoreOrder(items, answer);
     const rows = [...list.children] as HTMLElement[];
