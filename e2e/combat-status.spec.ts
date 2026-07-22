@@ -175,6 +175,7 @@ test('Parley: repeated outcomes never permanently touch the target\'s attack sta
   for (let i = 0; i < 2; i++) {
     await page.locator('.fw-opt').first().waitFor({ state: 'visible', timeout: 45_000 });
     await expect(page.locator('.fw-eyebrow')).toContainText('Parley');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-opt').first().click();
     await page.locator('.fw-verdict').waitFor({ state: 'visible', timeout: 10_000 });
     const cont = page.getByRole('button', { name: 'Onward ▸' });

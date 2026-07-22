@@ -25,6 +25,8 @@ export interface Overlay {
   panel: HTMLDivElement;
   body: HTMLDivElement;
   footer: HTMLDivElement;
+  /** Answer controls stay inert until the mounted overlay has been painted and settled. */
+  isArmed(): boolean;
   /** eyebrow (action name + glyph) + prompt + rule; omit prompt for teaching. `flair` (§12.4)
    *  replaces the default action-kind name in the eyebrow ("Cinder-Rebuke" instead of "Smite"). */
   setHeader(kindKey: string, prompt?: string, flair?: string): void;
@@ -64,6 +66,8 @@ function quietGameKeyboard(quiet: boolean): void {
 const openOverlays = new Set<() => void>();
 export const GAME_TEARDOWN_EVENT = 'fablewood:game-teardown';
 
+const ENCOUNTER_ARM_MS = 400;
+
 export function abortOpenOverlays(): void {
   for (const abort of [...openOverlays]) abort();
 }
@@ -76,6 +80,7 @@ function buildOverlay(): Overlay {
   ensureStyles();
   const prevFocus = document.activeElement as HTMLElement | null;
   let closed = false;
+  let armed = false;
 
   const header = el('div', { class: 'fw-header' });
   const body = el('div', { class: 'fw-body' });
@@ -115,6 +120,21 @@ function buildOverlay(): Overlay {
   if (++overlayDepth === 1) quietGameKeyboard(true);
   requestAnimationFrame(() => panel.focus());
 
+  /**
+   * BUG #4 (crucible sev3), generalized: answer controls receive native focus one frame
+   * after mount, so a Space/Enter/number-key mash already in flight can otherwise commit
+   * an unread encounter the instant its first control appears. The countdown must start
+   * from a PRESENTED frame, not from render time: a bare setTimeout can elapse entirely
+   * while a stalled device (throttling, GC, backgrounded tab) has painted nothing —
+   * arming blind for the exact impatient-mash this guard exists to stop. Double-rAF
+   * guarantees at least one real paint before the clock runs.
+   */
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      setTimeout(() => { armed = true; }, ENCOUNTER_ARM_MS);
+    });
+  });
+
   // Shared by close() (after its exit animation) and abort (immediately): remove
   // the DOM and step the keyboard latch down exactly once per overlay.
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -142,6 +162,9 @@ function buildOverlay(): Overlay {
     panel,
     body,
     footer,
+    isArmed() {
+      return armed;
+    },
     setHeader(kindKey, prompt, flair) {
       const a = ACTIONS[kindKey] ?? ACTIONS.mcq;
       const parts: Array<Node | string> = [

@@ -172,3 +172,20 @@ export async function gradeWithWarmWorker(prompt: string): Promise<string> {
     pool.replenish();
   }
 }
+
+/**
+ * Eagerly top the pool up to its target size — called once from
+ * vite-judge-plugin.ts's configureServer() so the FIRST real grade in a dev
+ * session doesn't pay the cold CLI-boot cost gradeWithWarmWorker's own lazy
+ * take-or-spawn fallback would otherwise incur on that first call (a live
+ * 2026-07-19 playtest measured 13.0s on a first "warm"-labeled grade with an
+ * empty pool, vs 4-8s once the pool was actually warm). Mirrors
+ * judge_pool.rs's prewarm() — the native Tauri shell's equivalent boot-time
+ * warm-up, called from main.rs's setup(). Not required for correctness — an
+ * empty pool still self-heals via gradeWithWarmWorker's own fallback — this
+ * only shaves latency off the first grade of a session.
+ */
+export function prewarmJudgePool(): number {
+  pool.replenish();
+  return pool.size();
+}

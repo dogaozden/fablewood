@@ -62,6 +62,19 @@ function continueButton(resolve: Resolve, result: EncounterResult): HTMLButtonEl
   });
 }
 
+/**
+ * Keep feedback reveals still: native focus must not choose the panel's scroll position.
+ * If a player had already scrolled unusually long content, reveal the verdict deliberately.
+ */
+function focusContinue(o: Overlay, verdict: HTMLElement, button: HTMLButtonElement): void {
+  button.focus({ preventScroll: true });
+  const panelRect = o.panel.getBoundingClientRect();
+  const verdictRect = verdict.getBoundingClientRect();
+  if (verdictRect.top < panelRect.top || verdictRect.bottom > panelRect.bottom) {
+    verdict.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
 // --- mcq · Smite -------------------------------------------------------------
 
 const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
@@ -71,7 +84,7 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
   let answered = false;
 
   const choose = (idx: number) => {
-    if (answered) return;
+    if (answered || !o.isArmed()) return;
     answered = true;
     const correct = options[idx] === answer;
     cards.forEach((c, i) => {
@@ -91,14 +104,14 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
       o.footer.replaceChildren(verdictBanner('pass', 'A clean strike.'));
       setTimeout(() => resolve(result), 720);
     } else {
+      // The verdict is the reveal's visual anchor. Keep it above the retained answer cards so
+      // it is visible immediately without relying on a focus-triggered jump to the footer.
+      const verdict = verdictBanner('fail', enc.trap_notes || 'Not quite — mark it, and move on.');
+      o.body.insertBefore(verdict, list);
       o.body.append(teachBlock('The Ledger records', answer, facts[0]));
       const cont = continueButton(resolve, result);
-      o.footer.replaceChildren(
-        verdictBanner('fail', enc.trap_notes || 'Not quite — mark it, and move on.'),
-        el('span', { class: 'fw-spacer' }),
-        cont,
-      );
-      cont.focus();
+      o.footer.replaceChildren(el('span', { class: 'fw-spacer' }), cont);
+      focusContinue(o, verdict, cont);
     }
   };
 
@@ -141,7 +154,7 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
 
   let submitting = false;
   const submit = async () => {
-    if (submitting) return;
+    if (submitting || !o.isArmed()) return;
     const answer = ta.value.trim();
     if (!answer) {
       ta.focus();
@@ -194,7 +207,7 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
       detail: verdict.line,
     });
     o.footer.replaceChildren(el('span', { class: 'fw-spacer' }), cont);
-    cont.focus();
+    focusContinue(o, parts[0], cont);
   };
 
   cast.addEventListener('click', () => void submit());
@@ -209,39 +222,13 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
 
 // --- scenario_branch · Parley ------------------------------------------------
 
-/**
- * BUG #4 (crucible sev3): a forced boss phase opens with a ~1.2-1.4s non-interactive
- * reveal cutscene (CombatScene.showBossReveal) *before* this overlay ever mounts. The
- * onKey handler below used to arm the instant renderScenario ran — a full frame before
- * focus (the requestAnimationFrame cards[0]?.focus() below) ever settled inside the
- * overlay — so a hotkey mashed continuously through the cutscene could land right after
- * mount and commit branch 1 before the player had any chance to read it. Arm choice
- * activation only after a short delay, and ONLY for the forced boss phase (the one
- * caller that opens with `context: 'boss'`, CombatScene.openBossPhase) — the dev harness
- * and a normal player-chosen Parley (`context: 'parley'`/'drill') keep resolving on the
- * very first press, so no friction is added to a real, deliberate answer.
- */
-const BOSS_PARLEY_ARM_MS = 400;
-
-const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
+const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   const branches = enc.branches ?? [];
   const cards: HTMLButtonElement[] = [];
   let answered = false;
-  let armed = ctx.context !== 'boss';
-  // The countdown must start from a PRESENTED frame, not from render time: a bare
-  // setTimeout can elapse entirely while a stalled device (throttling, GC, backgrounded
-  // tab) has painted nothing — arming blind for the exact impatient-mash the guard
-  // exists to stop. Double-rAF guarantees at least one real paint before the clock runs.
-  if (!armed) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setTimeout(() => { armed = true; }, BOSS_PARLEY_ARM_MS);
-      });
-    });
-  }
 
   const choose = (idx: number) => {
-    if (answered || !armed) return;
+    if (answered || !o.isArmed()) return;
     answered = true;
     const b = branches[idx];
     const tag = b.correct === true ? 'good' : b.correct === false ? 'bad' : 'neutral';
@@ -255,7 +242,8 @@ const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
       } else c.classList.add('is-dimmed');
     });
     const outcome = b.outcome || (tag === 'good' ? 'A sound choice.' : 'The moment passes.');
-    o.body.append(verdictBanner(tone, outcome));
+    const verdict = verdictBanner(tone, outcome);
+    o.body.append(verdict);
     const cont = continueButton(resolve, {
       encounterId: enc.id,
       kind: 'scenario_branch',
@@ -265,7 +253,7 @@ const renderScenario: KindRenderer = (o, enc, _facts, ctx, resolve) => {
       branchTag: tag,
     });
     o.footer.replaceChildren(el('span', { class: 'fw-spacer' }), cont);
-    cont.focus();
+    focusContinue(o, verdict, cont);
   };
 
   const list = el('div', { class: 'fw-opts' });
@@ -353,13 +341,13 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   };
 
   const clickLeft = (li: number) => {
-    if (done) return;
+    if (done || !o.isArmed()) return;
     if (pairOf.has(li)) pairOf.delete(li); // re-pick
     activeLeft = li;
     refresh();
   };
   const clickRight = (ri: number) => {
-    if (done || activeLeft === null) return;
+    if (done || !o.isArmed() || activeLeft === null) return;
     for (const [l, r] of pairOf) if (r === ri) pairOf.delete(l); // right can only serve one left
     pairOf.set(activeLeft, ri);
     activeLeft = null;
@@ -367,7 +355,7 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   };
 
   const submit = () => {
-    if (done || pairOf.size !== left.length) return;
+    if (done || !o.isArmed() || pairOf.size !== left.length) return;
     done = true;
     const userPairs = [...pairOf].map(([li, ri]) => [left[li], right[ri]] as [string, string]);
     const quality = scoreMatch(userPairs, answerPairs);
@@ -384,7 +372,8 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
 
     const tone = quality === 1 ? 'pass' : quality === 0.5 ? 'partial' : 'fail';
     const line = quality === 1 ? 'The weave holds.' : quality === 0.5 ? 'Half the threads catch.' : 'The weave unravels.';
-    o.body.insertBefore(verdictBanner(tone, line), container);
+    const verdict = verdictBanner(tone, line);
+    o.body.insertBefore(verdict, container);
     if (quality < 1) {
       o.body.append(
         el('div', { class: 'fw-teach' }, [
@@ -401,7 +390,7 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
       detail: answerPairs.map((p) => `${p[0]} → ${p[1]}`).join(', '),
     });
     o.footer.replaceChildren(el('span', { class: 'fw-spacer' }), cont);
-    cont.focus();
+    focusContinue(o, verdict, cont);
   };
 
   const leftCol = el('div', { class: 'fw-col' }, [el('div', { class: 'fw-colhead', text: 'Claim' })]);
@@ -490,7 +479,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   }
 
   const submit = () => {
-    if (done) return;
+    if (done || !o.isArmed()) return;
     done = true;
     const quality = scoreOrder(items, answer);
     const rows = [...list.children] as HTMLElement[];
@@ -502,7 +491,8 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     });
     const tone = quality === 1 ? 'pass' : quality === 0.5 ? 'partial' : 'fail';
     const line = quality === 1 ? 'The ritual holds.' : quality === 0.5 ? 'The chain falters partway.' : 'The sequence breaks.';
-    o.body.insertBefore(verdictBanner(tone, line), list);
+    const verdict = verdictBanner(tone, line);
+    o.body.insertBefore(verdict, list);
     if (quality < 1) {
       o.body.append(
         el('div', { class: 'fw-teach' }, [
@@ -519,7 +509,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
       detail: answer.join(' → '),
     });
     o.footer.replaceChildren(el('span', { class: 'fw-spacer' }), cont);
-    cont.focus();
+    focusContinue(o, verdict, cont);
   };
 
   render();

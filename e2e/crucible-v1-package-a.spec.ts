@@ -40,6 +40,7 @@ async function seedSave(page: Page, data: Save): Promise<void> {
  *  (quality 0) regardless of which real pack encounter substituted in for the request. */
 async function answerGateWrong(page: Page): Promise<void> {
   await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 20_000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   await page.locator('.fw-textarea').fill('zzz completely unrelated nonsense zzz qqq');
   await page.getByRole('button', { name: 'Cast' }).click();
   await page.waitForTimeout(300);

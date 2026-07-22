@@ -50,6 +50,7 @@ async function waitForLoggedAction(
 /** Answer an open free_recall (Cast) overlay with a terse-but-correct answer → a Clerk pass. */
 async function answerCast(page: Page): Promise<void> {
   await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   // The packless combat fixture has no packId, so runEncounter falls through to packs[0] —
   // vc-law, the only installed pack — and this is the first free_recall it offers combat:
   // enc.fr.economics-vs-control. Its rubric is written in the tiered house style ("Full
@@ -222,8 +223,8 @@ test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick be
       await page.waitForTimeout(30);
     }
 
-    // kinds.ts's renderScenario (BOSS_PARLEY_ARM_MS) arms `choose()` only ARM_MS after
-    // mount, for a forced boss phase. This ONE loop both finds the anchor and proves the
+    // overlay.ts's shared ENCOUNTER_ARM_MS guard arms `choose()` only ARM_MS after
+    // mount. This ONE loop both finds the anchor and proves the
     // window, with NOTHING else — no Playwright locator/assertion call, which are their
     // own round trips — between capturing T0 and the very next read: measured
     // empirically, even the overlay/eyebrow content checks sitting BEFORE this section
@@ -238,7 +239,7 @@ test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick be
     // the original bug resolved within about one frame of mount (~1-2ms, confirmed by
     // temporarily reverting the guard), so even this much slack still catches a
     // regression easily while tolerating this loop's own small per-sample round trip.
-    const ARM_MS = 400; // mirrors kinds.ts's BOSS_PARLEY_ARM_MS — the contract under test
+    const ARM_MS = 400; // mirrors overlay.ts's ENCOUNTER_ARM_MS — the contract under test
     const SAFE_MS = 100;
     let first: { now: number } | null = null;
     let elapsed = 0;
@@ -284,4 +285,69 @@ test('boss-phase reveal: mashing a hotkey cannot commit an unread Parley pick be
     await page.waitForTimeout(150);
   }
   expect(sawVerdict, 'a deliberate press after the overlay settles still resolves the branch').toBe(true);
+});
+
+// The same native-button hazard exists outside the boss path: Smite's first MCQ card takes
+// focus one frame after mount, so Space mashing can activate it without ever touching the
+// renderer's number-key handler. Drive a regular combat Smite and anchor the proof to the
+// browser's own first observation of `.fw-opt`, exactly like the boss regression above.
+test('regular combat Smite: mashing Space cannot commit an unread MCQ before the overlay is ready', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7&demo=1');
+  await waitReady(page, 'combat');
+  await setPilot(page, 'smite');
+
+  let mashing = true;
+  const mashLoop = (async () => {
+    while (mashing) {
+      await page.keyboard.press(' ').catch(() => {});
+      await page.waitForTimeout(40);
+    }
+  })();
+
+  const sample = () =>
+    page.evaluate(() => {
+      const opts = Array.from(document.querySelectorAll<HTMLButtonElement>('.fw-opt'));
+      return { exists: opts.length > 0, resolved: opts.some((e) => e.disabled), now: performance.now() };
+    });
+
+  const ARM_MS = 400; // mirrors overlay.ts's ENCOUNTER_ARM_MS — the contract under test
+  const SAFE_MS = 100;
+  let first: { now: number } | null = null;
+  let elapsed = 0;
+  try {
+    const pollCeiling = Date.now() + 20_000; // circuit breaker only, not part of the timing proof
+    while (Date.now() < pollCeiling) {
+      const s = await sample();
+      if (!first) {
+        if (!s.exists) { await page.waitForTimeout(10); continue; }
+        first = s;
+        continue; // next statement executed is the very next `sample()` below — no gap
+      }
+      elapsed = s.now - first.now;
+      if (s.resolved || elapsed >= SAFE_MS) break;
+      await page.waitForTimeout(20);
+    }
+    if (!first) throw new Error('the regular Smite overlay\'s .fw-opt cards never appeared');
+    expect(
+      elapsed,
+      `a mashed Space resolved the MCQ only ${Math.round(elapsed)}ms after the overlay became interactive (arm window is ${ARM_MS}ms) — must remain unresolved for the safety margin`,
+    ).toBeGreaterThanOrEqual(SAFE_MS);
+  } finally {
+    mashing = false;
+    await mashLoop;
+  }
+
+  // Content checks stay after the raw timing window so they cannot move its anchor.
+  await expect(page.locator('.fw-eyebrow'), 'the regular combat action opened a Smite (mcq)').toContainText('Smite');
+
+  // The shared guard delays activation; it never permanently locks the card.
+  const pressDeadline = Date.now() + 5_000;
+  let sawVerdict = false;
+  while (Date.now() < pressDeadline) {
+    await page.keyboard.press(' ');
+    if (await page.locator('.fw-verdict').count()) { sawVerdict = true; break; }
+    await page.waitForTimeout(150);
+  }
+  expect(sawVerdict, 'a deliberate Space press after the overlay settles still resolves the MCQ').toBe(true);
 });

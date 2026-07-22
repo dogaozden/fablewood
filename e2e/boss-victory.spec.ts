@@ -215,6 +215,7 @@ async function driveCastOnWarden(page: Page, parkMobId: string): Promise<void> {
 
     await clickTile(page, 6, 3); // the Warden's own tile — never the mob's
     await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 10_000 });
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-textarea').fill(
       'The Warden’s terms favor the house: a 1x liquidation preference is the market standard, ' +
       'nonparticipating preferred avoids the double dip, and weighted-average antidilution with a ' +

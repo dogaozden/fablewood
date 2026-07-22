@@ -23,7 +23,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
 import { stubJudge, AWAY_LINE, type JudgeArgs } from './src/judge/stub';
 import type { JudgeVerdict } from './src/game/contracts';
-import { gradeWithWarmWorker } from './judge-worker';
+import { gradeWithWarmWorker, prewarmJudgePool } from './judge-worker';
 
 // Measured 2026-07-19: with the user's MCP servers loading, a haiku one-shot ran
 // 17–26s; with MCP disabled, 7–13s from an idle shell and a few seconds worse when
@@ -175,6 +175,27 @@ export function fablewoodJudge(): Plugin {
   return {
     name: 'fablewood-judge',
     configureServer(server: ViteDevServer) {
+      // Eagerly warm the Clerk pool at server boot (mirrors judge_pool.rs's prewarm() in the
+      // native Tauri shell, called from main.rs's setup()) — the first real grade of a dev
+      // session then already has a warm spare instead of cold-booting the CLI (see
+      // judge-worker.ts's prewarmJudgePool doc comment for the measured numbers). Skipped
+      // entirely under JUDGE_MODE=stub: that path never spawns a real `claude` process at
+      // all (grade() below returns via stubJudge before ever touching the warm pool), so
+      // prewarming here would just spawn real CLI processes no e2e/stub run will ever use.
+      // ALSO skipped under vitest (process.env.VITEST, set by vitest itself): `npx vitest
+      // run` builds its own internal Vite server from this same vite.config.ts plugin list
+      // (confirmed empirically — a bare vitest run hung on shutdown for ~10s the first time
+      // this guard only checked JUDGE_MODE, because it eagerly spawned two real, unused
+      // `claude` processes whose open stdin pipes stalled the server's close), and no test
+      // in the suite ever hits /api/judge — plain `npx vitest run` and `npm run
+      // check:zero-packs` must both stay side-effect-free per this repo's verification
+      // culture (AGENTS.md), and neither sets JUDGE_MODE. configureServer never runs at all
+      // for `vite build`/`vite preview` (the static-build path), so that path is unaffected
+      // either way.
+      if (process.env.JUDGE_MODE !== 'stub' && !process.env.VITEST) {
+        const n = prewarmJudgePool();
+        console.log(`[clerk] warm pool ready (${n} workers)`);
+      }
       server.middlewares.use(async (req, res, next) => {
         const path = (req.url ?? '').split('?')[0];
         if (path !== '/api/judge') return next();

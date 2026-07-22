@@ -9,6 +9,7 @@ type Srs = { facts?: Record<string, { box: number; next_due: number; history?: u
 // Correctness doesn't matter — any answer records SRS. Resolves the overlay.
 async function answerAnyOverlay(page: Page): Promise<void> {
   await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   if (await page.locator('.fw-textarea').count()) {
     await page.locator('.fw-textarea').fill('the preferred shares convert at the stated ratio');
     await page.getByRole('button', { name: 'Cast' }).click();
@@ -84,4 +85,82 @@ test('SRS: Wellspring drill records facts to state/ and persists across reload',
   await waitReady(page, 'boot');
   const srs2 = await readState<Srs>(page, 'srs.json');
   expect(Object.keys(srs2?.facts ?? {}).length).toBeGreaterThanOrEqual(ids.length);
+});
+
+test('Wellspring drill: mashing Space through encounter mount cannot commit an unread answer', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?seed=7');
+  await waitReady(page, 'boot');
+  await page.keyboard.press('Enter');
+  await waitReady(page, 'hamlet');
+  await waitHamletPlayer(page);
+  await waitProvincesLoaded(page);
+
+  const warped = await warpHamletTo(page, 'wellspring');
+  expect(warped, 'dev warp hook parked the Keeper at the Wellspring').toBe(true);
+  await tapKey(page, 'e'); // open intro page 1
+  await page.waitForTimeout(220);
+  await tapKey(page, 'e'); // finish page 1's typewriter
+  await page.waitForTimeout(200);
+  await tapKey(page, 'e'); // advance to page 2
+  await page.waitForTimeout(250);
+  await tapKey(page, 'e'); // finish page 2 and reveal the default "Recall them" choice
+  await page.waitForTimeout(200);
+
+  // From the choice onward, Space is the real input under test: it confirms the intro and
+  // continues at a human mash cadence while the first due-queue encounter mounts and focuses.
+  let mashing = true;
+  const mashLoop = (async () => {
+    while (mashing) {
+      await page.keyboard.press(' ').catch(() => {});
+      await page.waitForTimeout(40);
+    }
+  })();
+
+  const sample = () =>
+    page.evaluate(() => {
+      const opts = Array.from(document.querySelectorAll<HTMLButtonElement>('.fw-opt'));
+      const textarea = document.querySelector<HTMLTextAreaElement>('.fw-textarea');
+      const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('.fw-chip'));
+      const steps = document.querySelectorAll('.fw-step');
+      return {
+        interactive: opts.length > 0 || !!textarea || chips.length > 0 || steps.length > 0,
+        resolved:
+          opts.some((e) => e.disabled) ||
+          textarea?.disabled === true ||
+          chips.some((e) => e.disabled) ||
+          !!document.querySelector('.fw-verdict'),
+        now: performance.now(),
+      };
+    });
+
+  const ARM_MS = 400; // mirrors overlay.ts's ENCOUNTER_ARM_MS — the contract under test
+  const SAFE_MS = 100;
+  let first: { now: number } | null = null;
+  let elapsed = 0;
+  try {
+    const pollCeiling = Date.now() + 20_000; // circuit breaker only, not part of the timing proof
+    while (Date.now() < pollCeiling) {
+      const s = await sample();
+      if (!first) {
+        if (!s.interactive) { await page.waitForTimeout(10); continue; }
+        first = s;
+        continue; // no locator/assertion round trip between this anchor and the next sample
+      }
+      elapsed = s.now - first.now;
+      if (s.resolved || elapsed >= SAFE_MS) break;
+      await page.waitForTimeout(20);
+    }
+    if (!first) throw new Error('the Wellspring drill encounter never became interactive');
+    expect(
+      elapsed,
+      `a Space mash resolved the drill only ${Math.round(elapsed)}ms after it became interactive (arm window is ${ARM_MS}ms) — every encounter kind must hold for the safety margin`,
+    ).toBeGreaterThanOrEqual(SAFE_MS);
+  } finally {
+    mashing = false;
+    await mashLoop;
+  }
+
+  // The unknown due kind remains usable after the shared delay (no permanent lockout).
+  await answerAnyOverlay(page);
 });

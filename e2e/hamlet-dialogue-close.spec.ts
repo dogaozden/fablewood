@@ -76,6 +76,7 @@ async function assertNoSilentReopen(page: Page, expectedCalls: number, ms = 1500
 async function answerAnyOverlay(page: Page): Promise<void> {
   const overlay = page.locator('.fw-overlay').first();
   await overlay.waitFor({ state: 'visible', timeout: 8000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   const handle = await overlay.elementHandle();
   const cont = page.getByRole('button', { name: 'Onward ▸' });
   let expectContinue = true;
