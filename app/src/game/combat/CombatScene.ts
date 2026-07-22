@@ -154,6 +154,7 @@ export class CombatScene extends Phaser.Scene {
   // content resolution
   private allFactIds = new Set<string>();
   private tagToIds = new Map<string, string[]>();
+  private factTypeById = new Map<string, string>();
   private roomTags: string[] = [];
 
   // §2/§5/§6 the Five Arts & Glow (Phase 2 — magic-combat-depth.md)
@@ -230,6 +231,7 @@ export class CombatScene extends Phaser.Scene {
     this.lastHpEvent = null;
     this.allFactIds.clear();
     this.tagToIds.clear();
+    this.factTypeById.clear();
     this.roomTags = [];
     this.boss = null;
     this.shields = 0;
@@ -542,6 +544,7 @@ export class CombatScene extends Phaser.Scene {
         const pack = entry.pack as Pack;
         for (const f of pack.facts ?? []) {
           this.allFactIds.add(f.id);
+          this.factTypeById.set(f.id, f.type);
           for (const t of f.tags ?? []) {
             const arr = this.tagToIds.get(t) ?? [];
             arr.push(f.id);
@@ -2123,7 +2126,9 @@ export class CombatScene extends Phaser.Scene {
     // extending to whether we remember it was just asked).
     for (const id of result.factIds) sessionRecentFactIds.add(id);
     try {
-      await Promise.all(result.factIds.map((id) => services.srs.record(id, result.quality, result.encounterId)));
+      await Promise.all(result.factIds.map((id) =>
+        services.srs.record(id, result.quality, result.encounterId, this.factTypeById.get(id)),
+      ));
     } catch { /* recording is best-effort; combat proceeds */ }
   }
 

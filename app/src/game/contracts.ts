@@ -118,10 +118,10 @@ export interface SrsApi {
   ready(): Promise<void>;
   /** due fact ids (overdue first, then lowest box), then unseen in prereq order */
   dueQueue(packId: string, factIds: string[], now?: number): string[];
-  record(factId: string, quality: Quality, encounterId: string): Promise<void>;
-  /** Leitner box 1-5; 0 = unseen */
+  record(factId: string, quality: Quality, encounterId: string, factType?: string): Promise<void>;
+  /** Leitner box 1-8; 0 = unseen */
   boxOf(factId: string): number;
-  /** avg box across facts (mastery-bound companion scaling), 0-5 */
+  /** avg box across facts (mastery-bound companion scaling), 0-8 */
   masteryAvg(factIds: string[]): number;
 }
 

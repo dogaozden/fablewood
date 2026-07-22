@@ -63,7 +63,7 @@ const wellspringRecentFactIds = new Set<string>();
 
 interface RawPack {
   meta?: { id?: string; title?: string };
-  facts?: { id: string }[];
+  facts?: { id: string; type?: string }[];
 }
 
 export class HamletScene extends Phaser.Scene {
@@ -365,7 +365,17 @@ export class HamletScene extends Phaser.Scene {
       const res = await getPacks();
       this.provinces = res.packs.map((p) => {
         const rp = p.pack as RawPack;
-        return { id: p.id, title: rp?.meta?.title ?? p.id, factIds: (rp?.facts ?? []).map((f) => f.id) };
+        const facts = rp?.facts ?? [];
+        const factTypes: Record<string, string> = {};
+        for (const fact of facts) {
+          if (typeof fact.type === 'string') factTypes[fact.id] = fact.type;
+        }
+        return {
+          id: p.id,
+          title: rp?.meta?.title ?? p.id,
+          factIds: facts.map((f) => f.id),
+          factTypes,
+        };
       });
       this.packId = this.provinces[0]?.id;
     } catch {
@@ -642,7 +652,7 @@ export class HamletScene extends Phaser.Scene {
           factIds,
         });
         for (const fid of res.factIds) {
-          await services.srs.record(fid, res.quality, res.encounterId);
+          await services.srs.record(fid, res.quality, res.encounterId, pv?.factTypes?.[fid]);
           wellspringRecentFactIds.add(fid);
         }
       }

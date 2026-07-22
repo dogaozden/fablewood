@@ -109,13 +109,14 @@ export class SrsStore {
     quality: Quality,
     encounterId: string,
     now: number = Date.now(),
+    factType?: string,
   ): Promise<void> {
     const task = this.writeChain.then(async () => {
       const remote = await this.bridge.getState<unknown>(SRS_FILE);
       const base: SrsState = isSrsState(remote)
         ? { ...remote, version: 1, facts: { ...remote.facts } }
         : this.cache; // null/corrupt mid-run → build on our cache, don't lose the write
-      const updated = leitnerRecord(base.facts[factId], quality, now, encounterId);
+      const updated = leitnerRecord(base.facts[factId], quality, now, encounterId, factType);
       const merged: SrsState = { ...base, version: 1, facts: { ...base.facts, [factId]: updated } };
       const ok = await this.bridge.putState(SRS_FILE, merged);
       if (!ok) this.warnOnce();

@@ -11,6 +11,7 @@ export interface Province {
   id: string;
   title: string;
   factIds: string[];
+  factTypes?: Record<string, string>;
 }
 
 /** The Gilded Acorn — Berry Bramblemaid. Rumor points at the due queue; hearth = streak. */
