@@ -364,7 +364,22 @@ math + wiring (single-line banner until P2), gate defaulting `false` (rider dorm
 Files: `packs/types.ts`, `pack.schema.json`, `contracts.ts`, `encounters/engine.ts`, `combat/
 {arts,spells,status,CombatScene}.ts`. Verify: `riderBonus` truth table (3×3×2),
 `difficultyEligible` per tier incl. fallback, Claim A's monotonicity across all 15 spells, §5's
-regime numbers as literal tests (gate=false must reproduce the 4-vs-3 violation exactly).
+regime numbers as literal tests — precisely: the UNGATED raw rider math (`packReady=true` on
+unmarked/Lantern-uniform content) must reproduce the 4-vs-3 violation, and `gate=false` must
+produce full dormancy (3-vs-3, rider zero everywhere). *(Amended at P1 merge: the original
+wording here said "gate=false must reproduce the 4-vs-3," which contradicts §5's own arithmetic
+— the "today" table is the counterfactual that JUSTIFIES the gate, not a literal
+`packReady=false` call. Implemented per the corrected reading.)*
+
+**P1 IMPLEMENTED** (merged 2026-07-22, Sol via codex exec; 502/502 at merged HEAD). Two wiring
+gaps discovered at implementation, now P2's first work items:
+- **T1 path**: `castGatedSpell` only runs for tier > 1; T1 casts route through the legacy
+  resolve chain and never compute `spellTier`/rider. §4.1's T1 rows are unreachable until P2
+  wires that path (moot while the gate is false — nothing player-visible changed).
+- **`EncounterResult.difficulty` has no producer**: the overlay/runner layer that builds
+  results sits outside P1's file list, so the field is never populated and CombatScene's
+  `?? 2` default always engages. P2 must stamp `difficultyOf(picked)` into the result where
+  the encounter resolves.
 
 **P2 — UX + banner plumbing**: §4.2's banner-list fix (touches shipped code — flagged), §7
 glyphs/copy. Files: `encounters/overlay.ts`, `combat/hud.ts`, `combat/CombatScene.ts`. Verify:
