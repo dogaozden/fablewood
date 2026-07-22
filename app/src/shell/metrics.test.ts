@@ -22,27 +22,32 @@ function entry(box: number, next_due: number, history: SrsEntry['history'] = [])
 
 describe('boxDistribution', () => {
   it('counts unseen ids (missing from the map) as box 0', () => {
-    expect(boxDistribution(['a', 'b'], {})).toEqual([2, 0, 0, 0, 0, 0]);
+    expect(boxDistribution(['a', 'b'], {})).toEqual([2, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
-  it('tallies each fact into its own box', () => {
+  it('tallies each fact into its own box, including the lifetime-ladder boxes 6-8', () => {
     const facts = {
       a: entry(0, 0), // never actually persisted at box 0, but tolerate it defensively
       b: entry(1, 0),
       c: entry(3, 0),
       d: entry(3, 0),
       e: entry(5, 0),
+      f: entry(6, 0),
+      g: entry(7, 0),
+      h: entry(8, 0),
     };
-    expect(boxDistribution(['a', 'b', 'c', 'd', 'e'], facts)).toEqual([1, 1, 0, 2, 0, 1]);
+    expect(boxDistribution(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], facts)).toEqual([
+      1, 1, 0, 2, 0, 1, 1, 1, 1,
+    ]);
   });
 
   it('clamps a corrupted out-of-range box rather than throwing or losing the fact', () => {
     const facts = { a: entry(99, 0), b: entry(-4, 0) };
-    expect(boxDistribution(['a', 'b'], facts)).toEqual([1, 0, 0, 0, 0, 1]);
+    expect(boxDistribution(['a', 'b'], facts)).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 1]);
   });
 
   it('empty factIds → all zero', () => {
-    expect(boxDistribution([], {})).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(boxDistribution([], {})).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
 });
 
@@ -54,6 +59,9 @@ describe('boxLabel', () => {
       'learning',
       'steady',
       'strong',
+      'seasoned',
+      'hardened',
+      'unbroken',
       'mastered',
     ]);
   });

@@ -12,17 +12,27 @@ import type { SrsEntry, HistoryItem } from '../srs/leitner';
 
 const DAY_MS = 86_400_000;
 
-/** Facts per Leitner box, indexed 0 (never seen) through 5 (mastered). */
-export type BoxCounts = [number, number, number, number, number, number];
+/** Facts per Leitner box, indexed 0 (never seen) through 8 (mastered). */
+export type BoxCounts = [number, number, number, number, number, number, number, number, number];
 
-/** The Ledger's own names for each Leitner box (weld strength), indexed 0-5. */
-export const BOX_LABELS = ['new', 'fragile', 'learning', 'steady', 'strong', 'mastered'] as const;
+/** The Ledger's own names for each Leitner box (weld strength), indexed 0-8. */
+export const BOX_LABELS = [
+  'new',
+  'fragile',
+  'learning',
+  'steady',
+  'strong',
+  'seasoned',
+  'hardened',
+  'unbroken',
+  'mastered',
+] as const;
 
 /** Human label for a Leitner box index — never a raw box number. Clamps a
  *  corrupted out-of-range box the same way boxDistribution does, rather than
  *  throwing or leaking `undefined` into the UI. */
 export function boxLabel(box: number): string {
-  return BOX_LABELS[Math.min(Math.max(Math.round(box), 0), 5)];
+  return BOX_LABELS[Math.min(Math.max(Math.round(box), 0), 8)];
 }
 
 /** How many of `factIds` sit in each box. Ids missing from `facts` count as box 0. */
@@ -30,10 +40,10 @@ export function boxDistribution(
   factIds: string[],
   facts: Record<string, Pick<SrsEntry, 'box'>>,
 ): BoxCounts {
-  const counts: BoxCounts = [0, 0, 0, 0, 0, 0];
+  const counts: BoxCounts = [0, 0, 0, 0, 0, 0, 0, 0, 0];
   for (const id of factIds) {
     const raw = facts[id]?.box;
-    const box = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw as number), 0), 5) : 0;
+    const box = Number.isFinite(raw) ? Math.min(Math.max(Math.round(raw as number), 0), 8) : 0;
     counts[box]++;
   }
   return counts;
