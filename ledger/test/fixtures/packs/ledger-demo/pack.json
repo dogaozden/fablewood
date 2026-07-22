@@ -1,0 +1,132 @@
+{
+  "meta": {
+    "id": "ledger-demo",
+    "title": "The Friendly Sourdough Ledger",
+    "version": "1.0.0",
+    "sources": [
+      {
+        "id": "tiny-bread-guide",
+        "title": "The Tiny Bread Guide",
+        "author": "Ada Baker",
+        "file": "tiny-bread-guide.md",
+        "version": "1st edition"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "id": "bread.starter.feed",
+      "type": "do",
+      "statement": "Feed a sourdough starter with equal weights of flour and water.",
+      "detail": "A kitchen scale keeps the ratio consistent from one feeding to the next.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Starter > Feeding",
+        "quote": "Use equal weights of starter, flour, and water for a simple maintenance feed."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Starter", "Routine"],
+      "difficulty": 1,
+      "prereqs": []
+    },
+    {
+      "id": "bread.starter.peak",
+      "type": "concept",
+      "statement": "A ripe starter reaches its peak after rising and before it begins to collapse.",
+      "detail": "A domed top and plentiful bubbles are useful visual cues.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Starter > Readiness",
+        "quote": "Use the starter near its highest rise, while the surface is still domed."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Starter", "Timing"],
+      "difficulty": 2,
+      "prereqs": ["bread.starter.feed"]
+    },
+    {
+      "id": "bread.dough.rest",
+      "type": "advice",
+      "statement": "Rest the mixed flour and water before adding the remaining ingredients.",
+      "detail": "The short rest lets the flour hydrate and makes the dough easier to handle.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Dough > Initial rest",
+        "quote": "A brief flour-and-water rest improves hydration."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Dough", "Routine"],
+      "difficulty": 2,
+      "prereqs": []
+    },
+    {
+      "id": "bread.ferment.bulk",
+      "type": "rule",
+      "statement": "Judge bulk fermentation by the dough's expansion and texture, not by the clock alone.",
+      "detail": "Room temperature and starter activity can change the required time.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Fermentation > Bulk",
+        "quote": "Look for expansion and aeration instead of relying only on elapsed time."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Fermentation", "Timing"],
+      "difficulty": 3,
+      "prereqs": ["bread.dough.rest"]
+    },
+    {
+      "id": "bread.shape.tension",
+      "type": "concept",
+      "statement": "Surface tension helps a shaped loaf hold its form.",
+      "detail": "Gentle dragging across the work surface can tighten the outer skin without tearing it.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Shaping > Tension",
+        "quote": "Build a taut outer skin while keeping the interior gases intact."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Dough", "Shaping"],
+      "difficulty": 3,
+      "prereqs": ["bread.ferment.bulk"]
+    },
+    {
+      "id": "bread.bake.steam",
+      "type": "rule",
+      "statement": "Steam early in the bake keeps the crust flexible while the loaf expands.",
+      "detail": "A covered baking vessel traps moisture released by the dough.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": 42,
+        "quote": "Retain steam during the first part of the bake to delay crust setting."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "tags": ["Baking"],
+      "difficulty": 2,
+      "prereqs": ["bread.shape.tension"]
+    },
+    {
+      "id": "bread.cool.wait",
+      "type": "dont",
+      "statement": "Do not slice a loaf immediately after it leaves the oven.",
+      "source_ref": {
+        "file": "tiny-bread-guide.md",
+        "loc": "Cooling",
+        "quote": "Let the crumb finish setting before slicing."
+      },
+      "as_of": "2026-07-20",
+      "source_version": "The Tiny Bread Guide, 1st edition",
+      "difficulty": 1,
+      "prereqs": ["bread.bake.steam"]
+    }
+  ],
+  "encounters": [],
+  "quests": [],
+  "npcs": [],
+  "metaphor_map": {}
+}
