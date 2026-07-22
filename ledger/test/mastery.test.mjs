@@ -28,7 +28,8 @@ test('deriveMastery implements unseen, overdue, known, and learning precedence',
 
 test('deriveMastery clamps malformed boxes and surfaces malformed due values', () => {
   assert.equal(deriveMastery({ box: -4, next_due: now + 1, history: [] }, now).box, 1);
-  assert.equal(deriveMastery({ box: 99, next_due: now + 1, history: [] }, now).box, 5);
+  assert.equal(deriveMastery({ box: 99, next_due: now + 1, history: [] }, now).box, 8);
+  assert.equal(deriveMastery({ box: 7, next_due: now + 1, history: [] }, now).box, 7);
   assert.deepEqual(deriveMastery({ box: Number.NaN, next_due: Number.NaN, history: [] }, now), {
     box: 1,
     due: null,

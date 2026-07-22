@@ -10,7 +10,6 @@ import {
   ledgerExport,
   ledgerLookup,
   ledgerMastery,
-  UnknownPackError,
 } from './lib/tools.mjs';
 
 const ledgerDir = path.dirname(fileURLToPath(import.meta.url));
@@ -104,7 +103,6 @@ server.registerTool(
       const result = await ledgerExport(callContext(), args);
       return textResult(result.markdown);
     } catch (error) {
-      if (error instanceof UnknownPackError) return errorResult(error);
       return errorResult(error);
     }
   },
