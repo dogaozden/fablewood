@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeRank, RANK2_NEED, RANK3_NEED, ARTS,
-  GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, weldBonus, seenDueIds,
+  GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, weldBonus, riderBonus, seenDueIds,
   type GlowState, type GlowSource,
 } from '../arts';
 
@@ -134,5 +134,30 @@ describe('weldBonus (§5.5 — the weld edge)', () => {
   });
   it('an empty list never welds — vacuous truth is not a reward here', () => {
     expect(weldBonus([])).toBe(0);
+  });
+});
+
+describe('riderBonus (§4 difficulty-rewards.md — full truth table)', () => {
+  it.each([
+    [1, 1, false, 0], [1, 2, false, 0], [1, 3, false, 0],
+    [2, 1, false, 0], [2, 2, false, 0], [2, 3, false, 0],
+    [3, 1, false, 0], [3, 2, false, 0], [3, 3, false, 0],
+    [1, 1, true, 0], [1, 2, true, 1], [1, 3, true, 1],
+    [2, 1, true, 0], [2, 2, true, 0], [2, 3, true, 1],
+    [3, 1, true, 0], [3, 2, true, 0], [3, 3, true, 0],
+  ] as const)(
+    'tier %i, drawn difficulty %i, packReady %s → %i',
+    (spellTier, drawnDifficulty, packReady, expected) => {
+      expect(riderBonus(spellTier, drawnDifficulty, packReady)).toBe(expected);
+    },
+  );
+
+  it('tier 3 intentionally never earns a rider at any possible drawn difficulty or pack state', () => {
+    // Drawn difficulty tops out at 3, so it can never be greater than spell tier 3.
+    for (const packReady of [false, true]) {
+      for (const drawnDifficulty of [1, 2, 3] as const) {
+        expect(riderBonus(3, drawnDifficulty, packReady)).toBe(0);
+      }
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { riderBonus } from '../arts';
 import { resolveAction } from '../damage';
 import { computeHit } from '../status';
 import { SPELLBOOK, resolveSpell, qualitySlot, spellsForArt, type SpellId } from '../spells';
@@ -199,6 +200,80 @@ describe('Overglow / weld / vsBoss (§5.3, §5.5, §9) — primary-only, never o
   });
 });
 
+describe('the difficulty rider — Claim A monotonicity (§5 difficulty-rewards.md)', () => {
+  it.each(SPELL_IDS)('%s: q1 primary damage with rider never LESS than without', (id) => {
+    const withoutRider = resolveSpell(SPELLBOOK[id], 1, TARGETS);
+    const withRider = resolveSpell(SPELLBOOK[id], 1, { ...TARGETS, rider: true });
+    const totalDamage = (ops: ReturnType<typeof resolveSpell>): number => ops.reduce(
+      (total, op) => total + (op.op === 'damage' ? op.amount : 0),
+      0,
+    );
+
+    expect(totalDamage(withRider)).toBeGreaterThanOrEqual(totalDamage(withoutRider));
+  });
+
+  it('gates every otherwise-active rider off at fail and partial quality', () => {
+    const riderEligibleCases = [
+      [1, 2, true],
+      [1, 3, true],
+      [2, 3, true],
+    ] as const;
+
+    for (const quality of [0, 0.5]) {
+      for (const [spellTier, drawnDifficulty, packReady] of riderEligibleCases) {
+        expect(riderBonus(spellTier, drawnDifficulty, packReady)).toBe(1);
+        expect(quality === 1 && riderBonus(spellTier, drawnDifficulty, packReady) === 1).toBe(false);
+      }
+    }
+  });
+});
+
+describe("§5's no-dominated-strategies proof — literal regime numbers", () => {
+  const primaryDamageAmount = (ops: ReturnType<typeof resolveSpell>): number => {
+    const damage = ops.find((op) => op.op === 'damage' && op.targetId === TARGETS.primaryTargetId);
+    if (!damage || damage.op !== 'damage') throw new Error('expected a primary damage op');
+    return damage.amount;
+  };
+
+  it('reproduces the pre-classification violation in the raw rider math', () => {
+    const smiteToday = resolveSpell(SPELLBOOK.smite, 1, {
+      ...TARGETS,
+      rider: riderBonus(1, 2, true) === 1,
+    });
+    const cinderToday = resolveSpell(SPELLBOOK['cinder-rebuke'], 1, {
+      ...TARGETS,
+      overglow: true,
+      rider: riderBonus(2, 2, true) === 1,
+    });
+    const smiteTodayAmount = primaryDamageAmount(smiteToday);
+    const cinderTodayAmount = primaryDamageAmount(cinderToday);
+
+    expect(smiteTodayAmount).toBe(4);
+    expect(cinderTodayAmount).toBe(3);
+    expect(smiteTodayAmount).toBeGreaterThan(cinderTodayAmount);
+    expect(cinderToday.some((op) => op.op === 'push')).toBe(true);
+  });
+
+  it('restores damage parity after classification while preserving Cinder-Rebuke control', () => {
+    const smitePost = resolveSpell(SPELLBOOK.smite, 1, {
+      ...TARGETS,
+      rider: riderBonus(1, 1, true) === 1,
+    });
+    const cinderPost = resolveSpell(SPELLBOOK['cinder-rebuke'], 1, {
+      ...TARGETS,
+      overglow: true,
+      rider: riderBonus(2, 1, true) === 1,
+    });
+    const smitePostAmount = primaryDamageAmount(smitePost);
+    const cinderPostAmount = primaryDamageAmount(cinderPost);
+
+    expect(smitePostAmount).toBe(3);
+    expect(cinderPostAmount).toBe(3);
+    expect(smitePostAmount).toBe(cinderPostAmount);
+    expect(cinderPost.some((op) => op.op === 'push')).toBe(true);
+  });
+});
+
 describe('§5.4 anti-soul math — S1 (no question-avoidant optimum)', () => {
   it('max Strike-turn damage (base + flank) stays strictly below the cheapest q1 tier-1 spell\'s full turn potential', () => {
     // Computed from the tables, not hardcoded: Strike's base comes from resolveAction (the
@@ -217,7 +292,7 @@ describe('§5.4 anti-soul math — S1 (no question-avoidant optimum)', () => {
     // hardcoded"; only the aggregation formula — max reachable tiles per shape — is added).
     const strikeBase = resolveAction('strike', 1).hits;
     const strikeMax = computeHit({
-      base: strikeBase, attackerStatuses: [], targetStatuses: [], flank: true, overglow: false, weld: false,
+      base: strikeBase, attackerStatuses: [], targetStatuses: [], flank: true, overglow: false, weld: false, rider: false,
     }).hpDamage;
 
     const maxAoeTiles = (id: 'smite' | 'weave' | 'sequence' | 'cast'): number => {

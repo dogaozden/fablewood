@@ -222,7 +222,7 @@ describe('effectiveMove — bound-still-acts & dimmed floor (§3)', () => {
 });
 
 describe('computeHit — the one pipeline (§3 rule 4)', () => {
-  const noMods = { attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false };
+  const noMods = { attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false };
 
   it('base only, no modifiers', () => {
     expect(computeHit({ base: 3, ...noMods })).toMatchObject({ hpDamage: 3, absorbed: 0 });

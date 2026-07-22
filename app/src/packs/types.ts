@@ -3,6 +3,7 @@
 
 export type FactType = 'rule' | 'concept' | 'advice' | 'do' | 'dont' | 'number' | 'story';
 export type EncounterKind = 'mcq' | 'free_recall' | 'scenario_branch' | 'match' | 'order';
+export type EncounterDifficulty = 1 | 2 | 3; // Ember | Lantern | Beacon
 
 export interface Source {
   id?: string;
@@ -19,6 +20,11 @@ export interface PackMeta {
   title: string;
   version: string;
   sources: Source[];
+  /**
+   * True once every encounter has passed the later difficulty-classification pipeline.
+   * Gates the reward rider; absent/false keeps it fully inert. P1 never sets this true.
+   */
+  difficultyClassified?: boolean;
 }
 
 export interface SourceRef {
@@ -50,6 +56,8 @@ export interface Encounter {
   id: string;
   fact_ids: string[];
   kind: EncounterKind;
+  /** Optional; absent = Lantern (2). NOT Fact.difficulty's axis (§1.1). */
+  difficulty?: EncounterDifficulty;
   template_vars?: Record<string, unknown>;
   prompt: string;
   options?: unknown[];

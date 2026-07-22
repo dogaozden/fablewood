@@ -44,7 +44,7 @@ import {
   SPELLBOOK, resolveSpell, spellsForArt, qualitySlot, type SpellDef, type SpellId, type BoardOp, type ResolveSpellOpts,
 } from './spells';
 import {
-  ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus,
+  ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus, riderBonus,
   type ArtRanks, type GlowState,
 } from './arts';
 import { mulberry32, layoutSeed } from './rng';
@@ -162,6 +162,9 @@ export class CombatScene extends Phaser.Scene {
   /** cached ONCE per battle (loadContent, after allFactIds is built) — never recomputed mid-battle. */
   private rank: 1 | 2 | 3 = 1;
   private rankInfo: ArtRanks = { rank: 1, welded3: 0, welded4: 0 };
+  /** cached ONCE per battle (loadContent, where pack.meta is in scope) — never recomputed
+   *  mid-battle; reset in create() (Trap-1, reused scene instance — see rankInfo above). */
+  private packDifficultyClassified = false;
   /** party-shared, per-battle, reset in create() — NEVER persisted (§13/§14). */
   private glow: GlowState = { pips: 0 };
   /** the concrete spell about to be cast; set only when a T2/T3 tier is chosen via the
@@ -241,6 +244,7 @@ export class CombatScene extends Phaser.Scene {
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
+    this.packDifficultyClassified = false;
     this.glow = { pips: 0 };
     this.pendingSpell = null;
     this.flyoutAction = null;
@@ -540,6 +544,7 @@ export class CombatScene extends Phaser.Scene {
       const entry = packs.find((pk) => pk.id === this.launch.packId);
       if (entry) {
         const pack = entry.pack as Pack;
+        this.packDifficultyClassified = pack.meta.difficultyClassified ?? false;
         for (const f of pack.facts ?? []) {
           this.allFactIds.add(f.id);
           for (const t of f.tags ?? []) {
@@ -1047,7 +1052,7 @@ export class CombatScene extends Phaser.Scene {
         const flank = isFlanked(striker, vacated, striker.team, this.units);
         const result = computeHit({
           base: 1, attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
-          flank, overglow: false, weld: false,
+          flank, overglow: false, weld: false, rider: false,
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
@@ -1213,6 +1218,7 @@ export class CombatScene extends Phaser.Scene {
     try {
       result = await services.runEncounter({
         context, kinds: [artKind], factIds, packId: this.launch.packId, seed: this.encSeed++, flair: spell.label,
+        spellTier: spell.tier,
       });
     } catch {
       result = { encounterId: `local-${spell.id}`, kind: artKind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
@@ -1244,6 +1250,7 @@ export class CombatScene extends Phaser.Scene {
 
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
     const weld = weldBonus(factBoxesAtCast) === 1;
+    const rider = quality === 1 && riderBonus(spell.tier, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
     const geometry = this.spellGeometry(unit, spell, tile, quality);
     const opts: ResolveSpellOpts = {
       primaryTargetId: geometry.primaryId,
@@ -1253,6 +1260,7 @@ export class CombatScene extends Phaser.Scene {
       dir: geometry.dir,
       overglow,
       weld,
+      rider,
       miraBonus,
       vsBoss,
     };
@@ -1355,7 +1363,7 @@ export class CombatScene extends Phaser.Scene {
         if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
         const result = computeHit({
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
-          flank: false, overglow: false, weld: false,
+          flank: false, overglow: false, weld: false, rider: false,
         });
         target.statuses = result.targetStatuses;
         if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
@@ -1407,7 +1415,7 @@ export class CombatScene extends Phaser.Scene {
     if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
-      flank: false, overglow: false, weld: false,
+      flank: false, overglow: false, weld: false, rider: false,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) {
@@ -1487,7 +1495,7 @@ export class CombatScene extends Phaser.Scene {
     const flank = isFlanked(attacker, target, attacker.team, this.units);
     const result = computeHit({
       base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
-      flank, overglow: false, weld: false,
+      flank, overglow: false, weld: false, rider: false,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
@@ -1847,7 +1855,7 @@ export class CombatScene extends Phaser.Scene {
       base: attacker.attack + bumpBonus,
       attackerStatuses: attacker.statuses,
       targetStatuses: target.statuses,
-      flank, overglow: false, weld: false,
+      flank, overglow: false, weld: false, rider: false,
     });
     target.statuses = result.targetStatuses;
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {

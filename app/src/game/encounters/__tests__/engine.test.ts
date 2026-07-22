@@ -51,6 +51,55 @@ describe('pick — the due queue drives selection', () => {
   });
 });
 
+describe('pick — difficulty filter (§3 difficulty-rewards.md)', () => {
+  const difficultyPack = (...difficulties: Array<1 | 2 | 3>): Pack => mkPack(
+    difficulties.map((difficulty, index) => ({
+      id: `e-d${index + 1}`,
+      fact_ids: [`f${index + 1}`],
+      kind: 'mcq' as const,
+      prompt: `difficulty ${difficulty}`,
+      options: ['x'],
+      answer: 'x',
+      difficulty,
+    })),
+  );
+
+  it('Tier 1 is a true no-op across a mixed-difficulty pool', () => {
+    const pack = difficultyPack(1, 2, 3);
+    const withoutTier = pick(req({ factIds: ['f1', 'f3', 'f2'], kinds: ['mcq'] }), [pack]);
+    const tier1 = pick(req({ factIds: ['f1', 'f3', 'f2'], kinds: ['mcq'], spellTier: 1 }), [pack]);
+
+    expect(tier1).toBe(withoutTier);
+    expect(tier1?.id).toBe('e-d1');
+  });
+
+  it('Tier 2 is a hard floor while preserving due-order inside the eligible pool', () => {
+    const pack = difficultyPack(1, 2);
+
+    // f1 is more due but its only mcq is below the floor, so selection advances to f2.
+    expect(pick(req({ factIds: ['f1', 'f2'], kinds: ['mcq'], spellTier: 2 }), [pack])?.id).toBe('e-d2');
+  });
+
+  it('Tier 2 keeps the more-due fact when its encounter already clears the floor', () => {
+    const pack = difficultyPack(2, 2);
+
+    expect(pick(req({ factIds: ['f1', 'f2'], kinds: ['mcq'], spellTier: 2 }), [pack])?.id).toBe('e-d1');
+  });
+
+  it('Tier 3 falls back to the kind-only pool when no difficulty-3 encounter exists', () => {
+    const pack = difficultyPack(1, 2);
+
+    // The preference is empty, so honest fallback restores the un-narrowed due-order winner.
+    expect(pick(req({ factIds: ['f1', 'f2'], kinds: ['mcq'], spellTier: 3 }), [pack])?.id).toBe('e-d1');
+  });
+
+  it('Tier 3 binds to a difficulty-3 encounter when the preference can be met', () => {
+    const pack = difficultyPack(3, 1, 2);
+
+    expect(pick(req({ factIds: ['f1', 'f2', 'f3'], kinds: ['mcq'], spellTier: 3 }), [pack])?.id).toBe('e-d1');
+  });
+});
+
 describe('reskin — deterministic surface randomization', () => {
   const enc: Encounter = {
     id: 'm',
