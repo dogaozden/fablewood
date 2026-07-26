@@ -52,6 +52,8 @@ export interface ResolveOpts {
   miraBonus?: number;
   /** targeting the boss (Cast can strip a shield on a pass) */
   vsBoss?: boolean;
+  /** difficulty-rewards.md §4 rider, already gated by the caller */
+  rider?: boolean;
   /** scenario_branch outcome, for Parley / boss branches */
   branchTag?: string;
 }
@@ -77,6 +79,7 @@ function outcomeFromSpell(def: SpellDef, quality: Quality, opts: ResolveOpts): A
     primaryTargetId: T1_PRIMARY,
     aoeTargetIds: T1_AOE,
     miraBonus: opts.miraBonus,
+    rider: opts.rider,
     vsBoss: opts.vsBoss,
   };
   const ops = resolveSpell(def, quality, spellOpts);

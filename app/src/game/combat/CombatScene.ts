@@ -1138,7 +1138,9 @@ export class CombatScene extends Phaser.Scene {
     if (action === 'cast') this.hud.setDeliberating(true);
     let result: EncounterResult;
     try {
-      result = await services.runEncounter({ context, kinds: [kind], factIds, packId: this.launch.packId, seed: this.encSeed++ });
+      result = await services.runEncounter({
+        context, kinds: [kind], factIds, packId: this.launch.packId, seed: this.encSeed++, spellTier: 1,
+      });
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
@@ -1166,8 +1168,15 @@ export class CombatScene extends Phaser.Scene {
       this.hud.showBanner('The lantern steadies you — the miss becomes a graze.', P.lanternGold);
     }
 
+    // Courtcraft's quality is the branch outcome, not the lantern-grace-adjusted quality
+    // passed to the legacy adapter. Keep the rider gate aligned with resolveAction's Parley
+    // adapter, which derives its spell slot from branchTag for the same reason.
+    const quality: Quality = action === 'parley'
+      ? (result.branchTag === 'good' ? 1 : result.branchTag === 'bad' ? 0 : 0.5)
+      : dmgQuality;
+    const rider = quality === 1 && riderBonus(1, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-    const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag });
+    const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider });
     if (action === 'smite' || action === 'weave' || action === 'sequence' || action === 'cast') {
       this.attackerTell(unit, tile, ACTIONS[action].tint);
     }

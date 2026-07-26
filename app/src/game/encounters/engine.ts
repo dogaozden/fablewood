@@ -7,7 +7,7 @@
  * reskin(): deterministic surface randomization for anti-staleness (Fable_SPEC §2 "Reskin on
  * repeat") — same (encounter, seed) always yields the same output; correctness never moves.
  */
-import type { EncounterRequest, Quality } from '../contracts';
+import type { EncounterRequest, EncounterResult, Quality } from '../contracts';
 import type { Encounter, EncounterDifficulty, Pack } from '../../packs/types';
 
 // --- deterministic RNG (mulberry32, matching the boot scene's seed discipline) ---
@@ -35,6 +35,11 @@ export function seededShuffle<T>(arr: readonly T[], rng: () => number): T[] {
 
 export function difficultyOf(e: Encounter): EncounterDifficulty {
   return (e.difficulty as EncounterDifficulty | undefined) ?? 2;
+}
+
+/** Stamp the resolved encounter's effective difficulty at the runner choke point. */
+export function stampDifficulty(result: EncounterResult, encounter: Encounter): EncounterResult {
+  return { ...result, difficulty: difficultyOf(encounter) };
 }
 
 // Tier 3 is a PREFERENCE (only difficulty 3 counts eligible); tiers 1-2 are FLOORS (>= tier).
