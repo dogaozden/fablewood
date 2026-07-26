@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pick, reskin, scoreMatch, scoreOrder, stampDifficulty } from '../engine';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph, pick, reskin, scoreMatch, scoreOrder, stampDifficulty } from '../engine';
 import type { Encounter, Pack } from '../../../packs/types';
 import type { EncounterRequest, EncounterResult } from '../../contracts';
 
@@ -66,6 +66,19 @@ describe('stampDifficulty — encounter result producer', () => {
     expect(stampDifficulty(result, {
       id: 'unmarked', fact_ids: ['f'], kind: 'mcq', prompt: 'unmarked',
     }).difficulty).toBe(2);
+  });
+});
+
+describe('difficulty presentation metadata (§7)', () => {
+  it('keeps the shipped name, glyph, tint, and short policy badge in one registry', () => {
+    expect(DIFFICULTY_DEFS).toEqual({
+      1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
+      2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
+      3: { name: 'Beacon', glyph: '■', tint: 0xfff1c6 },
+    });
+    expect(difficultyPolicyGlyph(1)).toBe('▫+');
+    expect(difficultyPolicyGlyph(2)).toBe('◧+');
+    expect(difficultyPolicyGlyph(3)).toBe('■?');
   });
 });
 

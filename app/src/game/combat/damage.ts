@@ -88,7 +88,10 @@ function outcomeFromSpell(def: SpellDef, quality: Quality, opts: ResolveOpts): A
   const hits = dmgOps.find((o) => o.targetId === T1_PRIMARY)?.amount ?? 0;
   const aoeHit = dmgOps.find((o) => o.targetId !== T1_PRIMARY)?.amount ?? 0;
   const fadeOpAmount = (ops.find((o): o is Extract<BoardOp, { op: 'fade' }> => o.op === 'fade'))?.amount ?? 0;
-  const banner = ops.find((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')?.text ?? '';
+  const banner = ops
+    .filter((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')
+    .map((o) => o.text)
+    .join('\n');
 
   return {
     ...EMPTY,

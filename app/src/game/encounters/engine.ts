@@ -37,6 +37,18 @@ export function difficultyOf(e: Encounter): EncounterDifficulty {
   return (e.difficulty as EncounterDifficulty | undefined) ?? 2;
 }
 
+/** Shared presentation metadata for the encounter difficulty axis (§1, §7). */
+export const DIFFICULTY_DEFS: Record<EncounterDifficulty, { name: string; glyph: string; tint: number }> = {
+  1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
+  2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
+  3: { name: 'Beacon', glyph: '■', tint: 0xfff1c6 },
+};
+
+/** Short policy badge for the tier flyout: floors use +, T3's preference uses ?. */
+export function difficultyPolicyGlyph(tier: EncounterDifficulty): string {
+  return `${DIFFICULTY_DEFS[tier].glyph}${tier === 3 ? '?' : '+'}`;
+}
+
 /** Stamp the resolved encounter's effective difficulty at the runner choke point. */
 export function stampDifficulty(result: EncounterResult, encounter: Encounter): EncounterResult {
   return { ...result, difficulty: difficultyOf(encounter) };

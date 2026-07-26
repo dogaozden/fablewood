@@ -488,6 +488,8 @@ export function resolveSpell(def: SpellDef, quality: Quality, opts: ResolveSpell
   }
 
   ops.push({ op: 'banner', text: def.banner[slot] });
+  if (opts.weld) ops.push({ op: 'banner', text: 'The welded truth strikes true.' });
+  if (opts.rider) ops.push({ op: 'banner', text: 'The truth burns brighter. (+1)' });
   return ops;
 }
 
