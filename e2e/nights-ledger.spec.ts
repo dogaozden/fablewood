@@ -35,6 +35,12 @@ async function captureLedger(page: Page, shotPath: string): Promise<LedgerSnap |
   });
 }
 
+// The retreat test wipes the pool to 0; reset HP afterwards so the shared STATE_DIR never
+// strands a downstream combat spec at a near-death party (they rely on the default full pool).
+test.afterEach(async ({ request }) => {
+  await request.put('/api/state/save.json', { data: { hp: 16 } });
+});
+
 async function combatState(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;

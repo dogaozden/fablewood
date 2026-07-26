@@ -86,6 +86,9 @@ test.describe('reclaimed from the fade — the redemption bell', () => {
     for (const entry of packs) for (const f of entry.pack?.facts ?? []) facts[f.id] = hist([0]);
     expect(Object.keys(facts).length, 'the installed pack has facts to seed').toBeGreaterThan(0);
     await seedSrs(page, facts);
+    // Full pool so the party survives long enough to Cast (the shared STATE_DIR may carry a
+    // near-death HP left by a prior spec's wipe).
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
 
     await page.goto('/?scene=combat&seed=7&demo=1');
     await waitReady(page, 'combat');
