@@ -19,8 +19,9 @@ interface LedgerSnap {
  *  dismisses it after a beat, so capture the visual first, then read all the text at once. */
 async function captureLedger(page: Page, shotPath: string): Promise<LedgerSnap | null> {
   await page.locator('.fw-overlay .fw-ledger-title').waitFor({ state: 'visible', timeout: 30_000 });
-  await page.screenshot({ path: shotPath });
-  return page.evaluate(() => {
+  // Read the load-bearing data FIRST (one atomic evaluate) — under fleet CPU load a slow
+  // screenshot must never let the auto-advance dismiss the ledger before we've captured it.
+  const data = await page.evaluate(() => {
     const root = document.querySelector('.fw-overlay');
     if (!root) return null;
     return {
@@ -33,6 +34,8 @@ async function captureLedger(page: Page, shotPath: string): Promise<LedgerSnap |
       signoff: root.querySelector('.fw-ledger-signoff')?.textContent ?? '',
     } as LedgerSnap;
   });
+  await page.screenshot({ path: shotPath });
+  return data;
 }
 
 // The retreat test wipes the pool to 0; reset HP afterwards so the shared STATE_DIR never

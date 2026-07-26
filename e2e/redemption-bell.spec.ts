@@ -70,7 +70,8 @@ test.describe('reclaimed from the fade — the redemption bell', () => {
 
     await page.locator('.fw-opt', { hasText: 'The third week' }).click();
     await expect(page.locator('.fw-verdict.pass')).toBeVisible();
-    expect(await page.locator('.fw-reclaim').count(), 'no bell without a pending miss').toBe(0);
+    // the chip (if any) is inserted synchronously with the verdict; assert its absence retryably.
+    await expect(page.locator('.fw-reclaim'), 'no bell without a pending miss').toHaveCount(0);
   });
 
   test('combat: a redeemed Cast rings the bell and increments the run reclaimed tally', async ({ page }) => {

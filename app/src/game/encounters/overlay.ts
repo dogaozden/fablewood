@@ -391,7 +391,8 @@ export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean
     });
     requestAnimationFrame(() => cont.focus());
     // auto-drive / dev flows must never hang on a click that won't come: auto-advance after a
-    // readable beat (the dungeon cards' 'auto' CardMode idiom). Real play waits for input.
-    if (opts.auto) setTimeout(done, 1200);
+    // readable beat (the dungeon cards' 'auto' CardMode idiom). Real play waits for input. The
+    // window is generous so an e2e can capture the card even under fleet CPU load.
+    if (opts.auto) setTimeout(done, 2000);
   });
 }
