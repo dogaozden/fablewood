@@ -110,11 +110,14 @@ export function record(
   factType?: string,
 ): SrsEntry {
   // unseen == box 1 for transition purposes; a corrupted box (out of range /
-  // non-numeric from a mangled state file) is clamped so BOX_INTERVALS[newBox]
-  // can never be undefined — that would poison next_due with NaN.
+  // non-numeric / fractional from a mangled or hand-edited state file) is
+  // clamped AND floored so BOX_INTERVALS[newBox] can never be undefined — an
+  // in-range fractional box (e.g. 2.5) is Number.isFinite, so the range clamp
+  // alone would let it sail through unchanged, and BOX_INTERVALS has no
+  // fractional keys: that would poison next_due with NaN just the same.
   const rawBox = entry?.box;
   const curBox = Number.isFinite(rawBox)
-    ? Math.min(Math.max(rawBox as number, MIN_BOX), MAX_BOX)
+    ? Math.floor(Math.min(Math.max(rawBox as number, MIN_BOX), MAX_BOX))
     : MIN_BOX;
   let newBox: number;
   if (quality === 1) newBox = Math.max(curBox, Math.min(curBox + 1, capFor(factType)));
