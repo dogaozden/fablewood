@@ -182,8 +182,15 @@ async function driveParley(page: Page, phaseNum: number, shotPrefix: string): Pr
   expect(idAfter, `phase ${phaseNum} resolved AN encounter`).not.toBeNull();
   expect(idAfter, `phase ${phaseNum} changed from the prior encounter id`).not.toBe(idBefore);
   expect(idAfter, `phase ${phaseNum} routed to a REAL vc-law-authored phase, not a disconnected fixture id`).toMatch(/^enc\.sb\.boss/);
-  const banner = await bannerText(page);
-  expect(banner, `phase ${phaseNum}'s matched branch is the pack's correct/"good" branch -> a shield shatters`).toContain('shield shatters');
+  // The shatter banner lands after overlay-close -> SRS record -> applyBranch, a chain whose
+  // wall time balloons under CPU starvation (parallel agent fleets) — a single fixed-delay read
+  // caught the stale proposal banner. Poll instead of sampling once.
+  await expect
+    .poll(() => bannerText(page), {
+      message: `phase ${phaseNum}'s matched branch is the pack's correct/"good" branch -> a shield shatters`,
+      timeout: 8_000,
+    })
+    .toContain('shield shatters');
   // post-Parley delayedCall(900) — let the effect (shield/heal/stagger) fully apply before
   // whatever comes next (either normal turns resume, or victory fires if shields hit 0).
   await page.waitForTimeout(1000);
