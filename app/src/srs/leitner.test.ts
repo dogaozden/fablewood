@@ -111,6 +111,24 @@ describe('record — box transitions', () => {
     expect(Number.isFinite(nonNumeric.next_due)).toBe(true);
   });
 
+  it('floors a fractional persisted box so next_due never goes NaN', () => {
+    // A hand-edited or partially-migrated state file can persist a fractional box
+    // (e.g. box: 2.5). Number.isFinite(2.5) is true, so the existing out-of-range/
+    // non-numeric clamp above lets it through UNCHANGED — BOX_INTERVALS[2.5] has no
+    // entry, so next_due = now + undefined * DAY = NaN.
+    const partial = record(entry(2.5, 0), 0.5, NOW, 'e'); // partial holds ground → floors to 2
+    expect(partial.box).toBe(2);
+    expect(partial.next_due).toBe(NOW + BOX_INTERVALS[2] * DAY);
+    expect(Number.isFinite(partial.next_due)).toBe(true);
+
+    const promoted = record(entry(2.5, 0), 1, NOW, 'e'); // correct → floors to 2, then +1
+    expect(promoted.box).toBe(3);
+    expect(Number.isFinite(promoted.next_due)).toBe(true);
+
+    const flooredNotRounded = record(entry(7.9, 0), 0.5, NOW, 'e'); // floor, never round up
+    expect(flooredNotRounded.box).toBe(7);
+  });
+
   it('sets next_due to the correct interval for every resulting box', () => {
     const documentedIntervals = [1, 3, 7, 14, 30, 90, 180, 365];
     for (const [index, intervalDays] of documentedIntervals.entries()) {
