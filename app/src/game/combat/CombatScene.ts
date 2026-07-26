@@ -131,7 +131,7 @@ export class CombatScene extends Phaser.Scene {
   private results: EncounterResult[] = [];
   private hpLost = 0;
   /** §3.2 Night's Ledger per-run tallies (consumed by the harvest card on run end): facts
-   *  reclaimed from the Fade (§3.1), and facts newly welded (crossed into box ≥ 2) this run.
+   *  reclaimed from the Fade (§3.1), and facts newly welded (crossed into box ≥ 4) this run.
    *  Both are counted in record(), the single choke point every SRS-recorded encounter passes. */
   private reclaimed = 0;
   private newWelds = 0;
@@ -2186,9 +2186,11 @@ export class CombatScene extends Phaser.Scene {
     } catch { /* recording is best-effort; combat proceeds */ }
     // Count the harvest AFTER the write settles the box (store.record awaits its persist, then
     // updates the cache boxOfSafe reads). A failed best-effort write leaves boxes untouched, so
-    // nothing false is tallied. "Newly welded" = a fact that crossed INTO box ≥ 2 on this write.
+    // nothing false is tallied. "Newly welded" = a fact that crossed INTO box ≥ 4 on this write —
+    // the weld-edge mastery level (weldBonus / welded4, magic-combat-depth.md), not mere "learning"
+    // (box 2). A rarer, milestone-worthy row; zero-suppression hides it on the common run.
     result.factIds.forEach((id, i) => {
-      if (beforeBoxes[i] < 2 && this.boxOfSafe(id) >= 2) this.newWelds++;
+      if (beforeBoxes[i] < 4 && this.boxOfSafe(id) >= 4) this.newWelds++;
     });
     if (reclaimedId) this.reclaimed++;
     return { reclaimedId };

@@ -1,9 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, currentScene } from './helpers';
+import { waitReady, currentScene, waitForState } from './helpers';
 
 // "The Night's Ledger" (fun-review.md §3.2) — the run-harvest overlay DungeonScene shows when a
-// run ends. Proves: the exit-specific subtitle, "Held against the Fade" always present, zero-row
-// suppression (welds/reclaimed hidden when 0), and that it fires on BOTH victory and retreat.
+// run ENDS (boss victory / retreat), NOT after a mid-crawl room clear. Proves: run-end-only firing,
+// the exit-specific subtitle, "Held against the Fade" always present, zero-row suppression.
 // It's a DOM overlay (document.body child) so it's queryable directly.
 
 const EV = 'screenshots';
@@ -52,10 +52,25 @@ async function combatState(page: Page): Promise<string | null> {
   });
 }
 
-test('Night\'s Ledger on victory: title, "vault stands cleared" subtitle, Held always shown, zero rows suppressed', async ({ page }) => {
+test('no Night\'s Ledger after a mid-run room clear — only at run end', async ({ page }) => {
   test.setTimeout(60_000);
-  // packless sim victory drives straight through DungeonScene.resolveCombat's normal-victory tail.
+  // auto=win sim-clears a single normal room mid-crawl; the ledger must NOT fire here (§3.2 rescope).
   await page.goto('/?scene=vaults&dev=1&auto=win&seed=7');
+  await waitReady(page, 'vaults');
+  // wait until the room-clear has settled (persisted) — a ledger WOULD have shown by now if it fired
+  await waitForState(page, 'save.json', (s: { dungeon?: { cleared?: string[] } } | null) =>
+    !!s?.dungeon?.cleared?.includes('under-1'),
+  );
+  await expect(
+    page.locator('.fw-overlay .fw-ledger-title'),
+    'no run-end ledger mid-crawl',
+  ).toHaveCount(0);
+});
+
+test('Night\'s Ledger at boss victory (run end): title, "vault stands cleared", Held always shown, zero rows suppressed', async ({ page }) => {
+  test.setTimeout(60_000);
+  // auto=boss sim-clears to the Vault-Warden → bossVictory → vaultOpensBeat → the run-end ledger.
+  await page.goto('/?scene=vaults&dev=1&auto=boss&seed=7');
 
   const led = await captureLedger(page, `${EV}/e2e-nights-ledger-victory.png`);
   expect(led, 'the ledger rendered').not.toBeNull();

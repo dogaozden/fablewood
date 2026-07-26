@@ -39,6 +39,7 @@ import devFactsJson from './__fixtures__/dev.facts.json';
 
 const PENDING_KEY = 'vaults:pendingOutcome';
 const PACKID_KEY = 'vaults:packId';
+const RUN_HARVEST_KEY = 'vaults:runHarvest';
 /** Party HP pool = Keeper 10 + Mira 6 (blueprint §3). Shared assumption with combat. */
 const PARTY_MAX_HP = 16;
 const GATE_FAIL_HP = 1;
@@ -49,6 +50,21 @@ const DEV_REWARD = 'the Undercroft falls quiet, and one knot in the Fade comes u
 interface Pending {
   roomId: string;
   outcome: CombatOutcome;
+}
+
+/**
+ * §3.2 — the Night's Ledger tallies ACCUMULATED across a whole crawl. DungeonScene restarts on
+ * every real battle (doCombat's scene.start('combat')), so run-scoped state can't live in scene
+ * fields; it rides the game registry (survives scene restarts, like PENDING_KEY). In-memory only
+ * — a mid-run reload forfeits the tally, which is acceptable: the harvest is a ceremony shown at
+ * run end, not a persisted record.
+ */
+interface RunHarvest {
+  /** distinct factIds answered q1 across the run — "Held against the Fade" */
+  held: string[];
+  reclaimed: number;
+  newWelds: number;
+  gold: number;
 }
 
 export class DungeonScene extends Phaser.Scene {
@@ -147,6 +163,10 @@ export class DungeonScene extends Phaser.Scene {
       if (!transitioned) this.markReadyOnce();
       return;
     }
+
+    // §3.2 — no pending outcome means a fresh vault entry (not a battle return): start a new
+    // crawl's Night's Ledger harvest. Battle returns above skip this, so the tally accumulates.
+    this.resetHarvest();
 
     if (this.auto) {
       await this.runAuto();
@@ -371,9 +391,10 @@ export class DungeonScene extends Phaser.Scene {
       // progress was persisted before combat — only the loot roll is forfeit (never story)
       this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
       await this.wait(1000);
-      // §3.2 the Night's Ledger — the run ends here; harvest before the walk home (no gold on a
-      // retreat, streak unchanged so it shows only if already standing).
-      await this.runNightLedger(outcome, 'retreat', 0, services.save.get().streak);
+      // §3.2 the Night's Ledger — the run ends here; fold this last battle in, then show the whole
+      // crawl's harvest before the walk home (no loot on a retreat, streak unchanged).
+      this.accrueHarvest(outcome, 0);
+      await this.runNightLedger('retreat', services.save.get().streak);
       this.scene.start('hamlet', { seed: this.seed });
       return { transitioned: true };
     }
@@ -408,8 +429,9 @@ export class DungeonScene extends Phaser.Scene {
     this.drawMap();
     this.refreshStatus();
     const gold = await this.grantRoomLoot(room);
-    // §3.2 the Night's Ledger — a room falls; harvest this battle's gains before pressing on.
-    await this.runNightLedger(outcome, 'victory', gold, streak);
+    // §3.2 — fold this room into the run harvest; the Night's Ledger shows ONLY at run end (boss
+    // victory / retreat), never mid-crawl (a per-room card would be five interruptions per vault).
+    this.accrueHarvest(outcome, gold);
     this.busy = false;
     return { transitioned: false };
   }
@@ -431,31 +453,39 @@ export class DungeonScene extends Phaser.Scene {
     return loot.gold;
   }
 
+  /** §3.2 — start a fresh crawl's harvest (called on a fresh vault entry, not a battle return). */
+  private resetHarvest(): void {
+    this.registry.set(RUN_HARVEST_KEY, { held: [], reclaimed: 0, newWelds: 0, gold: 0 } as RunHarvest);
+  }
+
+  /** §3.2 — fold one battle's outcome (+ its room loot) into the run harvest. "Held" is a distinct
+   *  factId set across the whole crawl; reclaimed/newWelds/gold sum. Called on EVERY battle result. */
+  private accrueHarvest(outcome: CombatOutcome, gold: number): void {
+    const h = (this.registry.get(RUN_HARVEST_KEY) as RunHarvest | undefined) ?? {
+      held: [], reclaimed: 0, newWelds: 0, gold: 0,
+    };
+    const held = new Set(h.held);
+    for (const r of outcome.results) if (r.quality === 1) for (const id of r.factIds) held.add(id);
+    this.registry.set(RUN_HARVEST_KEY, {
+      held: [...held],
+      reclaimed: h.reclaimed + (outcome.reclaimed ?? 0),
+      newWelds: h.newWelds + (outcome.newWelds ?? 0),
+      gold: h.gold + gold,
+    } as RunHarvest);
+  }
+
   /**
-   * §3.2 — the Night's Ledger run-harvest overlay (encounters agent's UI, via services). "Held
-   * against the Fade" is this battle's distinct q1 facts (from the outcome's results); the rest
-   * ride through CombatOutcome (reclaimed/newWelds) or the caller's settlement (gold/streak).
-   * Best-effort — a missing overlay service must never strand the return home.
+   * §3.2 — the Night's Ledger run-harvest overlay (encounters agent's UI, via services). Shows the
+   * WHOLE crawl accumulated in the registry (not just the last battle). Fires only at run end —
+   * boss victory and retreat. Best-effort: a missing overlay service must never strand the walk home.
    */
-  private async runNightLedger(
-    outcome: CombatOutcome,
-    kind: 'victory' | 'retreat',
-    gold: number,
-    streak: number,
-  ): Promise<void> {
-    const held = new Set(
-      outcome.results.filter((r) => r.quality === 1).flatMap((r) => r.factIds),
-    ).size;
+  private async runNightLedger(kind: 'victory' | 'retreat', streak: number): Promise<void> {
+    const h = (this.registry.get(RUN_HARVEST_KEY) as RunHarvest | undefined) ?? {
+      held: [], reclaimed: 0, newWelds: 0, gold: 0,
+    };
     try {
       await services.showNightLedger(
-        {
-          outcome: kind,
-          held,
-          welds: outcome.newWelds ?? 0,
-          reclaimed: outcome.reclaimed ?? 0,
-          gold,
-          streak,
-        },
+        { outcome: kind, held: h.held.length, welds: h.newWelds, reclaimed: h.reclaimed, gold: h.gold, streak },
         { auto: !!this.auto },
       );
     } catch {
@@ -520,9 +550,11 @@ export class DungeonScene extends Phaser.Scene {
       : ` The Warden yields ${loot.gold} coin and their signet.`;
 
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
-    // §3.2 — the boss finale plays its full staged reveal FIRST, then the quiet harvest, then home.
+    // §3.2 — fold the boss battle + bounty into the run harvest; the finale plays its full staged
+    // reveal FIRST, then the accumulated Night's Ledger, then home.
+    this.accrueHarvest(outcome, loot.gold);
     await this.view.vaultOpensBeat(reward + lootLine, streak);
-    await this.runNightLedger(outcome, 'victory', loot.gold, streak);
+    await this.runNightLedger('victory', streak);
     this.scene.start('hamlet', { seed: this.seed });
   }
 

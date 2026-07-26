@@ -118,7 +118,8 @@ export interface CombatOutcome {
   hpLost: number;
   results: EncounterResult[];
   /** §3.2 Night's Ledger run tallies — facts reclaimed from the Fade (§3.1) and facts newly
-   *  welded (crossed into box ≥ 2) this run. Optional: the packless sim victory omits them, and
+   *  welded (crossed into box ≥ 4, the weld-edge mastery level) this run. Optional: the packless
+   *  sim victory omits them, and
    *  consumers read `?? 0`. */
   reclaimed?: number;
   newWelds?: number;
@@ -223,7 +224,7 @@ export interface NightLedgerData {
   outcome: 'victory' | 'retreat' | 'camp';
   /** facts answered q1 this run — "Held against the Fade" (always shown) */
   held: number;
-  /** facts newly welded (crossed into box ≥ 2) — "Newly welded" */
+  /** facts newly welded (crossed into box ≥ 4, the weld-edge mastery level) — "Newly welded" */
   welds: number;
   /** facts reclaimed from the Fade (§3.1) — "Reclaimed from the Fade" */
   reclaimed: number;

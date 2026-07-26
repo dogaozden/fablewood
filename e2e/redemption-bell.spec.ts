@@ -35,6 +35,21 @@ async function seedSrs(page: Page, facts: Record<string, Entry>): Promise<void> 
   expect(res.ok(), 'seeded state/srs.json through the dev bridge').toBe(true);
 }
 
+/** Wait for the chip's bloom-in animation to REST at full opacity before capturing evidence —
+ *  a screenshot mid-fade reads as a washed-out, half-legible chip. */
+async function waitChipSettled(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const el = document.querySelector('.fw-reclaim');
+          return el ? parseFloat(getComputedStyle(el).opacity) : 0;
+        }),
+      { timeout: 3000 },
+    )
+    .toBeGreaterThan(0.98);
+}
+
 type Snap = { state: string; reclaimed: number; newWelds: number } | null;
 async function snap(page: Page): Promise<Snap> {
   return page.evaluate(() => {
@@ -59,6 +74,7 @@ test.describe('reclaimed from the fade — the redemption bell', () => {
     await expect(chip.locator('.fw-reclaim-label')).toHaveText('Reclaimed from the Fade');
     const line = ((await chip.locator('.fw-reclaim-line').textContent()) ?? '').trim();
     expect(CLERK_LINES, 'the bell shows one of the three verbatim Clerk lines').toContain(line);
+    await waitChipSettled(page);
     await page.screenshot({ path: `${EV}/e2e-redemption-chip.png` });
   });
 
@@ -110,6 +126,7 @@ test.describe('reclaimed from the fade — the redemption bell', () => {
     const chip = page.locator('.fw-reclaim');
     await expect(chip, 'the bell rings on the Cast verdict').toBeVisible({ timeout: 15_000 });
     await expect(chip.locator('.fw-reclaim-label')).toHaveText('Reclaimed from the Fade');
+    await waitChipSettled(page);
     await page.screenshot({ path: `${EV}/e2e-redemption-chip-combat.png` });
 
     await page.getByRole('button', { name: 'Onward ▸' }).click();
