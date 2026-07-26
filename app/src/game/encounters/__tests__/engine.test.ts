@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { pick, reskin, scoreMatch, scoreOrder } from '../engine';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph, pick, reskin, scoreMatch, scoreOrder, stampDifficulty } from '../engine';
 import type { Encounter, Pack } from '../../../packs/types';
-import type { EncounterRequest } from '../../contracts';
+import type { EncounterRequest, EncounterResult } from '../../contracts';
 
 function mkPack(encounters: Encounter[]): Pack {
   return {
@@ -48,6 +48,37 @@ describe('pick — the due queue drives selection', () => {
 
   it('returns null when there are no encounters', () => {
     expect(pick(req({}), [mkPack([])])).toBeNull();
+  });
+});
+
+describe('stampDifficulty — encounter result producer', () => {
+  const result: EncounterResult = {
+    encounterId: 'result', kind: 'mcq', factIds: ['f'], quality: 1,
+  };
+
+  it('stamps a marked encounter with its declared difficulty', () => {
+    expect(stampDifficulty(result, {
+      id: 'marked', fact_ids: ['f'], kind: 'mcq', prompt: 'marked', difficulty: 3,
+    }).difficulty).toBe(3);
+  });
+
+  it('stamps an unmarked encounter with the Lantern default', () => {
+    expect(stampDifficulty(result, {
+      id: 'unmarked', fact_ids: ['f'], kind: 'mcq', prompt: 'unmarked',
+    }).difficulty).toBe(2);
+  });
+});
+
+describe('difficulty presentation metadata (§7)', () => {
+  it('keeps the shipped name, glyph, tint, and short policy badge in one registry', () => {
+    expect(DIFFICULTY_DEFS).toEqual({
+      1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
+      2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
+      3: { name: 'Beacon', glyph: '■', tint: 0xfff1c6 },
+    });
+    expect(difficultyPolicyGlyph(1)).toBe('▫+');
+    expect(difficultyPolicyGlyph(2)).toBe('◧+');
+    expect(difficultyPolicyGlyph(3)).toBe('■?');
   });
 });
 

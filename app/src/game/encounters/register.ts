@@ -9,7 +9,7 @@
 import { services, type EncounterRequest, type EncounterResult, type FactLite } from '../contracts';
 import type { Fact, Pack } from '../../packs/types';
 import { getPacks } from '../../bridge/client';
-import { pick, reskin } from './engine';
+import { pick, reskin, stampDifficulty } from './engine';
 import { presentEncounter, presentTeaching } from './overlay';
 import { judge as judgeClient } from '../../judge/client';
 import { FIXTURE_PACK, FIXTURE_TEACHING } from './fixtures';
@@ -51,7 +51,8 @@ services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> 
   }
   const reskinned = reskin(chosen, req.seed);
   const facts = factsFor(chosen.fact_ids, sourcePack);
-  return presentEncounter(reskinned, facts, { context: req.context, judge: services.judge, flair: req.flair });
+  const result = await presentEncounter(reskinned, facts, { context: req.context, judge: services.judge, flair: req.flair });
+  return stampDifficulty(result, reskinned);
 };
 
 services.showTeaching = (facts: FactLite[]): Promise<void> => presentTeaching(facts);

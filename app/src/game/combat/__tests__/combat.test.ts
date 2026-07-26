@@ -531,6 +531,20 @@ describe('adapter equivalence — resolveAction over resolveSpell (Phase 2 §2)'
     }
   });
 
+  it('the rider increases the primary hit through the legacy T1 adapter', () => {
+    for (const [action] of T1) {
+      const withoutRider = resolveAction(action, 1).hits;
+      const withRider = resolveAction(action, 1, { rider: true }).hits;
+      expect(withRider, `${action} q1 rider`).toBeGreaterThan(withoutRider);
+    }
+  });
+
+  it('the legacy T1 adapter joins every banner op instead of dropping rider copy', () => {
+    expect(resolveAction('smite', 1, { rider: true }).banner).toBe(
+      `${SPELLBOOK.smite.banner.q1}\nThe truth burns brighter. (+1)`,
+    );
+  });
+
   it("Mira's bonus folds identically through the adapter as it did before (landed hit only, never a whiff)", () => {
     expect(resolveAction('smite', 1, { miraBonus: 1 }).hits).toBe(4);
     expect(resolveAction('smite', 0, { miraBonus: 1 }).hits).toBe(0);

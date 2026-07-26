@@ -49,6 +49,7 @@ import {
 } from './arts';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph } from '../encounters/engine';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
 
@@ -887,18 +888,20 @@ export class CombatScene extends Phaser.Scene {
    *  §9's rule stays string-matched on it, same as every other wardenAbsorbs call site). */
   private tierRow(unit: UnitState, spell: SpellDef, action: ActionKind): TierRow {
     const costText = spell.glowCost === 0 ? 'free' : `◈${spell.glowCost}`;
+    const difficulty = DIFFICULTY_DEFS[spell.tier];
+    const rowMeta = { difficultyGlyph: difficultyPolicyGlyph(spell.tier), difficultyTint: difficulty.tint };
     if (spell.tier > this.rank) {
-      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs Rank ${spell.tier}` };
+      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs Rank ${spell.tier}`, ...rowMeta };
     }
     if (this.glow.pips < spell.glowCost) {
-      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs ${spell.glowCost} glow` };
+      return { tier: spell.tier, label: spell.label, costText, enabled: false, reason: `needs ${spell.glowCost} glow`, ...rowMeta };
     }
     if (spell.shape === 'self') {
-      return { tier: spell.tier, label: spell.label, costText, enabled: true };
+      return { tier: spell.tier, label: spell.label, costText, enabled: true, ...rowMeta };
     }
     const rawTargets = this.validTargetsForSpell(unit, spell);
     const targets = this.strikableTargets(rawTargets, action);
-    if (targets.length) return { tier: spell.tier, label: spell.label, costText, enabled: true };
+    if (targets.length) return { tier: spell.tier, label: spell.label, costText, enabled: true, ...rowMeta };
     // "shielded" (not a longer sentence): the flyout row's trailing-reason slot is right-
     // anchored in a fixed ~196px row (hud.ts addRow) — a longer string here visibly collided
     // with the label text, the exact kind of legibility bug crucible v1 #10 already covers
@@ -907,6 +910,7 @@ export class CombatScene extends Phaser.Scene {
     return {
       tier: spell.tier, label: spell.label, costText, enabled: false,
       reason: rawTargets.length ? 'shielded' : 'no foe within reach',
+      ...rowMeta,
     };
   }
 
@@ -1138,7 +1142,9 @@ export class CombatScene extends Phaser.Scene {
     if (action === 'cast') this.hud.setDeliberating(true);
     let result: EncounterResult;
     try {
-      result = await services.runEncounter({ context, kinds: [kind], factIds, packId: this.launch.packId, seed: this.encSeed++ });
+      result = await services.runEncounter({
+        context, kinds: [kind], factIds, packId: this.launch.packId, seed: this.encSeed++, spellTier: 1,
+      });
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
@@ -1166,8 +1172,15 @@ export class CombatScene extends Phaser.Scene {
       this.hud.showBanner('The lantern steadies you — the miss becomes a graze.', P.lanternGold);
     }
 
+    // Courtcraft's quality is the branch outcome, not the lantern-grace-adjusted quality
+    // passed to the legacy adapter. Keep the rider gate aligned with resolveAction's Parley
+    // adapter, which derives its spell slot from branchTag for the same reason.
+    const quality: Quality = action === 'parley'
+      ? (result.branchTag === 'good' ? 1 : result.branchTag === 'bad' ? 0 : 0.5)
+      : dmgQuality;
+    const rider = quality === 1 && riderBonus(1, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-    const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag });
+    const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider });
     if (action === 'smite' || action === 'weave' || action === 'sequence' || action === 'cast') {
       this.attackerTell(unit, tile, ACTIONS[action].tint);
     }
@@ -1271,7 +1284,10 @@ export class CombatScene extends Phaser.Scene {
 
     if (spell.shape !== 'self' && spell.shape !== 'burst1') this.attackerTell(unit, tile, ACTIONS[action].tint);
     const before = this.enemyHpSum();
-    const bannerOp = ops.find((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner');
+    const bannerText = ops
+      .filter((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')
+      .map((o) => o.text)
+      .join('\n');
     this.applySpellOps(unit, action, ops);
     this.actionLog.push({ action, dmg: before - this.enemyHpSum(), overlay: true });
 
@@ -1285,7 +1301,7 @@ export class CombatScene extends Phaser.Scene {
       this.syncBoss();
     }
 
-    if (bannerOp) this.hud.showBanner(bannerOp.text, quality > 0 ? ACTIONS[action].tint : P.duskRose);
+    if (bannerText) this.hud.showBanner(bannerText, quality > 0 ? ACTIONS[action].tint : P.duskRose);
     this.refreshParty();
     this.time.delayedCall(620, () => this.endPlayerTurn());
   }
