@@ -7,10 +7,11 @@
  * parley ESC does nothing — you answer or you don't.
  */
 import type { EncounterRequest, EncounterResult, Judge, FactLite, NightLedgerData } from '../contracts';
-import type { Encounter } from '../../packs/types';
+import type { Encounter, EncounterDifficulty } from '../../packs/types';
 import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS } from './kinds';
+import { DIFFICULTY_DEFS, difficultyOf } from './engine';
 
 export interface EncounterCtx {
   context: EncounterRequest['context'];
@@ -29,7 +30,7 @@ export interface Overlay {
   isArmed(): boolean;
   /** eyebrow (action name + glyph) + prompt + rule; omit prompt for teaching. `flair` (§12.4)
    *  replaces the default action-kind name in the eyebrow ("Cinder-Rebuke" instead of "Smite"). */
-  setHeader(kindKey: string, prompt?: string, flair?: string): void;
+  setHeader(kindKey: string, prompt?: string, flair?: string, difficulty?: EncounterDifficulty): void;
   /** register a keydown handler (several may coexist; all fire). */
   onKey(fn: (e: KeyboardEvent) => void): void;
   /** animate out, remove, restore prior focus. */
@@ -165,13 +166,21 @@ function buildOverlay(): Overlay {
     isArmed() {
       return armed;
     },
-    setHeader(kindKey, prompt, flair) {
+    setHeader(kindKey, prompt, flair, difficulty) {
       const a = ACTIONS[kindKey] ?? ACTIONS.mcq;
+      const difficultyMeta = difficulty === undefined ? null : DIFFICULTY_DEFS[difficulty];
+      const difficultySpan = difficultyMeta
+        ? el('span', { class: 'fw-difficulty', text: `· ${difficultyMeta.glyph} ${difficultyMeta.name}` })
+        : null;
+      if (difficultySpan && difficultyMeta) {
+        difficultySpan.style.color = `#${difficultyMeta.tint.toString(16).padStart(6, '0')}`;
+      }
       const parts: Array<Node | string> = [
         el('div', { class: 'fw-eyebrow' }, [
           el('span', { class: 'fw-glyph', 'aria-hidden': 'true', text: a.glyph }),
           el('span', { text: flair ?? a.action }),
           el('span', { class: 'fw-kindname', text: `· ${a.kind}` }),
+          ...(difficultySpan ? [difficultySpan] : []),
         ]),
       ];
       if (prompt) parts.push(el('h2', { class: 'fw-prompt', text: prompt }));
@@ -206,7 +215,7 @@ export function presentEncounter(
 ): Promise<EncounterResult> {
   return new Promise((resolve) => {
     const o = buildOverlay();
-    o.setHeader(encounter.kind, encounter.prompt, ctx.flair);
+    o.setHeader(encounter.kind, encounter.prompt, ctx.flair, difficultyOf(encounter));
 
     const finish = async (result: EncounterResult) => {
       await o.close();

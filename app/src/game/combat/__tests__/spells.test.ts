@@ -180,6 +180,22 @@ describe('Overglow / weld / vsBoss (§5.3, §5.5, §9) — primary-only, never o
     expect(ops).toContainEqual({ op: 'damage', targetId: 'primary', amount: 5 });
   });
 
+  it('composes base, weld, and rider banners in their specified order', () => {
+    const banners = (opts: Parameters<typeof resolveSpell>[2]) => resolveSpell(SPELLBOOK.smite, 1, opts)
+      .filter((op): op is Extract<typeof op, { op: 'banner' }> => op.op === 'banner')
+      .map((op) => op.text);
+    const base = SPELLBOOK.smite.banner.q1;
+
+    expect(banners(TARGETS)).toEqual([base]);
+    expect(banners({ ...TARGETS, weld: true })).toEqual([base, 'The welded truth strikes true.']);
+    expect(banners({ ...TARGETS, rider: true })).toEqual([base, 'The truth burns brighter. (+1)']);
+    expect(banners({ ...TARGETS, weld: true, rider: true })).toEqual([
+      base,
+      'The welded truth strikes true.',
+      'The truth burns brighter. (+1)',
+    ]);
+  });
+
   it('Overglow never applies to a burst1 spell (no single primary to pin a one-time +1 to — would otherwise multiply across every hit enemy)', () => {
     const ops = resolveSpell(SPELLBOOK.lanternfall, 1, { ...TARGETS, aoeTargetIds: ['e1', 'e2', 'e3'], overglow: true });
     for (const o of ops.filter((op) => op.op === 'damage')) {

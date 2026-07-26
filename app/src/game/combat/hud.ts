@@ -42,6 +42,9 @@ export interface TierRow {
   label: string;
   /** 'free' for tier 1, else '◈N' */
   costText: string;
+  /** Short policy badge: '+' means a floor, '?' means T3's soft preference. */
+  difficultyGlyph: string;
+  difficultyTint: number;
   enabled: boolean;
   reason?: string;
 }
@@ -160,10 +163,13 @@ export class CombatHud {
     const label = this.scene.add.text(0, 0, text, {
       fontFamily: FONT, fontSize: '17px', color: hex(tint), align: 'center',
     }).setOrigin(0.5).setShadow(0, 2, hex(P.voidBlack), 4);
-    const pad = 14;
+    const padX = 14;
+    const padY = 8;
+    const boxHeight = label.height + padY * 2;
+    const boxY = -boxHeight / 2;
     const bg = this.scene.add.graphics();
-    bg.fillStyle(P.shadowPlum, 0.9).fillRoundedRect(-label.width / 2 - pad, -16, label.width + pad * 2, 32, 8);
-    bg.lineStyle(1, tint, 0.6).strokeRoundedRect(-label.width / 2 - pad, -16, label.width + pad * 2, 32, 8);
+    bg.fillStyle(P.shadowPlum, 0.9).fillRoundedRect(-label.width / 2 - padX, boxY, label.width + padX * 2, boxHeight, 8);
+    bg.lineStyle(1, tint, 0.6).strokeRoundedRect(-label.width / 2 - padX, boxY, label.width + padX * 2, boxHeight, 8);
     this.banner.add([bg, label]);
     this.scene.tweens.killTweensOf(this.banner);
     this.banner.setAlpha(0).setScale(0.96);
@@ -359,7 +365,15 @@ export class CombatHud {
     this.flyout.add(bg);
 
     let y = top + 6;
-    const addRow = (keyLabel: string, text: string, trailing: string, enabled: boolean, on: boolean, onClick: () => void): void => {
+    const addRow = (
+      keyLabel: string,
+      text: string,
+      trailing: string,
+      enabled: boolean,
+      on: boolean,
+      onClick: () => void,
+      badge?: { text: string; tint: number },
+    ): void => {
       const cy = y + rowH / 2;
       const row = this.scene.add.container(0, cy);
       const rbg = this.scene.add.graphics();
@@ -374,10 +388,20 @@ export class CombatHud {
       const label = this.scene.add.text(-rowW / 2 + 10, -9, `[${keyLabel}] ${text}`, {
         fontFamily: FONT, fontSize: '11px', color: hex(enabled ? P.parchment : P.stoneGrey),
       });
-      const trail = this.scene.add.text(rowW / 2 - 10, -9, trailing, {
+      const badgeText = badge
+        ? this.scene.add.text(rowW / 2 - 10, -9, badge.text, {
+            fontFamily: FONT, fontSize: '9px', color: hex(badge.tint),
+          }).setOrigin(1, 0)
+        : null;
+      const trail = this.scene.add.text(
+        badgeText ? rowW / 2 - 16 - badgeText.width : rowW / 2 - 10,
+        -9,
+        trailing,
+        {
         fontFamily: FONT, fontSize: '9px', color: hex(enabled ? P.lanternGold : P.stoneGrey),
-      }).setOrigin(1, 0);
-      row.add([rbg, label, trail]);
+        },
+      ).setOrigin(1, 0);
+      row.add([rbg, label, trail, ...(badgeText ? [badgeText] : [])]);
       if (enabled) {
         row.setInteractive(new Phaser.Geom.Rectangle(-rowW / 2, -rowH / 2, rowW, rowH), Phaser.Geom.Rectangle.Contains);
         row.on('pointerover', () => draw(true));
@@ -389,7 +413,15 @@ export class CombatHud {
     };
 
     for (const row of rows) {
-      addRow(String(row.tier), row.label, row.enabled ? row.costText : (row.reason ?? row.costText), row.enabled, false, () => onPickTier(row.tier));
+      addRow(
+        String(row.tier),
+        row.label,
+        row.enabled ? row.costText : (row.reason ?? row.costText),
+        row.enabled,
+        false,
+        () => onPickTier(row.tier),
+        { text: row.difficultyGlyph, tint: row.difficultyTint },
+      );
     }
     if (overglow) {
       addRow('o', 'Overglow +1', overglow.enabled ? '◈1' : (overglow.reason ?? '◈1'), overglow.enabled, overglow.on, onToggleOverglow);
