@@ -117,6 +117,11 @@ export interface CombatOutcome {
   outcome: 'victory' | 'retreat';
   hpLost: number;
   results: EncounterResult[];
+  /** §3.2 Night's Ledger run tallies — facts reclaimed from the Fade (§3.1) and facts newly
+   *  welded (crossed into box ≥ 2) this run. Optional: the packless sim victory omits them, and
+   *  consumers read `?? 0`. */
+  reclaimed?: number;
+  newWelds?: number;
 }
 
 // ---------------------------------------------------------------- srs & save
@@ -131,6 +136,9 @@ export interface SrsApi {
   boxOf(factId: string): number;
   /** avg box across facts (mastery-bound companion scaling), 0-8 */
   masteryAvg(factIds: string[]): number;
+  /** prior answer qualities for a fact, oldest first (empty if unseen). The redemption bell
+   *  (§3.1) reads this BEFORE record() to see a fact's PRIOR history. */
+  historyQualities(factId: string): Quality[];
 }
 
 export interface SaveData {
@@ -204,6 +212,27 @@ export interface SettingsApi {
   set(patch: Partial<{ muted: boolean; volume: number }>): Promise<void>;
 }
 
+// ---------------------------------------------------------------- night's ledger
+
+/**
+ * §3.2 — the run-harvest screen's data. Rows render only when their stat is nonzero, EXCEPT
+ * `held` which always shows; the empty-harvest sign-off is used when held/welds/reclaimed/gold
+ * are all zero (streak, a standing counter, does not count toward emptiness).
+ */
+export interface NightLedgerData {
+  outcome: 'victory' | 'retreat' | 'camp';
+  /** facts answered q1 this run — "Held against the Fade" (always shown) */
+  held: number;
+  /** facts newly welded (crossed into box ≥ 2) — "Newly welded" */
+  welds: number;
+  /** facts reclaimed from the Fade (§3.1) — "Reclaimed from the Fade" */
+  reclaimed: number;
+  /** gold earned this run — rendered "+N" */
+  gold: number;
+  /** hearth streak — rendered "N nights" (singular "1 night") */
+  streak: number;
+}
+
 export interface Services {
   runEncounter: RunEncounter;
   judge: Judge;
@@ -213,6 +242,9 @@ export interface Services {
   inventory: InventoryApi;
   /** teach-and-test: modal "discovered documents" cards, resolves on dismiss (encounters agent owns UI) */
   showTeaching: (facts: FactLite[]) => Promise<void>;
+  /** §3.2 the Night's Ledger run-harvest screen (encounters agent owns UI); resolves on dismiss.
+   *  `opts.auto` (dev/e2e auto-drive) auto-advances after a beat so the pipeline never hangs. */
+  showNightLedger: (data: NightLedgerData, opts?: { auto?: boolean }) => Promise<void>;
 }
 
 /**

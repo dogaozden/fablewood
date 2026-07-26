@@ -69,13 +69,16 @@ export const GLOW_CAP = 3;
  * is deliberately NOT here: the Wellspring boon sets the battle's STARTING pips directly (a
  * create()-time decision), it never flows through a gain call.
  */
-export type GlowSource = 'strike' | 'lantern-turn-start' | 'brazier-lit' | 'due-renewal' | 'wick-tallow' | 'lantern-brand';
+export type GlowSource =
+  | 'strike' | 'lantern-turn-start' | 'brazier-lit' | 'due-renewal' | 'redemption' | 'wick-tallow' | 'lantern-brand';
 
 const GLOW_AMOUNT: Record<GlowSource, number> = {
   strike: 1,
   'lantern-turn-start': 1,
   'brazier-lit': 1,
   'due-renewal': 1,
+  // §3.1 — reclaiming a fact from the Fade is a due-renewal sibling: same +1, same §5.1 family.
+  redemption: 1,
   'wick-tallow': 1,
   'lantern-brand': 2,
 };

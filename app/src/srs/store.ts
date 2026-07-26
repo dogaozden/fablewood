@@ -94,6 +94,13 @@ export class SrsStore {
     return sum / factIds.length;
   }
 
+  /** Prior answer qualities for a fact, oldest first (empty if unseen). Reads the cache, so
+   *  it reflects everything recorded SO FAR — call BEFORE record() to read a fact's PRIOR
+   *  history (the redemption bell's capture-before-record contract, §3.1). */
+  historyQualities(factId: string): Quality[] {
+    return this.cache.facts[factId]?.history?.map((h) => h.quality) ?? [];
+  }
+
   /** Read-only snapshot of the cached state (for dueQueue). */
   snapshot(): SrsState {
     return this.cache;

@@ -125,6 +125,31 @@ const CSS = `
 .fw-teach .fw-teachhead { font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; color: var(--ember-deep); font-weight: 700; display: block; margin-bottom: .25em; }
 .fw-teach b { color: var(--ink-2); }
 
+/* reclaimed-from-the-fade — the redemption bell (§3.1). A warm lantern-flare, not confetti. */
+.fw-reclaim { display: flex; align-items: center; gap: .8em; margin: 2px 0 16px; padding: .72em 1.05em;
+  border-radius: 12px; border: 1px solid var(--amber);
+  background: linear-gradient(100deg, rgba(247,206,107,.24), rgba(238,162,63,.12) 68%, rgba(247,206,107,.06));
+  box-shadow: 0 0 0 1px rgba(247,206,107,.32), 0 0 28px rgba(247,206,107,.26), inset 0 1px 0 rgba(255,241,198,.6);
+  animation: fw-reclaim-bloom .72s ease both; }
+.fw-reclaim .fw-reclaim-flare { flex: none; font-size: 1.5rem; line-height: 1; color: var(--gold);
+  text-shadow: 0 0 8px rgba(247,206,107,.85), 0 0 18px rgba(238,162,63,.5); animation: fw-reclaim-flicker 2.6s ease-in-out infinite; }
+.fw-reclaim .fw-reclaim-text { display: flex; flex-direction: column; gap: .12em; }
+.fw-reclaim .fw-reclaim-label { font-size: .7rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 700; color: var(--ember-deep); }
+.fw-reclaim .fw-reclaim-line { font-style: italic; line-height: 1.4; color: var(--ink-2); }
+
+/* the night's ledger — the run-harvest screen (§3.2). */
+.fw-ledger-head { text-align: center; }
+.fw-ledger-title { margin: 0; font-size: 1.7rem; line-height: 1.2; color: var(--ink-2); }
+.fw-ledger-sub { display: block; margin-top: .3em; font-style: italic; color: var(--ember-deep); font-size: 1rem; }
+.fw-ledger-rows { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 18px; }
+.fw-ledger-row { display: flex; align-items: baseline; gap: .5em; padding: .5em .2em; }
+.fw-ledger-label { color: var(--ink-deep); font-size: 1.05rem; }
+.fw-ledger-lead { flex: 1 1 auto; align-self: center; height: 0; border-bottom: 1.5px dotted rgba(104,70,40,.4); margin: 0 .15em; }
+.fw-ledger-val { color: var(--ink-2); font-weight: 700; font-variant-numeric: tabular-nums; font-size: 1.1rem; }
+.fw-ledger-row.is-reclaim .fw-ledger-label { color: var(--ember-deep); font-weight: 600; }
+.fw-ledger-row.is-reclaim .fw-ledger-val { color: var(--amber); text-shadow: 0 0 10px rgba(247,206,107,.45); }
+.fw-ledger-signoff { margin: 0; text-align: center; font-style: italic; color: var(--ink-soft); line-height: 1.5; }
+
 /* free recall */
 .fw-textarea { width: 100%; min-height: 122px; resize: vertical; font: inherit; font-size: 1.06rem;
   line-height: 1.5; color: var(--ink); padding: .8em .9em; border-radius: 12px;
@@ -194,10 +219,19 @@ const CSS = `
 @keyframes fw-shake { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-4px)} 40%,60%{transform:translateX(4px)} }
 @keyframes fw-bob { 0%,100%{transform:translateY(0) rotate(0)} 50%{transform:translateY(-3px) rotate(-8deg)} }
 @keyframes fw-dots { 0%,100%{opacity:.25} 50%{opacity:1} }
+@keyframes fw-reclaim-bloom {
+  0% { opacity: 0; transform: translateY(6px); box-shadow: 0 0 0 1px rgba(247,206,107,0), 0 0 0 rgba(247,206,107,0); }
+  55% { box-shadow: 0 0 0 1px rgba(247,206,107,.5), 0 0 40px rgba(247,206,107,.42), inset 0 1px 0 rgba(255,241,198,.6); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fw-reclaim-flicker {
+  0%,100% { text-shadow: 0 0 8px rgba(247,206,107,.85), 0 0 18px rgba(238,162,63,.5); }
+  50% { text-shadow: 0 0 11px rgba(247,206,107,1), 0 0 24px rgba(238,162,63,.7); }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .fw-overlay, .fw-panel, .fw-verdict, .fw-teach { animation: none !important; }
+  .fw-overlay, .fw-panel, .fw-verdict, .fw-teach, .fw-reclaim { animation: none !important; }
   .fw-opt, .fw-chip, .fw-step, .fw-btn { transition: none !important; }
-  .fw-deliberate .fw-nib, .fw-dots span { animation: none !important; }
+  .fw-deliberate .fw-nib, .fw-dots span, .fw-reclaim .fw-reclaim-flare { animation: none !important; }
 }
 `;

@@ -371,6 +371,9 @@ export class DungeonScene extends Phaser.Scene {
       // progress was persisted before combat — only the loot roll is forfeit (never story)
       this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
       await this.wait(1000);
+      // §3.2 the Night's Ledger — the run ends here; harvest before the walk home (no gold on a
+      // retreat, streak unchanged so it shows only if already standing).
+      await this.runNightLedger(outcome, 'retreat', 0, services.save.get().streak);
       this.scene.start('hamlet', { seed: this.seed });
       return { transitioned: true };
     }
@@ -389,7 +392,7 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     if (room.boss) {
-      await this.bossVictory();
+      await this.bossVictory(outcome);
       return { transitioned: true };
     }
 
@@ -404,13 +407,16 @@ export class DungeonScene extends Phaser.Scene {
     await services.save.save({ dungeon: this.progress, streak });
     this.drawMap();
     this.refreshStatus();
-    await this.grantRoomLoot(room);
+    const gold = await this.grantRoomLoot(room);
+    // §3.2 the Night's Ledger — a room falls; harvest this battle's gains before pressing on.
+    await this.runNightLedger(outcome, 'victory', gold, streak);
     this.busy = false;
     return { transitioned: false };
   }
 
-  /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). */
-  private async grantRoomLoot(room: DungeonRoom): Promise<void> {
+  /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). Returns the
+   *  gold granted, for the Night's Ledger harvest (§3.2). */
+  private async grantRoomLoot(room: DungeonRoom): Promise<number> {
     const roomIndex = this.spec.rooms.findIndex((r) => r.id === room.id);
     const rng = mulberry32((this.seed + roomIndex * 7919 + 1) >>> 0);
     const loot = roomClearLoot(roomIndex, rng);
@@ -422,6 +428,39 @@ export class DungeonScene extends Phaser.Scene {
         ? `${room.name} falls quiet. +${loot.gold} coin, and a ${trinketName} glints in the dust.`
         : `${room.name} falls quiet. +${loot.gold} coin.`,
     );
+    return loot.gold;
+  }
+
+  /**
+   * §3.2 — the Night's Ledger run-harvest overlay (encounters agent's UI, via services). "Held
+   * against the Fade" is this battle's distinct q1 facts (from the outcome's results); the rest
+   * ride through CombatOutcome (reclaimed/newWelds) or the caller's settlement (gold/streak).
+   * Best-effort — a missing overlay service must never strand the return home.
+   */
+  private async runNightLedger(
+    outcome: CombatOutcome,
+    kind: 'victory' | 'retreat',
+    gold: number,
+    streak: number,
+  ): Promise<void> {
+    const held = new Set(
+      outcome.results.filter((r) => r.quality === 1).flatMap((r) => r.factIds),
+    ).size;
+    try {
+      await services.showNightLedger(
+        {
+          outcome: kind,
+          held,
+          welds: outcome.newWelds ?? 0,
+          reclaimed: outcome.reclaimed ?? 0,
+          gold,
+          streak,
+        },
+        { auto: !!this.auto },
+      );
+    } catch {
+      /* best-effort: never block the walk home */
+    }
   }
 
   /** free_recall gate: pass (≥0.5) opens; miss costs HP with immediate retry; HP-out = Fade retreat. */
@@ -464,7 +503,7 @@ export class DungeonScene extends Phaser.Scene {
     return { transitioned: false };
   }
 
-  private async bossVictory(): Promise<void> {
+  private async bossVictory(outcome: CombatOutcome): Promise<void> {
     // already marked + persisted by resolveCombat right after combat victory (crucible V1-12)
     const streak = services.save.get().streak + 1;
     const reward = (this.pack ? rewardText(bossQuest(this.pack)) : null) ?? DEV_REWARD;
@@ -481,7 +520,9 @@ export class DungeonScene extends Phaser.Scene {
       : ` The Warden yields ${loot.gold} coin and their signet.`;
 
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
+    // §3.2 — the boss finale plays its full staged reveal FIRST, then the quiet harvest, then home.
     await this.view.vaultOpensBeat(reward + lootLine, streak);
+    await this.runNightLedger(outcome, 'victory', loot.gold, streak);
     this.scene.start('hamlet', { seed: this.seed });
   }
 

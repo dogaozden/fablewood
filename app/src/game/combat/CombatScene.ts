@@ -47,6 +47,7 @@ import {
   ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus, riderBonus,
   type ArtRanks, type GlowState,
 } from './arts';
+import { reclaimedFactId } from '../../srs/redemption';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
 
@@ -128,6 +129,11 @@ export class CombatScene extends Phaser.Scene {
 
   private results: EncounterResult[] = [];
   private hpLost = 0;
+  /** §3.2 Night's Ledger per-run tallies (consumed by the harvest card on run end): facts
+   *  reclaimed from the Fade (§3.1), and facts newly welded (crossed into box ≥ 2) this run.
+   *  Both are counted in record(), the single choke point every SRS-recorded encounter passes. */
+  private reclaimed = 0;
+  private newWelds = 0;
   private graceAvailable = true;
   private encSeed = 0;
   private destroyed = false;
@@ -227,6 +233,8 @@ export class CombatScene extends Phaser.Scene {
     this.pendingAction = null;
     this.results = [];
     this.hpLost = 0;
+    this.reclaimed = 0;
+    this.newWelds = 0;
     this.graceAvailable = true;
     this.debugPrefer = null;
     this.actionLog = [];
@@ -581,6 +589,12 @@ export class CombatScene extends Phaser.Scene {
   /** `services.srs.boxOf`, tolerant of an offline/stub SRS (0 = unseen, the honest default). */
   private boxOfSafe(id: string): number {
     try { return services.srs.boxOf(id); } catch { return 0; }
+  }
+
+  /** `services.srs.historyQualities`, tolerant of an offline/stub SRS (empty = unseen). Read
+   *  BEFORE record() to see a fact's PRIOR history — the redemption bell's contract (§3.1). */
+  private historyQualitiesSafe(id: string): Quality[] {
+    try { return services.srs.historyQualities(id); } catch { return []; }
   }
 
   /** crucible #11 — see loadContent's call site. Best-effort: tries every installed pack's
@@ -1149,11 +1163,17 @@ export class CombatScene extends Phaser.Scene {
     // Record FIRST — the learning record is sacred: never dropped, even if the
     // scene tears down mid-overlay (record() is pure service work, safe when dead).
     this.results.push(result);
-    await this.record(result);
+    const { reclaimedId } = await this.record(result);
     if (this.destroyed) return;
     this.hud.setDeliberating(false);
     if (dueRenewalSurge(result.quality, result.factIds, dueSetAtCast)) {
       this.glow = glowGain(this.glow, 'due-renewal');
+      this.refreshParty();
+    }
+    // §3.1 — reclaiming a fact from the Fade grants Glow alongside due-renewal (same §5.1
+    // family). record() already read the pre-record history + counted the run tally.
+    if (reclaimedId) {
+      this.glow = glowGain(this.glow, 'redemption');
       this.refreshParty();
     }
 
@@ -1230,12 +1250,17 @@ export class CombatScene extends Phaser.Scene {
     // 14 — same capture-before-record duty as the due-renewal snapshot above).
     const factBoxesAtCast = result.factIds.map((id) => this.boxOfSafe(id));
     this.results.push(result);
-    await this.record(result);
+    const { reclaimedId } = await this.record(result);
     if (this.destroyed) return;
     if (artKind === 'free_recall') this.hud.setDeliberating(false);
 
     if (dueRenewalSurge(result.quality, result.factIds, dueSetAtCast)) {
       this.glow = glowGain(this.glow, 'due-renewal');
+      this.refreshParty();
+    }
+    // §3.1 — redemption Glow, alongside due-renewal (see runPlayerAction).
+    if (reclaimedId) {
+      this.glow = glowGain(this.glow, 'redemption');
       this.refreshParty();
     }
 
@@ -2128,16 +2153,29 @@ export class CombatScene extends Phaser.Scene {
     } catch { return new Set(); }
   }
 
-  private async record(result: EncounterResult): Promise<void> {
+  private async record(result: EncounterResult): Promise<{ reclaimedId: string | null }> {
     // §recency — the fact was asked regardless of whether the SRS write below
     // succeeds, so this is unconditional (mirrors "recording is best-effort" not
     // extending to whether we remember it was just asked).
     for (const id of result.factIds) sessionRecentFactIds.add(id);
+    // §3.1/§3.2 Night's Ledger tallies — read the pre-record signals BEFORE record() mutates
+    // history/boxes (trap 14, the capture-before-record duty due-renewal / the weld edge keep):
+    // a redemption reads PRIOR history; a new weld compares box across the write.
+    const reclaimedId = reclaimedFactId(result.factIds, result.quality, (id) => this.historyQualitiesSafe(id));
+    const beforeBoxes = result.factIds.map((id) => this.boxOfSafe(id));
     try {
       await Promise.all(result.factIds.map((id) =>
         services.srs.record(id, result.quality, result.encounterId, this.factTypeById.get(id)),
       ));
     } catch { /* recording is best-effort; combat proceeds */ }
+    // Count the harvest AFTER the write settles the box (store.record awaits its persist, then
+    // updates the cache boxOfSafe reads). A failed best-effort write leaves boxes untouched, so
+    // nothing false is tallied. "Newly welded" = a fact that crossed INTO box ≥ 2 on this write.
+    result.factIds.forEach((id, i) => {
+      if (beforeBoxes[i] < 2 && this.boxOfSafe(id) >= 2) this.newWelds++;
+    });
+    if (reclaimedId) this.reclaimed++;
+    return { reclaimedId };
   }
 
   // ---- outcome ----------------------------------------------------------
@@ -2174,7 +2212,10 @@ export class CombatScene extends Phaser.Scene {
       this.cameras.main.flash(280, 90, 40, 60);
     }
 
-    const payload: CombatOutcome = { outcome, hpLost: this.hpLost, results: this.results };
+    const payload: CombatOutcome = {
+      outcome, hpLost: this.hpLost, results: this.results,
+      reclaimed: this.reclaimed, newWelds: this.newWelds,
+    };
     // Fire the event now (listeners registered before launch catch it) AND hand the
     // outcome to the return scene's init data (listeners registered on resume catch it).
     this.game.events.emit('combat:resolved', payload);
@@ -2291,8 +2332,9 @@ export class CombatScene extends Phaser.Scene {
     state: string; activeTeam: string | null; activeId: string; enemyHp: number; partyHp: number;
     log: Array<{ action: string; dmg: number; overlay: boolean }>;
     /** §6/§5 — e2e-only reads for Phase 2 (rank cache + Glow pips), same "read-only debug
-     *  surface" spirit as everything else in this section. */
+     *  surface" spirit as everything else in this section. §3.1/§3.2 add the run tallies. */
     rank: number; welded3: number; welded4: number; glow: number;
+    reclaimed: number; newWelds: number;
   } {
     return {
       state: this.state,
@@ -2305,6 +2347,8 @@ export class CombatScene extends Phaser.Scene {
       welded3: this.rankInfo.welded3,
       welded4: this.rankInfo.welded4,
       glow: this.glow.pips,
+      reclaimed: this.reclaimed,
+      newWelds: this.newWelds,
     };
   }
 

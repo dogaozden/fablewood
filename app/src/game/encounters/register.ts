@@ -10,7 +10,7 @@ import { services, type EncounterRequest, type EncounterResult, type FactLite } 
 import type { Fact, Pack } from '../../packs/types';
 import { getPacks } from '../../bridge/client';
 import { pick, reskin } from './engine';
-import { presentEncounter, presentTeaching } from './overlay';
+import { presentEncounter, presentTeaching, presentNightLedger } from './overlay';
 import { judge as judgeClient } from '../../judge/client';
 import { FIXTURE_PACK, FIXTURE_TEACHING } from './fixtures';
 
@@ -55,6 +55,8 @@ services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> 
 };
 
 services.showTeaching = (facts: FactLite[]): Promise<void> => presentTeaching(facts);
+
+services.showNightLedger = presentNightLedger;
 
 // --- dev harness: ?overlay=<kind|teaching> -----------------------------------
 

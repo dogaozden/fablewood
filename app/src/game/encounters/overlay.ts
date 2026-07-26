@@ -6,7 +6,7 @@
  * ESC policy (task teeth): in a Wellspring 'drill' you may flee (quality 0); in combat / boss /
  * parley ESC does nothing — you answer or you don't.
  */
-import type { EncounterRequest, EncounterResult, Judge, FactLite } from '../contracts';
+import type { EncounterRequest, EncounterResult, Judge, FactLite, NightLedgerData } from '../contracts';
 import type { Encounter } from '../../packs/types';
 import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
@@ -299,5 +299,90 @@ export function presentTeaching(facts: FactLite[]): Promise<void> {
     });
     renderCard();
     requestAnimationFrame(() => nextBtn.focus());
+  });
+}
+
+const LEDGER_SUBTITLE: Record<NightLedgerData['outcome'], string> = {
+  victory: '— the vault stands cleared',
+  camp: '— rest, earned',
+  retreat: '— a wise withdrawal',
+};
+
+/**
+ * "The Night's Ledger" (§3.2) — the run-harvest screen. A parchment overlay in the encounter
+ * family (same buildOverlay scaffolding as presentTeaching: quiet keyboard, arm guard, teardown
+ * safety). Rows are data-driven and zero-suppressed EXCEPT "Held against the Fade" (always
+ * shown); the sign-off flips to its empty-harvest variant when nothing was gained. Dismiss on
+ * Space / Enter / click — the continue idiom the encounter overlays use.
+ */
+export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean } = {}): Promise<void> {
+  return new Promise((resolve) => {
+    const o = buildOverlay();
+
+    // rows — render only nonzero, EXCEPT "Held against the Fade" (always). Reclaimed carries a
+    // gold accent, tying it back to the verdict-moment bell (§3.1).
+    const rows: Array<{ label: string; value: string; accent?: boolean }> = [
+      { label: 'Held against the Fade', value: String(data.held) },
+    ];
+    if (data.welds > 0) rows.push({ label: 'Newly welded', value: String(data.welds) });
+    if (data.reclaimed > 0) rows.push({ label: 'Reclaimed from the Fade', value: String(data.reclaimed), accent: true });
+    if (data.gold > 0) rows.push({ label: 'Gold', value: `+${data.gold}` });
+    if (data.streak > 0) rows.push({ label: 'Streak', value: data.streak === 1 ? '1 night' : `${data.streak} nights` });
+
+    // empty harvest = nothing gained this run (streak is a standing counter, not a gain).
+    const empty = data.held === 0 && data.welds === 0 && data.reclaimed === 0 && data.gold === 0;
+    const signoff = empty
+      ? 'A thin page is still a page. The Ledger keeps it.'
+      : 'So entered. What you keep, the Ledger keeps.';
+
+    o.body.replaceChildren(
+      el('div', { class: 'fw-ledger-head' }, [
+        el('h2', { class: 'fw-ledger-title', text: "The Night's Ledger" }),
+        el('span', { class: 'fw-ledger-sub', text: LEDGER_SUBTITLE[data.outcome] }),
+      ]),
+      el('hr', { class: 'fw-rule' }),
+      el(
+        'div',
+        { class: 'fw-ledger-rows' },
+        rows.map((r) =>
+          el('div', { class: r.accent ? 'fw-ledger-row is-reclaim' : 'fw-ledger-row' }, [
+            el('span', { class: 'fw-ledger-label', text: r.label }),
+            el('span', { class: 'fw-ledger-lead', 'aria-hidden': 'true' }),
+            el('span', { class: 'fw-ledger-val', text: r.value }),
+          ]),
+        ),
+      ),
+      el('p', { class: 'fw-ledger-signoff', text: signoff }),
+    );
+
+    let closed = false;
+    const done = (): void => {
+      if (closed) return;
+      closed = true;
+      void o.close().then(resolve);
+    };
+    const cont = el('button', {
+      class: 'fw-btn fw-btn-primary',
+      type: 'button',
+      text: 'Onward ▸',
+      onclick: () => {
+        if (o.isArmed()) done();
+      },
+    });
+    o.footer.replaceChildren(
+      el('span', { class: 'fw-hint', text: 'Space, Enter, or click to close the ledger.' }),
+      el('span', { class: 'fw-spacer' }),
+      cont,
+    );
+    o.onKey((e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && o.isArmed()) {
+        e.preventDefault();
+        done();
+      }
+    });
+    requestAnimationFrame(() => cont.focus());
+    // auto-drive / dev flows must never hang on a click that won't come: auto-advance after a
+    // readable beat (the dungeon cards' 'auto' CardMode idiom). Real play waits for input.
+    if (opts.auto) setTimeout(done, 1200);
   });
 }

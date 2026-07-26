@@ -51,6 +51,9 @@ services.srs = {
   masteryAvg(factIds) {
     return srsStore.masteryAvg(factIds);
   },
+  historyQualities(factId) {
+    return srsStore.historyQualities(factId);
+  },
 };
 
 services.save = {

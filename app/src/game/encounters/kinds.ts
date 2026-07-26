@@ -9,6 +9,7 @@ import type { Encounter } from '../../packs/types';
 import type { Overlay, EncounterCtx } from './overlay';
 import { el, ACTIONS, sealGlyph } from './dom';
 import { scoreMatch, scoreOrder } from './engine';
+import { reclaimBell, reclaimChip } from './redemption';
 
 type Resolve = (r: EncounterResult) => void;
 export type KindRenderer = (
@@ -75,6 +76,28 @@ function focusContinue(o: Overlay, verdict: HTMLElement, button: HTMLButtonEleme
   }
 }
 
+/**
+ * "Reclaimed from the Fade" (§3.1): if this q1 answer redeems a once-missed fact, drop the
+ * bell just under the verdict (or at the top of the body when the pass verdict lives in the
+ * footer — mcq's clean strike). Self-gates on quality (reclaimBell returns null unless it is a
+ * full pass reclaiming an uncleared miss), and reads PRIOR history — so every renderer calls it
+ * unconditionally right after its verdict lands, before resolve() lets combat record the answer.
+ * Returns whether the bell rang (mcq lengthens its auto-advance so the beat is legible).
+ */
+function reclaimBeat(
+  o: Overlay,
+  factIds: string[],
+  quality: Quality,
+  afterVerdict: HTMLElement | null,
+): boolean {
+  const bell = reclaimBell(factIds, quality);
+  if (!bell) return false;
+  const chip = reclaimChip(bell.line);
+  if (afterVerdict && afterVerdict.parentNode === o.body) afterVerdict.after(chip);
+  else o.body.insertBefore(chip, o.body.firstChild);
+  return true;
+}
+
 // --- mcq · Smite -------------------------------------------------------------
 
 const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
@@ -102,7 +125,9 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
     };
     if (correct) {
       o.footer.replaceChildren(verdictBanner('pass', 'A clean strike.'));
-      setTimeout(() => resolve(result), 720);
+      // clean pass auto-advances; a redemption bell lengthens the beat so it can be read.
+      const rang = reclaimBeat(o, enc.fact_ids, result.quality, null);
+      setTimeout(() => resolve(result), rang ? 1500 : 720);
     } else {
       // The verdict is the reveal's visual anchor. Keep it above the retained answer cards so
       // it is visible immediately without relying on a focus-triggered jump to the footer.
@@ -198,6 +223,7 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
     const excerpt = facts[0] ? excerptBlock(facts[0]) : null;
     if (excerpt) parts.push(excerpt);
     o.body.replaceChildren(...parts);
+    reclaimBeat(o, enc.fact_ids, quality, parts[0]);
 
     const cont = continueButton(resolve, {
       encounterId: enc.id,
@@ -244,6 +270,7 @@ const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     const outcome = b.outcome || (tag === 'good' ? 'A sound choice.' : 'The moment passes.');
     const verdict = verdictBanner(tone, outcome);
     o.body.append(verdict);
+    reclaimBeat(o, enc.fact_ids, quality, verdict);
     const cont = continueButton(resolve, {
       encounterId: enc.id,
       kind: 'scenario_branch',
@@ -374,6 +401,7 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     const line = quality === 1 ? 'The weave holds.' : quality === 0.5 ? 'Half the threads catch.' : 'The weave unravels.';
     const verdict = verdictBanner(tone, line);
     o.body.insertBefore(verdict, container);
+    reclaimBeat(o, enc.fact_ids, quality, verdict);
     if (quality < 1) {
       o.body.append(
         el('div', { class: 'fw-teach' }, [
@@ -493,6 +521,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     const line = quality === 1 ? 'The ritual holds.' : quality === 0.5 ? 'The chain falters partway.' : 'The sequence breaks.';
     const verdict = verdictBanner(tone, line);
     o.body.insertBefore(verdict, list);
+    reclaimBeat(o, enc.fact_ids, quality, verdict);
     if (quality < 1) {
       o.body.append(
         el('div', { class: 'fw-teach' }, [
