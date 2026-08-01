@@ -257,12 +257,22 @@ test.describe.serial('The Ledger Amended', () => {
     await expect(card(page)).toBeVisible({ timeout: 10_000 });
 
     const shownStatements: string[] = [];
+    const signoffs: boolean[] = [];
     let current = await settleNextCard(page);
     while (current !== '') {
       expect(shownStatements.length, 'the batch never exceeds the cap').toBeLessThan(3);
+      // §3's sign-off belongs to the LAST card of the batch, and only it
+      signoffs.push(
+        (await card(page).innerText()).includes('So amended. What the Ledger keeps, it keeps honestly.'),
+      );
       shownStatements.push(await witnessCard(page));
       current = await settleNextCard(page);
     }
+    expect(signoffs, 'the sign-off closes the batch, and appears nowhere before it').toEqual([
+      false,
+      false,
+      true,
+    ]);
     expect(shownStatements, 'exactly three distinct cards this visit').toHaveLength(3);
     expect(new Set(shownStatements).size, 'no card repeated').toBe(3);
     for (const s of shownStatements) expect(OLD_STATEMENTS).toContain(s);
