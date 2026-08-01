@@ -775,6 +775,29 @@ describe('adapter equivalence — resolveAction over resolveSpell (Phase 2 §2)'
     );
   });
 
+  // crucible-2 weld-T1-unreachable — §5.5's weld edge is written for "a q1 cast", with no tier
+  // restriction, but ResolveOpts carried no `weld` field at all and outcomeFromSpell never put
+  // one in its ResolveSpellOpts. The T1 Arts (Smite/Weave/Sequence/Cast) were therefore
+  // structurally incapable of welding: the mastery dividend the whole Leitner ladder builds
+  // toward was silently unreachable for every Rank-1 player, i.e. everyone before Rank 2.
+  it('a T1 cast CAN weld — the adapter carries the weld edge through (§5.5)', () => {
+    expect(resolveAction('cast', 1, { weld: true }).hits).toBe(7); // 6 + 1
+    expect(resolveAction('smite', 1, { weld: true }).hits).toBe(4); // 3 + 1
+    expect(resolveAction('cast', 1, { weld: true }).banner)
+      .toBe(`${SPELLBOOK.cast.banner.q1}\nThe welded truth strikes true.`);
+  });
+
+  it('a T1 weld obeys the same q1 gate as every other tier (§5.5)', () => {
+    expect(resolveAction('cast', 0.5, { weld: true }).hits).toBe(2); // unwelded 2, not 3
+    expect(resolveAction('cast', 0.5, { weld: true }).banner).not.toContain('welded truth');
+  });
+
+  it('the weld edge is primary-only through the adapter — never on a Weave arm', () => {
+    const welded = resolveAction('weave', 1, { weld: true });
+    expect(welded.hits).toBe(3);   // centre 2 + 1
+    expect(welded.aoeHit).toBe(2); // arms untouched
+  });
+
   it("Mira's bonus folds identically through the adapter as it did before (landed hit only, never a whiff)", () => {
     expect(resolveAction('smite', 1, { miraBonus: 1 }).hits).toBe(4);
     expect(resolveAction('smite', 0, { miraBonus: 1 }).hits).toBe(0);

@@ -48,9 +48,10 @@ import {
 } from './spells';
 import {
   ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus, riderBonus,
+  graceAppliesTo, isBossPhaseCast,
   type ArtRanks, type GlowState,
 } from './arts';
-import { reclaimedFactId } from '../../srs/redemption';
+import { reclaimedFactIds } from '../../srs/redemption';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
 import { DIFFICULTY_DEFS, difficultyPolicyGlyph } from '../encounters/engine';
@@ -845,8 +846,21 @@ export class CombatScene extends Phaser.Scene {
     // At Rank 1 this branch never taken: today's exact flow, zero regression.
     if (ART_ACTIONS.has(action) && this.rank >= 2) { this.openTierFlyout(unit, action); return; }
     this.pendingSpell = null; // T1/strike: the untouched Phase-1 resolveAction/applyOutcome path
-    const targets = this.validTargets(unit, action);
-    if (!targets.length) { this.hud.showBanner(`${ACTIONS[action].label}: no foe within reach.`, P.stoneGrey); return; }
+    // crucible-2 rank1-shielded-noop — Rank 2+ already refuses to arm an Art against a
+    // shield-absorbed target before a question is spent (crucible v1 #19, via tierRow/
+    // pickTierKey). Rank 1 never opens a flyout, so its T1 Arts skipped that filter entirely:
+    // a Smite at the shielded Warden cost a full turn AND a question for a guaranteed bounce,
+    // with "no foe within reach" as the only (wrong) explanation available. Free Strike is
+    // deliberately NOT filtered — it costs no question, and §9.3's Objection is its answer.
+    const inReach = this.validTargets(unit, action);
+    const spell = this.spellForAction(action);
+    const targets = spell ? this.strikableTargets(inReach, spell) : inReach;
+    if (!targets.length) {
+      // Reuses the flyout's own shipped reason vocabulary rather than inventing a new line.
+      const reason = inReach.length ? 'shielded' : 'no foe within reach';
+      this.hud.showBanner(`${ACTIONS[action].label}: ${reason}.`, P.stoneGrey);
+      return;
+    }
     this.enterTargeting(action, targets);
   }
 
@@ -1249,6 +1263,11 @@ export class CombatScene extends Phaser.Scene {
     // This applies to every T1 cast too, not just T2/T3 — the SRS loop is the mana engine
     // regardless of which tier answering the question happens to buy.
     const dueSetAtCast = this.snapshotDueSet();
+    // §5.5 the weld edge, same capture-before-record duty (trap 14): every fact's box must be
+    // read BEFORE record() moves it. castGatedSpell already did this for T2/T3; the T1 path
+    // never did, which is half of why a T1 cast could never weld (the other half was
+    // ResolveOpts having no `weld` field at all — crucible-2 weld-T1-unreachable).
+    const factBoxesAtCast = result.factIds.map((id) => this.boxOfSafe(id));
     // supersession-reteach.md §5 — same capture-before-record duty (the mercy reads the
     // superseding fact's PRIOR history, which record() is about to make non-empty).
     const mercy = this.amendedFirstMiss(result);
@@ -1270,9 +1289,14 @@ export class CombatScene extends Phaser.Scene {
     }
 
     // Lantern grace: standing on a lantern can soften a whiff for DAMAGE only —
-    // the SRS record stays honest (we record result.quality, above).
+    // the SRS record stays honest (we record result.quality, above). graceAppliesTo excludes
+    // Courtcraft, whose outcome comes from branchTag and never from this quality: softening it
+    // there changed nothing while still burning the once-per-battle charge and claiming it had
+    // helped (crucible-2 lantern-grace-false-banner).
     let dmgQuality = result.quality;
-    if (dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
+    const graceArt = this.spellForAction(action)?.art;
+    if (graceArt && graceAppliesTo(graceArt)
+        && dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
       dmgQuality = 0.5;
       this.graceAvailable = false;
       this.hud.showBanner('The lantern steadies you — the miss becomes a graze.', P.lanternGold);
@@ -1285,8 +1309,9 @@ export class CombatScene extends Phaser.Scene {
       ? (result.branchTag === 'good' ? 1 : result.branchTag === 'bad' ? 0 : 0.5)
       : dmgQuality;
     const rider = quality === 1 && riderBonus(1, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
+    const weld = quality === 1 && weldBonus(factBoxesAtCast) === 1;
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-    const base = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider });
+    const base = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider, weld });
     // §5 the one mercy rule — 0 HP to the party on the amended fact's first miss, Clerk's
     // line composed after the base copy. The SRS record above stays honest.
     const outcome = mercy ? applyAmendedMercy(base) : base;
@@ -1319,7 +1344,14 @@ export class CombatScene extends Phaser.Scene {
     const target = spell.shape === 'ally' ? this.unitAt(tile) : this.enemyAt(tile);
     const vsBoss = !!(target && target.team === 'enemy' && target.isBoss);
     const artKind = ARTS[spell.art].encounter;
-    const factIds = this.dueFactIds(this.roomTags);
+    // §9 — a T2/T3 Attestation at the Warden is the SAME negotiation beat as a T1 Cast, so it
+    // draws from the current phase's recallTags and advances the phase below. Without this a
+    // Rank-2/3 player casting only through the flyout stripped shields while phases 2 and 3
+    // never re-armed, skipping the mandatory branch questions (crucible-2
+    // attestation-phase-skip).
+    const isBossCast = isBossPhaseCast(spell.art, vsBoss);
+    const tags = isBossCast ? this.launch.room.boss?.phases[this.phaseIndex]?.recallTags : this.roomTags;
+    const factIds = this.dueFactIds(tags);
     const context = spell.art === 'courtcraft' ? 'parley' : vsBoss ? 'boss' : 'combat';
 
     // Spend Glow up front — the flyout only ever offered an enabled row when this would
@@ -1368,8 +1400,10 @@ export class CombatScene extends Phaser.Scene {
       this.refreshParty();
     }
 
+    // Grace is meaningless for Courtcraft here too — see runPlayerAction's own note.
     let dmgQuality = result.quality;
-    if (dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
+    if (graceAppliesTo(spell.art)
+        && dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
       dmgQuality = 0.5;
       this.graceAvailable = false;
       this.hud.showBanner('The lantern steadies you — the miss becomes a graze.', P.lanternGold);
@@ -1381,7 +1415,10 @@ export class CombatScene extends Phaser.Scene {
       : dmgQuality;
 
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-    const weld = weldBonus(factBoxesAtCast) === 1;
+    // §5.5 scopes the weld edge to "a q1 cast"; weldBonus itself only reads boxes, so the
+    // quality gate is stated here the same way `rider` states it below. resolveSpell enforces
+    // it again at the point of consumption — this line is the readable half of that contract.
+    const weld = quality === 1 && weldBonus(factBoxesAtCast) === 1;
     const rider = quality === 1 && riderBonus(spell.tier, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
     const geometry = this.spellGeometry(unit, spell, tile, quality);
     const opts: ResolveSpellOpts = {
@@ -1423,6 +1460,13 @@ export class CombatScene extends Phaser.Scene {
       this.shields = reduceShields(this.shields, shieldDelta);
       this.floatText(this.boss, '−shield', P.waterLight);
       this.syncBoss();
+    }
+
+    // §9 — advance the negotiation, mirroring the T1 path's own block exactly (unconditional
+    // on quality: engaging the Warden with an Attestation IS the beat, pass or fail).
+    if (isBossCast) {
+      this.phaseIndex += 1;
+      this.pendingBossPhase = this.phaseIndex < (this.launch.room.boss?.phases.length ?? 0);
     }
 
     if (bannerText) this.hud.showBanner(bannerText, quality > 0 ? ACTIONS[action].tint : P.duskRose);
@@ -2428,7 +2472,12 @@ export class CombatScene extends Phaser.Scene {
     // §3.1/§3.2 Night's Ledger tallies — read the pre-record signals BEFORE record() mutates
     // history/boxes (trap 14, the capture-before-record duty due-renewal / the weld edge keep):
     // a redemption reads PRIOR history; a new weld compares box across the write.
-    const reclaimedId = reclaimedFactId(result.factIds, result.quality, (id) => this.historyQualitiesSafe(id));
+    // The BELL takes the first qualifier (stable Clerk-line hash); the run TALLY takes them
+    // all. Driving the tally off the singular id undercounted every multi-fact reclamation to
+    // 1, while its sibling `newWelds` below already counted per fact (crucible-2
+    // reclaimed-undercount).
+    const reclaimedIds = reclaimedFactIds(result.factIds, result.quality, (id) => this.historyQualitiesSafe(id));
+    const reclaimedId = reclaimedIds[0] ?? null;
     const beforeBoxes = result.factIds.map((id) => this.boxOfSafe(id));
     try {
       await Promise.all(result.factIds.map((id) =>
@@ -2443,7 +2492,7 @@ export class CombatScene extends Phaser.Scene {
     result.factIds.forEach((id, i) => {
       if (beforeBoxes[i] < 4 && this.boxOfSafe(id) >= 4) this.newWelds++;
     });
-    if (reclaimedId) this.reclaimed++;
+    this.reclaimed += reclaimedIds.length;
     return { reclaimedId };
   }
 

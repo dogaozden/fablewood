@@ -34,9 +34,27 @@ export function reclaimedFactId(
   now: Quality,
   priorHistoryOf: (id: string) => readonly Quality[],
 ): string | null {
-  if (now !== 1) return null;
-  for (const id of factIds) {
-    if (isRedemption(priorHistoryOf(id), now)) return id;
-  }
-  return null;
+  return reclaimedFactIds(factIds, now, priorHistoryOf)[0] ?? null;
+}
+
+/**
+ * EVERY factId among `factIds` that `isRedemption` fires for, in the given order — the run
+ * TALLY's basis, where reclaimedFactId above is the BELL's basis.
+ *
+ * The two are deliberately different arities. One encounter rings one bell (reclaimedFactId
+ * picks the earliest qualifier so the Clerk-line hash stays stable), but a match/order
+ * encounter can carry several facts and redeem all of them at once — and the Night's Ledger
+ * row counts FACTS reclaimed from the Fade, exactly as its sibling `newWelds` counts facts.
+ * Driving the tally off the singular id undercounted every multi-fact reclamation to 1.
+ *
+ * Same capture-before-record discipline as reclaimedFactId: `priorHistoryOf` must be read
+ * BEFORE this answer is recorded.
+ */
+export function reclaimedFactIds(
+  factIds: readonly string[],
+  now: Quality,
+  priorHistoryOf: (id: string) => readonly Quality[],
+): string[] {
+  if (now !== 1) return [];
+  return factIds.filter((id) => isRedemption(priorHistoryOf(id), now));
 }

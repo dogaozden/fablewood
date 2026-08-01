@@ -180,6 +180,33 @@ describe('Overglow / weld / vsBoss (§5.3, §5.5, §9) — primary-only, never o
     expect(ops).toContainEqual({ op: 'damage', targetId: 'primary', amount: 5 });
   });
 
+  // crucible-2 weld-on-q0.5 — §5.5 grants the weld edge to "a q1 cast". The bonus was applied
+  // straight off opts.weld with no quality gate, so a PARTIAL answer collected the mastery
+  // dividend (and the "welded truth strikes true" banner) it did not earn. Gated here inside
+  // resolveSpell, the one place the weld is consumed, so neither the T1 adapter nor
+  // castGatedSpell can reintroduce it at a call site.
+  it('the weld edge requires q1 — a partial answer earns no bonus and no weld banner (§5.5)', () => {
+    const ops = resolveSpell(SPELLBOOK['verbatim-decree'], 0.5, { ...TARGETS, weld: true });
+    // Verbatim Decree q0.5 is a flat 3; welded it would read 4.
+    expect(ops).toContainEqual({ op: 'damage', targetId: 'primary', amount: 3 });
+    expect(ops.filter((o) => o.op === 'banner').map((o) => (o as { text: string }).text))
+      .not.toContain('The welded truth strikes true.');
+  });
+
+  it('the weld edge is absent at q0 too — a whiff never welds (§5.5)', () => {
+    const ops = resolveSpell(SPELLBOOK.smite, 0, { ...TARGETS, weld: true });
+    expect(ops.some((o) => o.op === 'damage')).toBe(false);
+    expect(ops.filter((o) => o.op === 'banner').map((o) => (o as { text: string }).text))
+      .not.toContain('The welded truth strikes true.');
+  });
+
+  it('the weld edge still lands in full at q1 (the gate did not break the feature)', () => {
+    const ops = resolveSpell(SPELLBOOK['verbatim-decree'], 1, { ...TARGETS, weld: true });
+    expect(ops).toContainEqual({ op: 'damage', targetId: 'primary', amount: 9 });
+    expect(ops.filter((o) => o.op === 'banner').map((o) => (o as { text: string }).text))
+      .toContain('The welded truth strikes true.');
+  });
+
   it('composes base, weld, and rider banners in their specified order', () => {
     const banners = (opts: Parameters<typeof resolveSpell>[2]) => resolveSpell(SPELLBOOK.smite, 1, opts)
       .filter((op): op is Extract<typeof op, { op: 'banner' }> => op.op === 'banner')

@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   computeRank, RANK2_NEED, RANK3_NEED, ARTS,
   GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, weldBonus, riderBonus, seenDueIds,
+  graceAppliesTo, isBossPhaseCast,
   type GlowState, type GlowSource,
 } from '../arts';
+import { SPELLBOOK } from '../spells';
 
 describe('computeRank (§6 — one global rank off Leitner box distribution)', () => {
   it('7 facts at box ≥3 stays Rank 1 (below the Rank-2 gate)', () => {
@@ -159,5 +161,62 @@ describe('riderBonus (§4 difficulty-rewards.md — full truth table)', () => {
         expect(riderBonus(3, drawnDifficulty, packReady)).toBe(0);
       }
     }
+  });
+});
+
+// crucible-2 lantern-grace-false-banner — grace softens a MISS's damage quality (0 → 0.5)
+// while the SRS record stays honest. Courtcraft's outcome comes from branchTag, never from
+// quality, so grace applied to a Parley did nothing at all — yet it still consumed the
+// once-per-battle charge AND showed "the miss becomes a graze". A mercy that lies and
+// charges for it.
+describe('graceAppliesTo (§5 — the lantern grace only where quality drives the outcome)', () => {
+  it('applies to the four quality-driven Arts', () => {
+    for (const art of ['kindling', 'binding', 'ritecraft', 'attestation'] as const) {
+      expect(graceAppliesTo(art), art).toBe(true);
+    }
+  });
+
+  it('does NOT apply to Courtcraft — its outcome is the branchTag, not the quality', () => {
+    expect(graceAppliesTo('courtcraft')).toBe(false);
+  });
+
+  it('covers every Art in ARTS, so a new Art cannot silently default into a false mercy', () => {
+    const arts = Object.keys(ARTS) as Array<keyof typeof ARTS>;
+    expect(arts).toHaveLength(5);
+    expect(arts.filter((a) => graceAppliesTo(a))).toHaveLength(4);
+  });
+});
+
+// crucible-2 attestation-phase-skip [HIGH] — the boss phase machinery was keyed to the T1
+// 'cast' ActionKind. At Rank 2/3 an Attestation cast through the flyout (Verbatim Decree) is
+// the same negotiation beat but was not recognised as one: it drew roomTags instead of the
+// phase's recallTags and never advanced phaseIndex, so phases 2 and 3 never re-armed while
+// its q1 strip-shield rider still took shields down. A high-Rank player could win having
+// answered ONE of the three mandatory branches.
+describe('isBossPhaseCast (§9 — a boss negotiation beat, at any tier)', () => {
+  it('is true for Attestation at the boss, at every tier', () => {
+    expect(isBossPhaseCast(SPELLBOOK.cast.art, true)).toBe(true);              // T1 Cast From Memory
+    expect(isBossPhaseCast(SPELLBOOK['attested-ward'].art, true)).toBe(true);  // T2
+    expect(isBossPhaseCast(SPELLBOOK['verbatim-decree'].art, true)).toBe(true); // T3
+  });
+
+  it('is false for every non-Attestation Art, even at the boss', () => {
+    for (const id of Object.keys(SPELLBOOK) as Array<keyof typeof SPELLBOOK>) {
+      const art = SPELLBOOK[id].art;
+      expect(isBossPhaseCast(art, true), id).toBe(art === 'attestation');
+    }
+  });
+
+  it('is false away from the boss, and for a free action with no Art at all', () => {
+    expect(isBossPhaseCast(SPELLBOOK['verbatim-decree'].art, false)).toBe(false);
+    expect(isBossPhaseCast(undefined, true)).toBe(false); // Strike / Satchel / Wait
+  });
+
+  it('agrees with the T1 path it generalises: Cast at the boss, and nothing else T1', () => {
+    // the old spelling was `action === 'cast' && vsBoss` — identical on the T1 five
+    for (const id of ['smite', 'weave', 'sequence', 'parley'] as const) {
+      expect(isBossPhaseCast(SPELLBOOK[id].art, true), id).toBe(false);
+    }
+    expect(isBossPhaseCast(SPELLBOOK.cast.art, true)).toBe(true);
   });
 });
