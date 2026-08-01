@@ -10,6 +10,7 @@
  * fallback victory; party wipe = retreat.
  */
 import type { SpellDef } from './spells';
+import type { Quality } from './types';
 
 export interface BranchEffect {
   shieldDelta: number;
@@ -29,8 +30,25 @@ export function applyBranch(branchTag: string | undefined): BranchEffect {
   return { shieldDelta: 0, partyDelta: 0, wardenHeal: 0, stagger: false, banner: 'A wary stalemate — no ground won.' };
 }
 
+/** NOTE the convention: `delta` is SIGNED and is ADDED. Removing a shield is `-1`, never `1`.
+ *  Prefer shieldStripDelta() below over hand-writing the sign at a call site — passing `1`
+ *  here silently GRANTS the boss a shield, which is exactly how that bug shipped once. */
 export function reduceShields(current: number, delta: number): number {
   return Math.max(0, current + delta);
+}
+
+/**
+ * §9.2 — the signed shield delta for one cast, ready to hand straight to reduceShields.
+ *
+ * A q1 Attestation carrying `bossRider: 'strip-shield'` aimed at the boss strips exactly one
+ * shield (`-1`); everything else is `0`. Owning the SIGN here — rather than at each call site —
+ * is the point: castGatedSpell previously wrote `reduceShields(this.shields, 1)` for this same
+ * rule, and since reduceShields ADDS its delta that ADDED a shield on every apex cast (the
+ * float still read "−shield"), letting a Rank-3 Keeper's Verbatim Decree make the Warden
+ * unkillable. There is now no call site left that has to remember the sign.
+ */
+export function shieldStripDelta(spell: SpellDef | null, quality: Quality, vsBoss: boolean): number {
+  return spell?.bossRider === 'strip-shield' && quality === 1 && vsBoss ? -1 : 0;
 }
 
 /** Boss is beaten when its shields are gone OR (fallback) its HP is spent. */

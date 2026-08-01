@@ -30,7 +30,7 @@ import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction, isFlanked } from './damage';
 import {
   applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
-  OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
+  shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
 } from './boss';
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
@@ -1384,9 +1384,13 @@ export class CombatScene extends Phaser.Scene {
 
     // §9.2 trap 10 — the shield gate now reads the SpellDef's own `bossRider` (boss.ts
     // wardenAbsorbs), not the ActionKind: Attested Ward and Verbatim Decree pierce on their
-    // own rider rather than by happening to share the 'cast' button.
-    if (spell.bossRider === 'strip-shield' && quality === 1 && vsBoss && this.boss) {
-      this.shields = reduceShields(this.shields, 1);
+    // own rider rather than by happening to share the 'cast' button. The SIGNED delta comes
+    // from shieldStripDelta, which owns the sign — this site used to hand reduceShields a
+    // literal `1`, and since reduceShields ADDS its delta that GRANTED the Warden a shield on
+    // every apex cast while the float still read "−shield".
+    const shieldDelta = shieldStripDelta(spell, quality, vsBoss);
+    if (shieldDelta !== 0 && this.boss) {
+      this.shields = reduceShields(this.shields, shieldDelta);
       this.floatText(this.boss, '−shield', P.waterLight);
       this.syncBoss();
     }

@@ -8,6 +8,7 @@ import { resolveAction, isFlanked } from '../damage';
 import { SPELLBOOK, resolveSpell, type SpellId } from '../spells';
 import {
   applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
+  shieldStripDelta,
 } from '../boss';
 import { decideEnemy, occupancyExcept, opportunityStrikers, carefulStepMove } from '../ai';
 import { makeKeeper, makeMira, makeEnemy, ENEMY_STATS, WARDEN_BOSS_HP } from '../units';
@@ -390,6 +391,66 @@ describe('the Warden reforged (§9)', () => {
     expect(maxed.amount).toBeLessThan(WARDEN_BOSS_HP);
     // The room's regular 'warden' archetype trash (the Root-Husk) is NOT reforged with him.
     expect(ENEMY_STATS.warden.hp).toBe(8);
+  });
+});
+
+/**
+ * §9.2 — shield STRIPPING, the arithmetic. Regression cover for a HIGH bug found by the
+ * crucible sweep and closed here: castGatedSpell wrote `reduceShields(this.shields, 1)`, and
+ * because reduceShields ADDS its signed delta that GRANTED the Warden a shield on every apex
+ * cast — a q1 Verbatim Decree made him progressively unkillable while the float still read
+ * "−shield". It shipped because nothing tested the sign; these do, at the pure layer that both
+ * call sites now share (shieldStripDelta owns the sign, so no call site can get it wrong).
+ */
+describe('§9.2 shield stripping — the signed delta', () => {
+  const shielded = 3;
+
+  it('a q1 strip-shield cast at the boss REMOVES exactly one shield (never adds one)', () => {
+    for (const id of ['cast', 'attested-ward', 'verbatim-decree'] as const) {
+      const delta = shieldStripDelta(SPELLBOOK[id], 1, true);
+      expect(delta, `${id} strips`).toBe(-1);
+      expect(reduceShields(shielded, delta), `${id} takes 3 shields to 2`).toBe(2);
+      // …and the direction is the point: it must never come out ABOVE where it started.
+      expect(reduceShields(shielded, delta)).toBeLessThan(shielded);
+    }
+  });
+
+  it('stripping clamps at zero — a strip against an unshielded Warden cannot go negative', () => {
+    expect(reduceShields(0, shieldStripDelta(SPELLBOOK['verbatim-decree'], 1, true))).toBe(0);
+    expect(reduceShields(1, shieldStripDelta(SPELLBOOK.cast, 1, true))).toBe(0);
+  });
+
+  it('a partial or failed cast strips nothing (quality must be exactly q1)', () => {
+    for (const q of [0.5, 0] as const) {
+      expect(shieldStripDelta(SPELLBOOK['verbatim-decree'], q, true), `q${q}`).toBe(0);
+      expect(reduceShields(shielded, shieldStripDelta(SPELLBOOK['verbatim-decree'], q, true))).toBe(shielded);
+    }
+  });
+
+  it('a cast at a REGULAR enemy strips nothing (vsBoss required)', () => {
+    expect(shieldStripDelta(SPELLBOOK.cast, 1, false)).toBe(0);
+    expect(reduceShields(shielded, shieldStripDelta(SPELLBOOK.cast, 1, false))).toBe(shielded);
+  });
+
+  it('no non-Attestation spell, and no free action, ever moves the shield count', () => {
+    for (const id of Object.keys(SPELLBOOK) as SpellId[]) {
+      if (SPELLBOOK[id].bossRider === 'strip-shield') continue;
+      expect(shieldStripDelta(SPELLBOOK[id], 1, true), `${id} must not strip`).toBe(0);
+    }
+    expect(shieldStripDelta(null, 1, true), 'free steel never strips a shield').toBe(0);
+  });
+
+  it('the shield count is monotonically non-increasing under any sequence of casts', () => {
+    // The property the bug violated, stated directly: nothing a player casts can RAISE it.
+    let shields = 3;
+    for (const q of [1, 0.5, 1, 0, 1, 1] as const) {
+      for (const id of Object.keys(SPELLBOOK) as SpellId[]) {
+        const next = reduceShields(shields, shieldStripDelta(SPELLBOOK[id], q, true));
+        expect(next, `${id} @ q${q} raised the shields from ${shields} to ${next}`).toBeLessThanOrEqual(shields);
+        shields = next;
+      }
+    }
+    expect(shields).toBe(0);
   });
 });
 
