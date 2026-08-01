@@ -8,6 +8,9 @@ import {
   DIFFICULTY_SIDECAR_FILE,
   type DifficultyProvenance,
 } from '../difficulty';
+import { difficultyOf } from '../../game/encounters/engine';
+import { riderBonus } from '../../game/combat/arts';
+import type { Encounter } from '../../packs/types';
 
 // A tiny 3-encounter pack, mirroring pack.json's shape at the fields the merge touches.
 function toyPack() {
@@ -129,5 +132,38 @@ describe('listPacks difficulty-sidecar integration (disk)', () => {
     const pack = entry.pack as { meta: { difficultyClassified?: boolean }; encounters: Array<{ difficulty?: number }> };
     expect(pack.encounters.every((e) => e.difficulty === undefined)).toBe(true);
     expect(pack.meta.difficultyClassified).toBeUndefined();
+  });
+});
+
+// The whole point of P3: classifying the pack is what lights the reward rider. This ties the
+// loader merge (bridge) to the gate (arts.riderBonus) through difficultyOf (engine) end-to-end —
+// GREEN only because the sidecar merge flips the flag and stamps the tiers; without it (the
+// unclassified branch below) the rider is zero everywhere.
+describe('rider gate lit by the loader merge (non-dormant iff classified)', () => {
+  const asEncounter = (e: unknown) => e as Encounter;
+
+  it('a classified pack lights the rider on a T1 q1 punch-up into a harder draw', () => {
+    const pack = toyPack();
+    applyDifficultySidecar(pack, sidecar({ 'e-ember': 1, 'e-lantern': 2, 'e-beacon': 3 }));
+    const packReady = pack.meta.difficultyClassified ?? false;
+    expect(packReady).toBe(true);
+    const byId = (id: string) => asEncounter(pack.encounters.find((e) => e.id === id));
+    // T1 (Smite, tier 1) drawing Beacon(3) or Lantern(2) at q1 → +1 rider fires
+    expect(riderBonus(1, difficultyOf(byId('e-beacon')), packReady)).toBe(1);
+    expect(riderBonus(1, difficultyOf(byId('e-lantern')), packReady)).toBe(1);
+    // T1 drawing its own Ember(1) — no punch-up (not harder than the tier)
+    expect(riderBonus(1, difficultyOf(byId('e-ember')), packReady)).toBe(0);
+    // T3 can never earn the rider — nothing exceeds Beacon (§5)
+    expect(riderBonus(3, difficultyOf(byId('e-beacon')), packReady)).toBe(0);
+  });
+
+  it('stays fully dormant on the SAME pack when unclassified (no sidecar)', () => {
+    const pack = toyPack(); // no merge → unmarked, flag absent
+    const packReady = pack.meta.difficultyClassified ?? false;
+    expect(packReady).toBe(false);
+    for (const e of pack.encounters) {
+      expect(difficultyOf(asEncounter(e))).toBe(2); // unmarked → Lantern
+      expect(riderBonus(1, difficultyOf(asEncounter(e)), packReady)).toBe(0); // rider zero everywhere
+    }
   });
 });
