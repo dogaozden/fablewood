@@ -25,6 +25,12 @@ import {
   checkIdImmutability,
   buildMergedPack,
   firstJsonObject,
+  heuristicDifficulty,
+  renderPrompt,
+  buildClassifyPrompt,
+  mergeProvenance,
+  encountersNeedingClassification,
+  tierHistogram,
 } from './expand_pack.mjs';
 
 // ============================================================================
@@ -548,4 +554,106 @@ test('firstJsonObject does not miscount braces that appear inside strings', () =
 
 test('firstJsonObject returns null when there is no JSON object', () => {
   assert.equal(firstJsonObject('no json here'), null);
+});
+
+// ============================================================================
+// classify verb — difficulty-rewards.md §8 (+ §9.2's free_recall amendment)
+// ============================================================================
+
+test('heuristicDifficulty: mcq is Ember, every other kind is Lantern', () => {
+  assert.equal(heuristicDifficulty('mcq'), 1);
+  assert.equal(heuristicDifficulty('match'), 2);
+  assert.equal(heuristicDifficulty('order'), 2);
+  assert.equal(heuristicDifficulty('scenario_branch'), 2);
+});
+
+test('heuristicDifficulty: free_recall defaults to Lantern, NOT Beacon (§9.2 / veto 13)', () => {
+  assert.equal(heuristicDifficulty('free_recall'), 2);
+});
+
+test('renderPrompt substitutes template_vars so the classifier reads the played prompt', () => {
+  const enc = { prompt: '{{company}} raises {{raise}} — what now?', template_vars: { company: 'Emberforge', raise: '$2M' } };
+  assert.equal(renderPrompt(enc), 'Emberforge raises $2M — what now?');
+});
+
+test('renderPrompt leaves a prompt without template_vars alone', () => {
+  assert.equal(renderPrompt({ prompt: 'plain prompt' }), 'plain prompt');
+});
+
+test('buildClassifyPrompt carries the kind, the rendered prompt, the payload and the facts', () => {
+  const enc = {
+    kind: 'mcq',
+    prompt: '{{co}} raises money.',
+    template_vars: { co: 'Emberforge' },
+    options: ['a', 'b'],
+    answer: 'a',
+    trap_notes: 'b forgets the investment',
+  };
+  const p = buildClassifyPrompt(enc, [{ statement: 'Post-money = pre-money + investment.' }]);
+  assert.match(p, /ENCOUNTER_KIND: mcq/);
+  assert.match(p, /PROMPT: Emberforge raises money\./);
+  assert.match(p, /OPTIONS: \["a","b"\]/);
+  assert.match(p, /TRAP_NOTES: b forgets the investment/);
+  assert.match(p, /Post-money = pre-money \+ investment\./);
+  // The rubric's load-bearing calibration must actually reach the model.
+  assert.match(p, /RESERVED FOR A GENUINE/);
+  assert.match(p, /free_recall\s+→ start at 2 \(Lantern\)/);
+  assert.match(p, /"difficulty": 1, "rationale"/);
+});
+
+test('buildClassifyPrompt omits the facts block when an encounter drills none', () => {
+  const p = buildClassifyPrompt({ kind: 'order', prompt: 'sort these' }, []);
+  assert.ok(!p.includes('FACTS THIS DRILLS'));
+});
+
+const provEntry = (difficulty, source) => ({ difficulty, rationale: 'r', source, model: 'm', date: '2026-08-01' });
+
+test('mergeProvenance takes the fresh pass for non-human entries', () => {
+  const prev = { encounters: { a: provEntry(1, 'heuristic') } };
+  const merged = mergeProvenance(prev, { a: provEntry(3, 'llm') }, ['a']);
+  assert.equal(merged.a.difficulty, 3);
+  assert.equal(merged.a.source, 'llm');
+});
+
+test('mergeProvenance treats a human entry as permanent — an automated pass cannot overwrite it', () => {
+  const prev = { encounters: { a: provEntry(3, 'human') } };
+  const merged = mergeProvenance(prev, { a: provEntry(1, 'llm') }, ['a']);
+  assert.equal(merged.a.difficulty, 3);
+  assert.equal(merged.a.source, 'human');
+});
+
+test('mergeProvenance keeps a previous entry the fresh pass skipped (e.g. --limit)', () => {
+  const prev = { encounters: { a: provEntry(2, 'llm'), b: provEntry(1, 'llm') } };
+  const merged = mergeProvenance(prev, { a: provEntry(3, 'llm') }, ['a', 'b']);
+  assert.equal(merged.a.difficulty, 3);
+  assert.equal(merged.b.difficulty, 1);
+});
+
+test('mergeProvenance drops entries whose encounter id no longer exists in the pack', () => {
+  const prev = { encounters: { gone: provEntry(3, 'human') } };
+  const merged = mergeProvenance(prev, {}, ['a']);
+  assert.deepEqual(Object.keys(merged), []);
+});
+
+test('mergeProvenance handles a missing previous sidecar', () => {
+  const merged = mergeProvenance(null, { a: provEntry(2, 'llm') }, ['a']);
+  assert.equal(merged.a.difficulty, 2);
+});
+
+test('encountersNeedingClassification skips human-locked ids (no LLM call spent)', () => {
+  const encounters = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const prev = { encounters: { b: provEntry(3, 'human'), c: provEntry(1, 'llm') } };
+  assert.deepEqual(encountersNeedingClassification(encounters, prev).map((e) => e.id), ['a', 'c']);
+});
+
+test('encountersNeedingClassification returns everything when no sidecar exists yet', () => {
+  const encounters = [{ id: 'a' }, { id: 'b' }];
+  assert.equal(encountersNeedingClassification(encounters, null).length, 2);
+});
+
+test('tierHistogram counts each tier and ignores invalid ones', () => {
+  const h = tierHistogram({
+    a: provEntry(1, 'llm'), b: provEntry(2, 'llm'), c: provEntry(2, 'llm'), d: provEntry(3, 'llm'), e: provEntry(9, 'llm'),
+  });
+  assert.deepEqual(h, { 1: 1, 2: 2, 3: 1 });
 });

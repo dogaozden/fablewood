@@ -30,6 +30,12 @@
 //   node pipeline/expand_pack.mjs --coverage-only [--pack-dir ...] [--raw-dir ...]
 //   node pipeline/expand_pack.mjs --check [<staging/expand/run-dir>]
 //
+// The `classify` verb (difficulty-rewards.md §8) rides the same file and the same
+// LLM plumbing — it assigns each encounter a 1-3 reward difficulty and writes
+// packs/<id>/difficulty.provenance.json (a SIDECAR; pack.json is never touched):
+//   node pipeline/expand_pack.mjs --classify --model claude-opus-5 [--pack-dir packs/vc-law]
+//                                 [--heuristic-only] [--dry-run] [--limit N]
+//
 // No API keys: every LLM call shells the subscription `claude` CLI, exactly
 // the way app/vite-judge-plugin.ts already does for the Clerk.
 
@@ -681,6 +687,300 @@ async function generateDraft(candidate, ctx) {
 }
 
 // ============================================================================
+// The `classify` verb — difficulty-rewards.md §8 (+ §9.2's amendment)
+//
+// Assigns every encounter in a pack its reward-axis difficulty (1 Ember /
+// 2 Lantern / 3 Beacon) and writes ONE provenance sidecar per pack,
+// packs/<id>/difficulty.provenance.json — never into pack.json, whose fact and
+// encounter ids stay byte-for-byte frozen (state/ is precious). The loader
+// (app/src/bridge/difficulty.ts) folds the sidecar into the in-memory pack at
+// listPacks() time and flips meta.difficultyClassified at full coverage, which
+// is what takes the §4 reward rider out of dormancy.
+//
+// NOT the Fact.difficulty axis (1-5 pedagogical authoring metadata, §1.1) — a
+// different field on a different object. Fact STATEMENTS are fed to the
+// classifier as context; their difficulty numbers deliberately are NOT (§8's
+// Fact.difficulty tie-break is a "recommended, not required" follow-up).
+// ============================================================================
+
+/** §8's by-kind baseline, as amended by §9.2 / veto item 13: free_recall defaults
+ *  to Lantern, NOT Beacon — typing is the most expensive input in the game, so the
+ *  form alone never earns the top tier; only genuine multi-concept synthesis does.
+ *  Also the honest fallback when an LLM call is rejected (recorded as
+ *  source:'heuristic', so the sidecar never claims a judgment it didn't make). */
+export function heuristicDifficulty(kind) {
+  return kind === 'mcq' ? 1 : 2;
+}
+
+/** The classification rubric, verbatim — shared by the prompt and the run report so a
+ *  reviewer grades the run against the exact text the model was given. */
+export const CLASSIFY_RUBRIC = [
+  'TIER 1 — EMBER: a quick spark. One atomic recall: a definition, a term, or a single',
+  '  recognition step. Someone who read the material once answers without deliberation.',
+  '  Recognition-format questions (choose among given options) start here.',
+  '',
+  'TIER 2 — LANTERN: real weight, one demand. THE DEFAULT — the steady light most of the',
+  '  Ledger burns by, and where most encounters belong. Applying a rule, running one',
+  '  calculation, telling two neighbouring concepts apart, or recalling one specific',
+  '  provision AND what it does. One demand — but a demand a skimmer gets wrong.',
+  '',
+  'TIER 3 — BEACON: a signal-fire, lit only for what truly matters. RESERVED FOR A GENUINE',
+  '  MINORITY. Requires multi-concept SYNTHESIS: two or more distinct provisions or',
+  '  mechanisms whose INTERACTION is the point; or a chain where an intermediate result',
+  '  feeds the next step; or a trade-off judgement where the naive answer is wrong for a',
+  '  structural reason. A single-demand question is NOT a Beacon no matter how obscure —',
+  '  obscurity is not difficulty. If you cannot name the two-or-more things being',
+  '  synthesised, it is not a Beacon.',
+].join('\n');
+
+/** Per-kind starting points, which the model is told to move off ONLY when the actual
+ *  prompt earns it (§8's heuristic, amended by §9.2). */
+export const CLASSIFY_KIND_ANCHORS = [
+  'mcq              → start at 1 (Ember). Promote to 2 when the distractors encode a real',
+  '                   confusion, or the stem demands a computation or an application rather',
+  '                   than recognition. A Beacon mcq is rare and needs true synthesis.',
+  'match / order    → start at 2 (Lantern).',
+  'scenario_branch  → start at 2 (Lantern).',
+  'free_recall      → start at 2 (Lantern) and STAY THERE unless the prompt genuinely demands',
+  '                   synthesis. Free recall is the most expensive form in the game (the player',
+  '                   types; the Clerk deliberates), so the FORM alone never earns Beacon. One',
+  '                   number, one term, or one short sentence = Lantern.',
+].join('\n');
+
+/** The kind-specific payload the classifier needs to judge the actual demand rather than
+ *  just the kind: distractors, the branch set, the rubric, the ordering. */
+function encounterPayload(enc) {
+  const lines = [];
+  if (enc.options !== undefined) lines.push(`OPTIONS: ${JSON.stringify(enc.options)}`);
+  if (enc.answer !== undefined) lines.push(`ANSWER: ${JSON.stringify(enc.answer)}`);
+  if (enc.rubric !== undefined) lines.push(`RUBRIC: ${enc.rubric}`);
+  if (enc.branches !== undefined) {
+    lines.push(`BRANCHES: ${JSON.stringify((enc.branches ?? []).map((b) => ({ label: b.label, correct: !!b.correct })))}`);
+  }
+  if (enc.trap_notes !== undefined) lines.push(`TRAP_NOTES: ${enc.trap_notes}`);
+  return lines.join('\n');
+}
+
+/** Substitute template_vars into the prompt so the classifier reads what the PLAYER reads —
+ *  "{{company}} raises {{raise}} at a {{pre}}…" hides the actual demand behind placeholders. */
+export function renderPrompt(enc) {
+  let out = String(enc.prompt ?? '');
+  for (const [k, v] of Object.entries(enc.template_vars ?? {})) {
+    out = out.split(`{{${k}}}`).join(String(v));
+  }
+  return out;
+}
+
+export function buildClassifyPrompt(enc, facts) {
+  return [
+    'You are classifying ONE question from Fablewood (a knowledge-retention RPG) on its REWARD',
+    'difficulty axis: how much cognitive demand answering it actually places on the player.',
+    'This is NOT a rating of how obscure or advanced the underlying topic is.',
+    '',
+    CLASSIFY_RUBRIC,
+    '',
+    'START FROM THE FORM, THEN JUDGE THE ACTUAL PROMPT:',
+    CLASSIFY_KIND_ANCHORS,
+    '',
+    'CALIBRATION: most encounters are Lantern. Beacon is a deliberate minority. Do NOT spread',
+    'tiers to make the distribution look balanced, and do not avoid a tier because you have used',
+    'it often — judge THIS encounter on its own merits alone.',
+    '',
+    `ENCOUNTER_KIND: ${enc.kind}`,
+    `PROMPT: ${renderPrompt(enc)}`,
+    encounterPayload(enc),
+    '',
+    facts.length ? `FACTS THIS DRILLS:\n${facts.map((f) => `- ${f.statement}`).join('\n')}` : '',
+    '',
+    'Respond with STRICT JSON only — no prose, no markdown fence, no preamble:',
+    '{"difficulty": 1, "rationale": "<ONE line, max 140 chars, naming the concrete reason>"}',
+    '"difficulty" MUST be the integer 1, 2, or 3.',
+  ].filter((l) => l !== '').join('\n');
+}
+
+function validTier(d) {
+  return d === 1 || d === 2 || d === 3;
+}
+
+/** One encounter, ≤2 attempts, then reject-and-log — a single bad item never crashes the run
+ *  (§8's "one corrective retry, then reject-and-log", same shape as generateDraft above). */
+async function classifyOne(enc, facts, ctx) {
+  const prompt = buildClassifyPrompt(enc, facts);
+  let lastErr = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let raw;
+    try {
+      raw = await runClaude(prompt, { model: ctx.model, timeoutMs: ctx.timeoutMs });
+    } catch (e) {
+      lastErr = `claude -p call failed: ${e.message}`;
+      continue;
+    }
+    const jsonText = firstJsonObject(raw);
+    if (!jsonText) {
+      lastErr = 'no JSON object found in response';
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      lastErr = `JSON.parse failed: ${e.message}`;
+      continue;
+    }
+    if (!validTier(parsed?.difficulty)) {
+      lastErr = `difficulty not 1|2|3 (got ${JSON.stringify(parsed?.difficulty)})`;
+      continue;
+    }
+    const rationale = String(parsed.rationale ?? '').trim();
+    if (!rationale) {
+      lastErr = 'missing rationale';
+      continue;
+    }
+    return { ok: true, difficulty: parsed.difficulty, rationale, attempts: attempt + 1 };
+  }
+  return { ok: false, reason: lastErr, attempts: 2 };
+}
+
+/**
+ * Merge a fresh classification pass over the existing sidecar. §8: automated passes only ever
+ * write a NON-'human' entry — an entry already marked source:'human' is PERMANENT, carried
+ * through untouched (and never re-classified, so it costs no LLM call either). Entries whose
+ * encounter id no longer exists in the pack are dropped.
+ */
+export function mergeProvenance(previous, fresh, encounterIds) {
+  const prev = previous?.encounters ?? {};
+  const out = {};
+  for (const id of encounterIds) {
+    if (prev[id]?.source === 'human') out[id] = prev[id];
+    else if (fresh[id]) out[id] = fresh[id];
+    else if (prev[id]) out[id] = prev[id];
+  }
+  return out;
+}
+
+/** Which encounters this run must actually spend an LLM call on (skips permanent human
+ *  overrides — §8). Pure + exported so the skip rule is unit-testable. */
+export function encountersNeedingClassification(encounters, previous) {
+  const prev = previous?.encounters ?? {};
+  return encounters.filter((e) => prev[e.id]?.source !== 'human');
+}
+
+export function tierHistogram(entries) {
+  const h = { 1: 0, 2: 0, 3: 0 };
+  for (const e of Object.values(entries)) if (validTier(e.difficulty)) h[e.difficulty]++;
+  return h;
+}
+
+function buildClassifyReport({ packId, model, entries, results, histogram, total }) {
+  const pct = (n) => (total ? ((n / total) * 100).toFixed(1) : '0.0');
+  const rejected = results.filter((r) => !r.ok);
+  return [
+    `# Difficulty classification — ${packId}`,
+    '',
+    `Model: \`${model}\` · encounters: ${total} · generated ${new Date().toISOString()}`,
+    'Spec: docs/design/difficulty-rewards.md §8 (heuristic), §9.2 (free_recall → Lantern default).',
+    '',
+    '## Distribution',
+    '',
+    '| Tier | Name | Count | Share |',
+    '|---|---|---|---|',
+    `| 1 | Ember | ${histogram[1]} | ${pct(histogram[1])}% |`,
+    `| 2 | Lantern | ${histogram[2]} | ${pct(histogram[2])}% |`,
+    `| 3 | Beacon | ${histogram[3]} | ${pct(histogram[3])}% |`,
+    '',
+    `Rejected (fell back to the §8 heuristic): ${rejected.length}`,
+    ...rejected.map((r) => `- \`${r.id}\` — ${r.reason}`),
+    '',
+    '## Rubric given to the classifier',
+    '',
+    '```',
+    CLASSIFY_RUBRIC,
+    '',
+    CLASSIFY_KIND_ANCHORS,
+    '```',
+    '',
+    '## Per-encounter',
+    '',
+    '| Encounter | Kind | Tier | Source | Rationale |',
+    '|---|---|---|---|---|',
+    ...Object.entries(entries).map(([id, e]) =>
+      `| \`${id}\` | ${e.kind ?? ''} | ${e.difficulty} | ${e.source} | ${String(e.rationale).replace(/\|/g, '\\|')} |`),
+  ].join('\n');
+}
+
+async function runClassifyMode(opts) {
+  const pack = loadPack(opts.packDir);
+  const packId = pack?.meta?.id ?? basename(opts.packDir);
+  const encounters = pack.encounters ?? [];
+  const factById = new Map((pack.facts ?? []).map((f) => [f.id, f]));
+  const sidecarPath = resolve(root, opts.packDir, 'difficulty.provenance.json');
+  const previous = existsSync(sidecarPath) ? JSON.parse(readFileSync(sidecarPath, 'utf8')) : null;
+
+  let todo = encountersNeedingClassification(encounters, previous);
+  const skippedHuman = encounters.length - todo.length;
+  if (opts.limit > 0) todo = todo.slice(0, opts.limit);
+
+  console.log(`classify: ${packId} — ${encounters.length} encounters, ${todo.length} to classify` +
+    `${skippedHuman ? ` (${skippedHuman} human-locked, preserved)` : ''}` +
+    `${opts.heuristicOnly ? ' — HEURISTIC ONLY, no LLM calls' : ` via ${opts.model}`}`);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const fresh = {};
+  const results = [];
+  for (const [i, enc] of todo.entries()) {
+    const facts = (enc.fact_ids ?? []).map((id) => factById.get(id)).filter(Boolean);
+    let r;
+    if (opts.heuristicOnly) {
+      r = { ok: false, reason: 'heuristic-only run (no LLM pass requested)', attempts: 0 };
+    } else {
+      const t0 = Date.now();
+      r = await classifyOne(enc, facts, opts);
+      r.ms = Date.now() - t0;
+    }
+    results.push({ ...r, id: enc.id });
+    fresh[enc.id] = {
+      difficulty: r.ok ? r.difficulty : heuristicDifficulty(enc.kind),
+      rationale: r.ok ? r.rationale : `heuristic by kind (${enc.kind}) — ${r.reason}`,
+      source: r.ok ? 'llm' : 'heuristic',
+      model: r.ok ? opts.model : 'none',
+      date: today,
+      kind: enc.kind,
+    };
+    console.log(`  [${i + 1}/${todo.length}] ${enc.id} (${enc.kind}) → ${fresh[enc.id].difficulty}` +
+      `${r.ok ? ` (${r.ms}ms, attempt ${r.attempts})` : ` [REJECTED: ${r.reason}]`}`);
+  }
+
+  const merged = mergeProvenance(previous, fresh, encounters.map((e) => e.id));
+  const covered = encounters.filter((e) => validTier(merged[e.id]?.difficulty)).length;
+  const histogram = tierHistogram(merged);
+  const sidecar = {
+    pack: packId,
+    verb: 'classify',
+    generatedAt: new Date().toISOString(),
+    spec: 'docs/design/difficulty-rewards.md §8 + §9.2',
+    encounters: merged,
+  };
+
+  const runDir = resolve(root, 'staging', 'difficulty', `${packId}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'provenance.json'), `${JSON.stringify(sidecar, null, 2)}\n`);
+  writeFileSync(join(runDir, 'report.md'), buildClassifyReport({
+    packId, model: opts.heuristicOnly ? 'heuristic-only' : opts.model, entries: merged, results, histogram, total: encounters.length,
+  }));
+
+  // The sidecar is a SEPARATE file — pack.json, its fact ids and its encounter ids are never
+  // touched by this verb. Writing it is what flips meta.difficultyClassified at load time.
+  if (!opts.dryRun) writeFileSync(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`);
+
+  console.log(`\ncoverage: ${covered}/${encounters.length}` +
+    ` → difficultyClassified will be ${covered === encounters.length && covered > 0}`);
+  console.log(`histogram: Ember(1)=${histogram[1]} Lantern(2)=${histogram[2]} Beacon(3)=${histogram[3]}`);
+  console.log(`report: ${relative(root, runDir)}`);
+  console.log(opts.dryRun ? '(dry run — sidecar NOT written)' : `sidecar: ${relative(root, sidecarPath)}`);
+  return 0;
+}
+
+// ============================================================================
 // CLI plumbing
 // ============================================================================
 
@@ -694,6 +994,10 @@ function parseArgs(argv) {
     check: false,
     checkDir: null,
     coverageOnly: false,
+    classify: false,
+    heuristicOnly: false,
+    dryRun: false,
+    limit: 0,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -703,6 +1007,10 @@ function parseArgs(argv) {
     else if (a === '--model') opts.model = argv[++i];
     else if (a === '--timeout-ms') opts.timeoutMs = parseInt(argv[++i], 10);
     else if (a === '--coverage-only') opts.coverageOnly = true;
+    else if (a === '--classify') opts.classify = true;
+    else if (a === '--heuristic-only') opts.heuristicOnly = true;
+    else if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--limit') opts.limit = parseInt(argv[++i], 10);
     else if (a === '--check') {
       opts.check = true;
       if (argv[i + 1] && !argv[i + 1].startsWith('-')) opts.checkDir = argv[++i];
@@ -1037,6 +1345,7 @@ function runCheckMode(opts) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
+  if (opts.classify) return runClassifyMode(opts);
   if (opts.check) return runCheckMode(opts);
   return runGenerateMode(opts);
 }
