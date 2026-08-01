@@ -22,7 +22,7 @@ type Save = {
   hp?: number;
   streak?: number;
   lastPlayed?: string;
-  dungeon?: { roomIndex: number; cleared: string[] };
+  dungeon?: { roomIndex: number; cleared: string[]; gatePending?: string };
 };
 
 interface LedgerSnap {
@@ -130,14 +130,18 @@ test("gate HP-out (free_recall drill drains the pool) fires the Night's Ledger r
     expect(saveAfter?.streak, 'streak reflects under-1/under-2s clears; the gate retreat adds none').toBe(
       2,
     );
-    // rooms 1+2 (no gate) plus this room's OWN combat (V1-12: credited before the gate ever
-    // runs) all mark cleared even though the gate itself never opened — proves this run
-    // genuinely threaded through the real gate room, not some other retreat path.
-    expect(saveAfter?.dungeon?.cleared, 'combat-cleared rooms include the gated room, in order').toEqual([
+    // rooms 1+2 (no gate) cleared; the gate room's OWN combat is credited too, but as a
+    // pending ward rather than a clear (V1-12 as amended by crucible-2: an unopened ward is
+    // not a passed vault, yet its won fight must never be re-litigated). That pending id is
+    // what proves this run genuinely threaded through the real gate room, not some other
+    // retreat path.
+    expect(saveAfter?.dungeon?.cleared, 'the non-gated rooms cleared, in order').toEqual([
       'under-1',
       'under-2',
-      'under-3',
     ]);
+    expect(saveAfter?.dungeon?.gatePending, "the gate room's won combat is banked, not cleared").toBe(
+      'under-3',
+    );
   } finally {
     await restoreSave(page, beforeSave);
   }

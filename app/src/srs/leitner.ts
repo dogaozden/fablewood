@@ -77,9 +77,19 @@ export interface FactMeta {
   prereqs: string[];
 }
 
-/** Box a fact currently occupies. 0 = never seen (contracts: "0 = unseen"). */
+/**
+ * Box a fact currently occupies. 0 = never seen (contracts: "0 = unseen").
+ *
+ * A persisted box is only as trustworthy as the file it came from — SrsStore's shape
+ * check validates the `facts` container, never each entry — so coerce here rather than
+ * hand a non-number back under a `: number` signature. That lie is what let masteryAvg
+ * below CONCATENATE a string box ("0"+"3"+5 = "035" → 17.5) instead of adding it, and
+ * that number feeds the Dashboard and the companion mastery gate. Anything that will
+ * not resolve to a finite number reads as unseen, matching record()'s own box clamp.
+ */
 export function boxOf(state: SrsState, factId: string): number {
-  return state.facts[factId]?.box ?? 0;
+  const box = Number(state.facts[factId]?.box);
+  return Number.isFinite(box) ? box : 0;
 }
 
 /** Average box across facts (unseen counts as 0), 0-8. Empty set → 0. */
@@ -125,8 +135,14 @@ export function record(
   else newBox = MIN_BOX;
 
   const next_due = now + BOX_INTERVALS[newBox] * DAY_MS;
+  // `?? []` guards only null/undefined. Any OTHER non-array history (a number or object
+  // from a mangled / half-written state file) makes the spread throw "is not iterable" —
+  // and it throws on every retry too, because the failed write never replaces the bad
+  // shape on disk, so that fact becomes permanently unanswerable. Rebuild instead, the
+  // same way a corrupted box is clamped rather than allowed to poison next_due.
+  const prior = Array.isArray(entry?.history) ? entry.history : [];
   const history: HistoryItem[] = [
-    ...(entry?.history ?? []),
+    ...prior,
     { ts: new Date(now).toISOString(), quality, encounter_id: encounterId },
   ];
   return { box: newBox, next_due, history };

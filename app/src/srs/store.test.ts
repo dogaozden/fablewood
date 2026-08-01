@@ -127,6 +127,44 @@ describe('SrsStore — load & read', () => {
   });
 });
 
+// isSrsState only checks that `facts` is an object — never each entry — so a hand-edited
+// or half-written srs.json reaches boxOf/masteryAvg with a non-number box. masteryAvg sums
+// with `+`, so a string box concatenates instead of adding, and THIS is the masteryAvg the
+// Dashboard and the companion mastery gate (CombatScene) actually call.
+describe('SrsStore — mangled box tolerance', () => {
+  it('adds a numeric-string box arithmetically instead of concatenating it', async () => {
+    const b = new FakeBridge();
+    b.seed('srs.json', {
+      version: 1,
+      facts: { a: { box: '3', next_due: NOW, history: [] }, z: { box: 5, next_due: NOW, history: [] } },
+    });
+    const s = new SrsStore(b);
+    await s.ready();
+    expect(s.boxOf('a')).toBe(3);
+    expect(s.masteryAvg(['a', 'z'])).toBe(4); // (3+5)/2, NOT "035"/2 = 17.5
+  });
+
+  it('never leaves NaN or a non-number reachable through boxOf/masteryAvg', async () => {
+    const b = new FakeBridge();
+    b.seed('srs.json', {
+      version: 1,
+      facts: {
+        obj: { box: {}, next_due: NOW, history: [] },
+        nul: { box: null, next_due: NOW, history: [] },
+        inf: { box: Number.POSITIVE_INFINITY, next_due: NOW, history: [] },
+        ok: { box: 4, next_due: NOW, history: [] },
+      },
+    });
+    const s = new SrsStore(b);
+    await s.ready();
+    for (const id of ['obj', 'nul', 'inf', 'ok']) {
+      expect(typeof s.boxOf(id)).toBe('number');
+      expect(Number.isFinite(s.boxOf(id))).toBe(true);
+    }
+    expect(s.masteryAvg(['obj', 'ok'])).toBe(2); // (0+4)/2
+  });
+});
+
 describe('SrsStore — merge-write preserves foreign data', () => {
   it('keeps unknown top-level keys and other facts when recording', async () => {
     const b = new FakeBridge();

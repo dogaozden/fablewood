@@ -229,6 +229,14 @@ export class CombatScene extends Phaser.Scene {
   create(): void {
     this.destroyed = false;
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => { this.destroyed = true; });
+    // A full Game teardown (PhaserGame.tsx's unmount — e.g. the shell switching away from
+    // the "Game" tab mid-battle) does NOT emit SHUTDOWN: Phaser's SceneManager.destroy()
+    // calls every scene's Systems.destroy() directly, skipping shutdown() entirely. Without
+    // this twin listener the flag stayed false on that path, so every `if (this.destroyed)`
+    // guard below failed open — including the ones protecting the delayed calls and the
+    // awaited encounter overlays, which resolve on their own setTimeout (encounters/kinds.ts)
+    // long after the scene is gone. Same idiom HamletScene uses for its own DESTROY path.
+    this.events.once(Phaser.Scenes.Events.DESTROY, () => { this.destroyed = true; });
 
     // Phaser reuses this Scene INSTANCE across scene.start('combat') calls, but the class-field
     // initializers ran only once — so every battle must begin from zero here, or the second

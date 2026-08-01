@@ -27,6 +27,7 @@ import { itemById } from '../../../inventory/catalog';
 import { openInventoryPane } from '../../../inventory/ui/inventoryPane';
 import {
   firstUnclearedIndex,
+  markGatePending,
   markRoomCleared,
   nodeState,
   type DungeonProgress,
@@ -225,7 +226,11 @@ export class DungeonScene extends Phaser.Scene {
     if (d && Array.isArray(d.cleared)) {
       // only trust cleared ids that exist in *this* spec (guards a stale save vs a changed pack)
       const valid = d.cleared.filter((id) => this.spec.rooms.some((r) => r.id === id));
-      return { roomIndex: firstUnclearedIndex(this.spec.rooms, valid), cleared: valid };
+      // same guard for a shut ward: only a room *this* spec still gates, and only one the
+      // save does not also call cleared, is a ward the crawl can still be standing before.
+      const pending = this.spec.rooms.find((r) => r.id === d.gatePending && !!r.gate);
+      const gatePending = pending && !valid.includes(pending.id) ? pending.id : undefined;
+      return { roomIndex: firstUnclearedIndex(this.spec.rooms, valid), cleared: valid, gatePending };
     }
     return { roomIndex: 0, cleared: [] };
   }
@@ -334,6 +339,14 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
+    // A ward left shut by an HP-out mid-drill (resolveCombat's gatePending): the fight here
+    // is already won and must never be re-fought, so skip the teaching and the battle and
+    // settle straight back into the gate. resolveCombat owns `busy` from here.
+    if (this.progress.gatePending === room.id) {
+      await this.resolveCombat(room.id, { outcome: 'victory', hpLost: 0, results: [] });
+      return;
+    }
+
     const driving = opts.mode === 'drive';
     await this.view.showBlurbCard(room, facts, { mode: driving ? 'auto' : 'wait' });
     // discovered documents (encounters agent's modal) — skipped only in auto-drive
@@ -378,6 +391,14 @@ export class DungeonScene extends Phaser.Scene {
     roomId: string,
     outcome: CombatOutcome,
   ): Promise<{ transitioned: boolean }> {
+    // crucible-2 — this method RELEASES `busy` on every exit that leaves us in the vaults,
+    // but only doCombat's sim path ever took it (enterRoom's acquire upstream). On the
+    // battle-return path (bootFlow's pending outcome) the whole settlement — HP, progress,
+    // the gate drill, the streak, the loot grant — therefore ran with the map drawn and
+    // unlocked, so a click on the next node sailed through and launched a second battle on
+    // top of an unfinished one. Take the lock where it is given back; the sim path already
+    // holds it, so this is idempotent.
+    this.busy = true;
     const room = this.spec.rooms.find((r) => r.id === roomId);
     if (!room) {
       this.busy = false;
@@ -406,13 +427,23 @@ export class DungeonScene extends Phaser.Scene {
     // gate runs, so a gate wipe (HP exhausted mid-drill, below) can never re-litigate a
     // fight already won (Fable_SPEC.md:31 — wipes cost the loot roll, never story
     // progress). Idempotent, so bossVictory's own final save just carries this forward.
-    this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
+    // crucible-2 — but a WARDED room was being credited as fully cleared here too, so an
+    // HP-out mid-drill counted as passage: the node came back marked ✓ with its gate, its
+    // loot and its streak silently gone forever (a cleared node only ever re-shows its
+    // blurb). Credit the two halves separately instead — the fight is banked as a pending
+    // ward (enterRoom resumes straight into the drill, never re-fighting), and the room
+    // only joins `cleared` once the ward actually yields, below.
+    this.progress = room.gate
+      ? markGatePending(this.progress, room.id)
+      : markRoomCleared(this.progress, room.id, this.spec.rooms);
     await services.save.save({ dungeon: this.progress });
 
     // gate door must open before the node can clear
     if (room.gate) {
       const gate = await this.runGate(room, outcome);
       if (gate.transitioned) return { transitioned: true };
+      this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
+      await services.save.save({ dungeon: this.progress });
     }
 
     if (room.boss) {

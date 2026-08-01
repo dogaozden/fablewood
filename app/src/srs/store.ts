@@ -13,7 +13,7 @@
  */
 import type { Quality, SaveData } from '../game/contracts';
 import { getState as realGetState, putState as realPutState } from '../bridge/client';
-import { record as leitnerRecord, type SrsState } from './leitner';
+import { boxOf as leitnerBoxOf, record as leitnerRecord, type SrsState } from './leitner';
 
 /** The two bridge calls the stores depend on — injectable for tests. */
 export interface Bridge {
@@ -84,8 +84,10 @@ export class SrsStore {
     this.cache = { ...raw, version: 1, facts: { ...raw.facts } };
   }
 
+  /** Delegates to leitner's boxOf so the mangled-box coercion lives in exactly one place —
+   *  masteryAvg below sums with `+`, and a non-number box concatenates instead of adding. */
   boxOf(factId: string): number {
-    return this.cache.facts[factId]?.box ?? 0;
+    return leitnerBoxOf(this.cache, factId);
   }
 
   masteryAvg(factIds: string[]): number {
