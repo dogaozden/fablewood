@@ -47,7 +47,7 @@ if (!Array.isArray(dun.rooms) || dun.rooms.length === 0) push('dungeon.rooms mus
 const roomIds = new Set();
 let bossCount = 0;
 
-for (const r of dun.rooms ?? []) {
+for (const r of Array.isArray(dun.rooms) ? dun.rooms : []) {
   const at = (m) => `[${r.id ?? '?'}] ${m}`;
   if (!r.id || roomIds.has(r.id)) push(at('room id missing or duplicate'));
   roomIds.add(r.id);
@@ -57,7 +57,7 @@ for (const r of dun.rooms ?? []) {
     if (!factIds.has(fid)) push(at(`teaching references unknown fact: ${fid}`));
   }
   if (!Array.isArray(r.enemies)) push(at('room.enemies must be an array'));
-  for (const e of r.enemies ?? []) {
+  for (const e of Array.isArray(r.enemies) ? r.enemies : []) {
     if (!ARCHETYPES.has(e.archetype)) push(at(`bad enemy archetype: ${e.archetype}`));
     for (const k of e.kinds ?? []) if (!KINDS.has(k)) push(at(`bad enemy kind: ${k}`));
     for (const t of e.tags ?? []) if (!factTags.has(t)) push(at(`enemy tag not on any fact: ${t}`));
@@ -76,7 +76,7 @@ for (const r of dun.rooms ?? []) {
     if (!b.name) push(at('boss.name required'));
     if (!Number.isInteger(b.shields) || b.shields < 1) push(at(`boss.shields must be a positive integer, got ${b.shields}`));
     if (!Array.isArray(b.phases) || b.phases.length === 0) push(at('boss.phases must be non-empty'));
-    for (const ph of b.phases ?? []) {
+    for (const ph of Array.isArray(b.phases) ? b.phases : []) {
       const e = encById.get(ph.branchEncounterId);
       if (!e) push(at(`boss phase references unknown encounter: ${ph.branchEncounterId}`));
       else if (e.kind !== 'scenario_branch') push(at(`boss phase encounter ${e.id} must be scenario_branch, is ${e.kind}`));

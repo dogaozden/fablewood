@@ -112,3 +112,70 @@ test('a non-object moveLabels is REJECTED (array and scalar alike)', () => {
     assert.match(out, /boss\.moveLabels must be an object when present/);
   }
 });
+
+// ============================================================================
+// crucible-2 — non-array rooms/enemies/phases must be REPORTED, not crash the
+// validator with a TypeError. Each field already had an Array.isArray() check
+// that pushed a clean error message — but the for-of loop right after it ran
+// over the raw (non-iterable) value regardless, so the process crashed before
+// ever reaching the report. Fixtures mirror the verifier's malformed-pack repro.
+// ============================================================================
+
+/** Run the real validator CLI over an explicit dungeon object (bypassing
+ * dungeonWith's fixed valid-boss shape, since these fixtures target rooms/
+ * enemies/phases directly) against the shared PACK fixture above. */
+function runValidatorWithDungeon(dungeon) {
+  const dir = mkdtempSync(join(tmpdir(), 'fw-dungeon-'));
+  try {
+    const dPath = join(dir, 'test.dungeon.json');
+    const pPath = join(dir, 'pack.json');
+    writeFileSync(dPath, JSON.stringify(dungeon));
+    writeFileSync(pPath, JSON.stringify(PACK));
+    const res = spawnSync(process.execPath, [SCRIPT, dPath, pPath], { encoding: 'utf8' });
+    return { ok: res.status === 0, out: `${res.stdout}${res.stderr}` };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('dungeon.rooms as a non-array object is reported, not a crash', () => {
+  const { ok, out } = runValidatorWithDungeon({
+    id: 'test.dungeon', name: 'Test Dungeon', region: 'Testing', packId: 'test-pack', rooms: {},
+  });
+  assert.equal(ok, false);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /dungeon\.rooms must be a non-empty array/);
+  assert.match(out, /DUNGEON VALIDATION FAILED/);
+});
+
+test('dungeon.rooms as a non-array number is reported, not a crash', () => {
+  const { ok, out } = runValidatorWithDungeon({
+    id: 'test.dungeon', name: 'Test Dungeon', region: 'Testing', packId: 'test-pack', rooms: 5,
+  });
+  assert.equal(ok, false);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /dungeon\.rooms must be a non-empty array/);
+});
+
+test('room.enemies as a non-array object is reported, not a crash', () => {
+  const { ok, out } = runValidatorWithDungeon({
+    id: 'test.dungeon', name: 'Test Dungeon', region: 'Testing', packId: 'test-pack',
+    rooms: [{ id: 'room.1', name: 'Room 1', enemies: {} }],
+  });
+  assert.equal(ok, false);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /\[room\.1\] room\.enemies must be an array/);
+});
+
+test('boss.phases as a non-array object is reported, not a crash', () => {
+  const { ok, out } = runValidatorWithDungeon({
+    id: 'test.dungeon', name: 'Test Dungeon', region: 'Testing', packId: 'test-pack',
+    rooms: [{
+      id: 'room.1', name: 'Room 1', enemies: [],
+      boss: { name: 'Boss', shields: 1, phases: {} },
+    }],
+  });
+  assert.equal(ok, false);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /\[room\.1\] boss\.phases must be non-empty/);
+});
