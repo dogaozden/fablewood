@@ -74,7 +74,7 @@ describe('difficulty presentation metadata (§7)', () => {
     expect(DIFFICULTY_DEFS).toEqual({
       1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
       2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
-      3: { name: 'Beacon', glyph: '■', tint: 0xfff1c6 },
+      3: { name: 'Beacon', glyph: '■', tint: 0xa65420 },
     });
     expect(difficultyPolicyGlyph(1)).toBe('▫+');
     expect(difficultyPolicyGlyph(2)).toBe('◧+');
