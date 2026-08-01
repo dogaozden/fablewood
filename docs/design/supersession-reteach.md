@@ -1,6 +1,6 @@
 # The Ledger Amended — Supersession Re-teach Event
 
-**Status: DESIGN FINAL (Fable, 2026-08-01). Execute-ready. Builder assignment BLOCKED on the Opus-lane freeze — do not implement with a lesser model without the author's say-so.**
+**Status: DESIGN FINAL (Fable, 2026-08-01). Execute-ready. Builder ASSIGNED 2026-08-01: Opus 5 (freeze lifted after in-session verification — alias serves claude-opus-5[1m]).**
 Closes knowledge-platform-vision.md §9 item 3 (the schema/validator half shipped at `faeb11f`; this is the game-event half).
 
 ## 1. What exists, what's missing
@@ -28,12 +28,14 @@ Sign-off (after last card of the batch): *"So amended. What the Ledger keeps, it
 
 The witness beat is **teach-only**: no question, no grade, no SRS record, no HP, no Glow. All player-facing strings above are Fable-written and FINAL — builder transcribes verbatim, invents nothing.
 
-## 4. Selection rules (engine)
+## 4. Selection rules (engine) — AMENDED 2026-08-01 after the choke-point survey
 
-Witnessing is the pivot. Per superseded/superseding pair:
+The first draft had the old fact drawing normally until witnessed. The survey killed that clause: the validator invariants (pipeline/validate_pack.mjs) already forbid a live encounter from targeting a superseded fact, so the pack update that supersedes a fact necessarily retargets its encounters — post-update, the old fact **cannot** be drilled through any encounter. Keeping it "active" would leave it stuck due forever, polluting the queue while drills silently serve other facts. Amended rule — **the amendment suspends BOTH truths until witnessed:**
 
-- **Before witness:** the OLD fact draws normally everywhere (combat pick, Wellspring drills, gate draws, due queue). The player lives on the old truth until the Clerk amends it — no silent swaps.
-- **After witness:** the OLD fact is excluded from every draw path, permanently. The NEW fact enters play as a normal new fact (new = due immediately, box 1) — no schedule seeding, no history migration.
+- **From pack load:** the SUPERSEDED fact retires from every draw/scheduling surface (dueQueue, combat candidates, Wellspring recompute, due badges, Dashboard forecast/weakest/mastery aggregates). This is not a silent swap — the Records Office pulses immediately, and the amendment card is where the change is honored. The SUPERSEDING fact is likewise gated out of play while its amendment is unwitnessed (otherwise it would surface as an ordinary unseen fact, teaching the new truth with no ceremony).
+- **After witness:** the NEW fact enters play as a normal new fact (new = due immediately, box 1) — no schedule seeding, no history migration. The old fact stays retired, permanently.
+- **Canonical filter site:** the `services.srs.dueQueue` wrapper (srs/register.ts) filters its factIds input through ONE exported predicate module — that single site covers combat dueFactIds, snapshotDueSet, the Wellspring recompute, and the hamlet due badge. `pick()`/engine.ts is deliberately NOT modified: a valid pack cannot contain encounters teaching superseded facts (validator invariant), so encounter-level runtime filtering would be dead code guarding an impossible state.
+- **Display surfaces, ruled individually:** dungeon teachingFacts filters superseded facts OUT (an outdated truth must never be re-taught as current); the Library keeps them visible with the ⟳ marker (both lines stay); Dashboard forecast/weakest/mastery exclude them per §6.
 
 Witness state persists in `state/` (a small `amendments.json` or equivalent: factId → witnessed-at ISO date; merge-write discipline like every other store; corrupt-file backup rule applies).
 
@@ -48,7 +50,7 @@ The player *mastered* the old truth. The world changed — their diligence didn'
 ## 6. State & stats
 
 - Old fact's SRS rows: preserved forever, never migrated, never copied (state/ is sacred).
-- Dashboard: superseded+witnessed facts drop out of the due forecast and weakest-bindings; history views keep them with an **amended marker** (provisional glyph `⟳` — the author one-worder pending). Minimal change: filter + marker only.
+- Dashboard: superseded facts drop out of the due forecast, weakest-bindings, and mastery aggregates **from pack load** (per amended §4); history views keep them with an **amended marker** (provisional glyph `⟳` — the author one-worder pending). Minimal change: filter + marker only.
 
 ## 7. Non-goals (v1)
 
@@ -61,7 +63,7 @@ Test fixture: a tiny fixture pack carrying one superseded pair — vc-law needs 
 
 ## 9. Verification
 
-- Unit red→green: exclusion at each draw site; pre-witness old-fact draws; gentleness (first miss 0 HP + line, second miss normal); batch cap 3; witness persistence across store reload; NaN/absent-field tolerance (`superseded_by` optional everywhere; zero-packs green).
+- Unit red→green: superseded fact retired from every scheduling surface from load; superseding fact gated until witnessed, active after; gentleness (first miss 0 HP + line, second miss normal); batch cap 3; witness persistence across store reload; NaN/absent-field tolerance (`superseded_by` optional everywhere; zero-packs green).
 - e2e (fixture pack, stub judge, scratch port, expect.poll everywhere, settled screenshots): hamlet entry → pulse visible → Records visit → card register (strike-through + quote + lines verbatim) → witness → new fact appears in next Wellspring drill → old fact never drawn across N drills → reload mid-batch → remaining amendments still pending.
 - Full battery ×2 at the merge gate, as always.
 
