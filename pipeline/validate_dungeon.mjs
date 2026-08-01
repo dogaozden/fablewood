@@ -10,6 +10,8 @@
 //     on >=1 fact (so encounters can actually be drawn); parley is boolean
 //   - boss.phases[].branchEncounterId exists and is a scenario_branch;
 //     recallTags exist on >=1 fact; shields is a positive integer
+//   - boss.moveLabels (optional, additive): keys in {seizure,injunction,summon},
+//     values non-empty strings — absent is always valid
 //
 // Usage: node pipeline/validate_dungeon.mjs [dungeon.json] [pack.json]
 
@@ -26,6 +28,8 @@ const pack = JSON.parse(readFileSync(pPath, 'utf8'));
 
 const ARCHETYPES = new Set(['wisp', 'wraith', 'construct', 'warden']);
 const KINDS = new Set(['mcq', 'free_recall', 'scenario_branch', 'match', 'order']);
+// magic-combat-depth.md §9.4/§9.5 — the engine's WardenMove union (app/src/game/combat/boss.ts).
+const WARDEN_MOVES = new Set(['seizure', 'injunction', 'summon']);
 
 const factIds = new Set(pack.facts.map((f) => f.id));
 const factTags = new Set(pack.facts.flatMap((f) => f.tags ?? []));
@@ -80,6 +84,20 @@ for (const r of dun.rooms ?? []) {
     }
     if (b.shields !== (b.phases ?? []).length) {
       push(at(`boss.shields (${b.shields}) != number of phases (${(b.phases ?? []).length}) — intended?`));
+    }
+    // magic-combat-depth.md §9.5/§13 — boss.moveLabels is ADDITIVE and OPTIONAL: absent is
+    // always fine (every shipped dungeon predates it). When present it must be a flat map of
+    // the engine's three WardenMove keys to non-empty strings, so a typo'd key silently
+    // relabels nothing instead of failing loudly at runtime.
+    if (b.moveLabels !== undefined) {
+      if (typeof b.moveLabels !== 'object' || b.moveLabels === null || Array.isArray(b.moveLabels)) {
+        push(at('boss.moveLabels must be an object when present'));
+      } else {
+        for (const [k, v] of Object.entries(b.moveLabels)) {
+          if (!WARDEN_MOVES.has(k)) push(at(`bad boss.moveLabels key: ${k} (expected one of ${[...WARDEN_MOVES].join(', ')})`));
+          if (typeof v !== 'string' || !v.trim()) push(at(`boss.moveLabels.${k} must be a non-empty string`));
+        }
+      }
     }
   }
 }

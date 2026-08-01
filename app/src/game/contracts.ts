@@ -82,6 +82,12 @@ export interface BossSpec {
   name: string;
   shields: number; // 3 for the Vault-Warden
   phases: BossPhase[];
+  /** magic-combat-depth.md §9.5/§13 (ADDITIVE, optional — accept-if-absent): a pack may
+   *  relabel the Warden's three engine-generic moves in its own register. The engine's
+   *  SCRIPT is unchanged either way — this is flavor text only, never a mechanic (S5), and
+   *  packs should mirror each label in their metaphor_map. Keys are combat/boss.ts's
+   *  WardenMove union. */
+  moveLabels?: { seizure?: string; injunction?: string; summon?: string };
 }
 
 export interface DungeonRoom {

@@ -22,6 +22,18 @@ export const ENEMY_STATS: Record<EnemyArchetype, StatBlock> = {
   warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false },
 };
 
+/**
+ * §9.1 — the BOSS Warden's own pool, 8 → 12. Verbatim Decree deals 6 against a boss (§7), so
+ * the fallback HP kill still costs TWO apex q1 answers — exactly the shipped bar — and the
+ * phase branches stay the primary path rather than something an apex spell can out-race.
+ *
+ * Deliberately its own const rather than an edit to ENEMY_STATS.warden: that stat block is
+ * ALSO the room-trash `archetype: 'warden'` mob (the Root-Husk — see ENEMY_LABEL, which was
+ * renamed precisely because it is NOT the boss), and §9 reforges the boss, not the trash.
+ * A tuning knob per §18.
+ */
+export const WARDEN_BOSS_HP = 12;
+
 export const KEEPER = { hp: 10, move: 4, speed: 5 };
 export const MIRA = { hp: 6, move: 4, speed: 4 };
 
@@ -49,7 +61,6 @@ function base(partial: Partial<UnitState> & Pick<UnitState, 'id' | 'name' | 'tea
     range: 1,
     ranged: false,
     parley: false,
-    skipNextTurn: false,
     statuses: [],
     oaSpent: false,
     uniqueSpent: false,
@@ -88,7 +99,7 @@ export function makeBoss(spec: BossSpec, c: number, r: number): UnitState {
   const s = ENEMY_STATS.warden;
   return base({
     id: 'warden', name: spec.name, team: 'enemy', kind: 'warden',
-    c, r, hp: s.hp, maxHp: s.hp, move: s.move, speed: s.speed,
+    c, r, hp: WARDEN_BOSS_HP, maxHp: WARDEN_BOSS_HP, move: s.move, speed: s.speed,
     attack: s.attack, range: s.range, ranged: false,
     isBoss: true, shields: spec.shields, maxShields: spec.shields,
   });

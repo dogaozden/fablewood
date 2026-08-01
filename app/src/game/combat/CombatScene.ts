@@ -13,7 +13,7 @@ import Phaser from 'phaser';
 import { markReady } from '../ready';
 import {
   services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
-  type Quality,
+  type Quality, type EnemySpec,
 } from '../contracts';
 import type { Pack } from '../../packs/types';
 import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
@@ -28,7 +28,10 @@ import {
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction, isFlanked } from './damage';
-import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from './boss';
+import {
+  applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
+  shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
+} from './boss';
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
@@ -194,6 +197,16 @@ export class CombatScene extends Phaser.Scene {
   private shields = 0;
   private phaseIndex = 0;
   private pendingBossPhase = false;
+  /** §9.3 — Objection! is a once-per-ROUND reaction: set when it fires, cleared at every round
+   *  boundary (advanceTurn's newRound branch, §3 rule 5) and at battle start (trap 1). */
+  private objectionSpent = false;
+  /** §9.4 — 1-based count of the Warden's own turns this battle; drives the "every OTHER
+   *  Warden turn" Crown Injunction cadence (trap 1). */
+  private wardenTurns = 0;
+  /** §9.4 — the once-per-battle Call the Clause, and the id of the wisp it spawned (max one
+   *  clause-wisp alive at a time). Both per-battle only, never persisted (trap 1, §14). */
+  private clauseSpawned = false;
+  private clauseWispId: string | null = null;
   /** non-null exactly while the phase-opening portrait reveal is on screen (e2e/debug read). */
   private bossReveal: Phaser.GameObjects.Container | null = null;
 
@@ -249,6 +262,10 @@ export class CombatScene extends Phaser.Scene {
     this.shields = 0;
     this.phaseIndex = 0;
     this.pendingBossPhase = false;
+    this.objectionSpent = false;
+    this.wardenTurns = 0;
+    this.clauseSpawned = false;
+    this.clauseWispId = null;
     this.bossReveal = null;
     this.tileImages.clear();
     this.carefulStepOn = false;
@@ -646,8 +663,12 @@ export class CombatScene extends Phaser.Scene {
 
     const nxt = nextInOrder(this.order, this.orderIndex, (id) => this.isAlive(id));
     if (!nxt) { this.resolveBattle(this.checkEnd() ?? 'victory'); return; }
-    // §4.2 round boundary (initiative.ts nextInOrder flags a wrap): reset every unit's oaSpent.
-    if (nxt.newRound) { for (const u of this.units) u.oaSpent = false; }
+    // §3 rule 5 round boundary (initiative.ts nextInOrder flags a wrap): reset every unit's
+    // oaSpent AND re-arm the Warden's Objection (§9.3 — "passive, resets each round").
+    if (nxt.newRound) {
+      for (const u of this.units) u.oaSpent = false;
+      this.objectionSpent = false;
+    }
     this.orderIndex = nxt.index;
     const unit = this.unitById(nxt.id)!;
     this.activeId = unit.id;
@@ -899,17 +920,51 @@ export class CombatScene extends Phaser.Scene {
   /** crucible v1 #19 — the Warden's shield absorbs every non-Attestation action (boss.ts
    *  wardenAbsorbs); excluding shield-absorbed targets here — instead of only discovering that
    *  after Glow is already spent — keeps a T2/T3 cast from being armed against a target it can
-   *  never actually damage. Attestation ('cast') still pierces normally, since wardenAbsorbs
-   *  itself already exempts it. A no-op whenever no target is a shielded boss (every other
-   *  Art/room), so this changes nothing outside a shielded boss fight. */
-  private strikableTargets(targets: UnitState[], action: ActionKind): UnitState[] {
-    return targets.filter((t) => !wardenAbsorbs(action, t.isBoss, this.shields));
+   *  never actually damage. Attestation still pierces normally, since wardenAbsorbs itself
+   *  exempts every `bossRider: 'strip-shield'` SpellDef. A no-op whenever no target is a
+   *  shielded boss (every other Art/room), so this changes nothing outside a shielded boss
+   *  fight. */
+  private strikableTargets(targets: UnitState[], spell: SpellDef | null): UnitState[] {
+    return targets.filter((t) => !wardenAbsorbs(spell, t.isBoss, this.shields));
+  }
+
+  /**
+   * §9.2/§9.3 — the SpellDef a T1 Art button casts, or `null` for the FREE lane (Strike,
+   * Satchel, Wait; and by extension opportunity strikes and push-bump damage, which no spell
+   * owns). This one null/SpellDef split IS both of the Warden's rules: `wardenAbsorbs` lets
+   * through only a `bossRider: 'strip-shield'` SpellDef, and `wardenObjects` lawyers only the
+   * null lane — so no Art can ever be Objected (soul S4), by construction rather than by list.
+   */
+  private spellForAction(action: ActionKind): SpellDef | null {
+    return ART_ACTIONS.has(action) ? SPELLBOOK[action as SpellId] : null;
+  }
+
+  /**
+   * §9.3 Objection! — the Warden lawyers away the FIRST free-lane blow aimed at him each round
+   * and ripostes for 1. Call this ONLY from the free lane (Strike, opportunity strikes): the
+   * hard-coded `null` first argument is what makes soul guarantee S4 structural — an Art never
+   * reaches this method at all, and could not trigger it if it did.
+   *
+   * Deliberately checked BEFORE the shield gate: the shields answer spells, the Objection
+   * answers steel. (Ordering it after `wardenAbsorbs` would make it unreachable — while
+   * shields stand every free blow is already absorbed, and the instant they fall syncBoss ends
+   * the fight.) Returns true when the blow was negated; the caller must then apply no damage.
+   */
+  private wardenObjection(attacker: UnitState, target: UnitState): boolean {
+    if (!wardenObjects(null, target.isBoss, this.objectionSpent)) return false;
+    this.objectionSpent = true;
+    // Banner only — the spec names a banner, and a float here sat directly over the riposte's
+    // own −1 on the adjacent attacker (they collided illegibly in the first e2e screenshot).
+    // The negation already reads on the board: the Warden's HP bar simply does not move.
+    this.hud.showBanner(OBJECTION_BANNER, P.berry);
+    this.actionLog.push({ action: 'objection', dmg: 0, overlay: false });
+    this.damageUnit(attacker, OBJECTION_RIPOSTE, P.berry);
+    return true;
   }
 
   /** One flyout row: greys with a reason via Rank, Glow, shield, then target availability, in
-   *  that order. `action` is the Art's own anchor ActionKind (needed only for the shield gate —
-   *  §9's rule stays string-matched on it, same as every other wardenAbsorbs call site). */
-  private tierRow(unit: UnitState, spell: SpellDef, action: ActionKind): TierRow {
+   *  that order. */
+  private tierRow(unit: UnitState, spell: SpellDef): TierRow {
     const costText = spell.glowCost === 0 ? 'free' : `◈${spell.glowCost}`;
     const difficulty = DIFFICULTY_DEFS[spell.tier];
     const rowMeta = { difficultyGlyph: difficultyPolicyGlyph(spell.tier), difficultyTint: difficulty.tint };
@@ -923,7 +978,7 @@ export class CombatScene extends Phaser.Scene {
       return { tier: spell.tier, label: spell.label, costText, enabled: true, ...rowMeta };
     }
     const rawTargets = this.validTargetsForSpell(unit, spell);
-    const targets = this.strikableTargets(rawTargets, action);
+    const targets = this.strikableTargets(rawTargets, spell);
     if (targets.length) return { tier: spell.tier, label: spell.label, costText, enabled: true, ...rowMeta };
     // "shielded" (not a longer sentence): the flyout row's trailing-reason slot is right-
     // anchored in a fixed ~196px row (hud.ts addRow) — a longer string here visibly collided
@@ -951,7 +1006,7 @@ export class CombatScene extends Phaser.Scene {
 
   private renderFlyout(unit: UnitState, action: ActionKind): void {
     const spells = spellsForArt(SPELLBOOK[action as SpellId].art);
-    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s, action));
+    const rows: TierRow[] = spells.map((s) => this.tierRow(unit, s));
     // §12.2 — the Overglow toggle is offered "when a damaging tier is highlighted"; this
     // flyout has no live hover-tracking, so the default/focus tier is the highest one
     // currently unlocked (rank-derived) — matches spec's own worked example (Rank 3 Kindling
@@ -1011,7 +1066,7 @@ export class CombatScene extends Phaser.Scene {
     const action = this.flyoutAction;
     const spell = spellsForArt(SPELLBOOK[action as SpellId].art).find((s) => s.tier === tier);
     if (!spell) return;
-    const row = this.tierRow(unit, spell, action);
+    const row = this.tierRow(unit, spell);
     if (!row.enabled) return;
     const overglow = this.overglowOn;
     this.flyoutAction = null;
@@ -1030,7 +1085,7 @@ export class CombatScene extends Phaser.Scene {
     // in a mixed fight (shielded boss + other valid targets) the row can be enabled while the
     // boss's own tile must still never be offered as a clickable target for a non-Attestation
     // spell (else Glow spends against it anyway, just via a different foe making the row live).
-    const targets = this.strikableTargets(this.validTargetsForSpell(unit, spell), action);
+    const targets = this.strikableTargets(this.validTargetsForSpell(unit, spell), spell);
     this.enterTargeting(action, targets);
   }
 
@@ -1074,6 +1129,10 @@ export class CombatScene extends Phaser.Scene {
       if (!mover.alive) return;
       for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
         if (!mover.alive) break;
+        // §9.3 — an opportunity strike is free-lane steel, so the Warden's Objection answers it
+        // exactly like a Strike: negated, riposted, and the striker's one-per-round is still
+        // spent (they did swing).
+        if (this.wardenObjection(striker, mover)) { striker.oaSpent = true; continue; }
         // crucible v1 #6 — flank must be evaluated against the tile `mover` is leaving
         // (`vacated`), not `mover`'s live c/r — both call sites (movePlayerTo, the enemy-move
         // branch of runEnemyTurn) already mutate unit.c/r to the LANDING tile before calling
@@ -1122,8 +1181,15 @@ export class CombatScene extends Phaser.Scene {
       const outcome = resolveAction('strike', 1, { miraBonus, vsBoss: !!target?.isBoss });
       const before = this.enemyHpSum();
       this.attackerTell(unit, tile, ACTIONS.strike.tint);
+      // §9.3 — if the Warden Objected to this swing, HIS banner is the outcome; the Strike's
+      // own "a quick blow" line would otherwise overwrite it in the same frame and the player
+      // would never see why nothing happened. `objectionSpent` flipping across applyOutcome is
+      // exactly "the Objection was spent BY this action" (it is re-armed only at a round
+      // boundary, never mid-turn).
+      const objectedBefore = this.objectionSpent;
       this.applyOutcome(unit, 'strike', tile, outcome, target);
-      this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
+      const objected = this.objectionSpent && !objectedBefore;
+      if (!objected) this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
       const dealt = before - this.enemyHpSum();
       this.actionLog.push({ action: 'strike', dmg: dealt, overlay: false });
       // §5.1 Glow source 1 — a Strike that deals damage grants the party +1 Glow. `dealt` is
@@ -1322,15 +1388,18 @@ export class CombatScene extends Phaser.Scene {
       .filter((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')
       .map((o) => o.text)
       .join('\n');
-    this.applySpellOps(unit, action, ops);
+    this.applySpellOps(unit, action, spell, ops);
     this.actionLog.push({ action, dmg: before - this.enemyHpSum(), overlay: true });
 
-    // §9 trap 10 — the shield gate stays string-matched on the ActionKind (unchanged boss.ts,
-    // Phase 3's job to generalize): since Attested Ward/Verbatim Decree both live behind the
-    // 'cast' button, wardenAbsorbs('cast',...) already lets every Attestation tier pierce,
-    // exactly like T1 Cast — no boss.ts edit needed this phase.
-    if (spell.bossRider === 'strip-shield' && quality === 1 && vsBoss && this.boss) {
-      this.shields = reduceShields(this.shields, 1);
+    // §9.2 trap 10 — the shield gate now reads the SpellDef's own `bossRider` (boss.ts
+    // wardenAbsorbs), not the ActionKind: Attested Ward and Verbatim Decree pierce on their
+    // own rider rather than by happening to share the 'cast' button. The SIGNED delta comes
+    // from shieldStripDelta, which owns the sign — this site used to hand reduceShields a
+    // literal `1`, and since reduceShields ADDS its delta that GRANTED the Warden a shield on
+    // every apex cast while the float still read "−shield".
+    const shieldDelta = shieldStripDelta(spell, quality, vsBoss);
+    if (shieldDelta !== 0 && this.boss) {
+      this.shields = reduceShields(this.shields, shieldDelta);
       this.floatText(this.boss, '−shield', P.waterLight);
       this.syncBoss();
     }
@@ -1405,15 +1474,19 @@ export class CombatScene extends Phaser.Scene {
    * `overglow:false, weld:false` here — never double-counted); flank is always false (spells
    * never flank, §4.1). The 'banner' op is intentionally skipped — the caller shows it with
    * a quality-derived tint, mirroring the T1 path's own banner call.
+   *
+   * `spell` is the SpellDef these ops came from — it (never the ActionKind) is what the §9.2
+   * shield gate reads, so Attested Ward and Verbatim Decree pierce on their own rider rather
+   * than by sharing the 'cast' button (trap 10).
    */
-  private applySpellOps(caster: UnitState, action: ActionKind, ops: BoardOp[]): void {
+  private applySpellOps(caster: UnitState, action: ActionKind, spell: SpellDef, ops: BoardOp[]): void {
     for (const op of ops) {
       if (op.op === 'banner') continue;
       if (op.op === 'fade') { this.damageParty(op.amount, caster); continue; }
       if (op.op === 'damage') {
         const target = this.unitById(op.targetId);
         if (!target?.alive) continue;
-        if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
+        if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
         const result = computeHit({
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
           flank: false, overglow: false, weld: false, rider: false,
@@ -1439,7 +1512,7 @@ export class CombatScene extends Phaser.Scene {
       }
       if (op.op === 'push') {
         const target = this.unitById(op.targetId);
-        if (target?.alive) this.pushUnit(caster, target, op.dir, action);
+        if (target?.alive) this.pushUnit(caster, target, op.dir, spell);
         continue;
       }
       if (op.op === 'heal') {
@@ -1450,8 +1523,10 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** §4.3 forced movement, applied to a spell's push (Cinder-Rebuke/Processional): same
-   *  forceMove + bump-damage rules as construct's Vault-Slam (enemyStrike below). */
-  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, action: ActionKind): void {
+   *  forceMove + bump-damage rules as the construct's Vault-Slam and the Warden's Writ of
+   *  Seizure (enemyStrike below). `spell` carries the §9.2 shield gate for the bump damage —
+   *  null when the push came from an enemy kit rather than a cast. */
+  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, spell: SpellDef | null): void {
     const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
     const res = forceMove(target, dir, board);
     if (res.moved) {
@@ -1465,7 +1540,7 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     if (!res.bump) return;
-    if (wardenAbsorbs(action, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
+    if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
@@ -1501,24 +1576,27 @@ export class CombatScene extends Phaser.Scene {
       // computeHit modifier pipeline (flank) instead of a flat subtraction (see meleeHit).
       if (target && o.hits > 0) this.meleeHit(actor, target, o.hits, ACTIONS.strike.tint);
     } else if (action === 'cast' || action === 'smite') {
-      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS[action].tint, action);
+      const spell = this.spellForAction(action);
+      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS[action].tint, spell);
       if (o.extraShield && target?.isBoss) { this.shields = reduceShields(this.shields, -o.extraShield); this.floatText(target, '−shield', P.waterLight); this.syncBoss(); }
       if (o.fade > 0) this.damageParty(o.fade, actor);
     } else if (action === 'weave') {
-      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS.weave.tint, action);
+      const spell = this.spellForAction(action);
+      if (target && o.hits > 0) this.hitEnemy(target, o.hits, ACTIONS.weave.tint, spell);
       if (o.aoeHit > 0) {
         for (const co of crossTiles(tile)) {
           if (co.c === tile.c && co.r === tile.r) continue;
           const e = this.enemyAt(co);
-          if (e) this.hitEnemy(e, o.aoeHit, ACTIONS.weave.tint, action);
+          if (e) this.hitEnemy(e, o.aoeHit, ACTIONS.weave.tint, spell);
         }
       }
     } else if (action === 'sequence') {
       const dir = this.dirTo(actor, tile);
+      const spell = this.spellForAction(action);
       if (dir) {
         for (const [i, co] of lineTiles(actor, dir, o.lineDepth).entries()) {
           const e = this.enemyAt(co);
-          if (e) this.hitEnemy(e, i === 0 ? o.hits : o.aoeHit, ACTIONS.sequence.tint, action);
+          if (e) this.hitEnemy(e, i === 0 ? o.hits : o.aoeHit, ACTIONS.sequence.tint, spell);
           // §4.4 — mist (and walls) block Ritecraft lines: the lance can still land on
           // whatever occupies the blocking tile, but nothing beyond it.
           if (blocksSight(this.tileTypeOf(co))) break;
@@ -1539,9 +1617,12 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** §3 rule 4 / §4.1 — the one melee player action (Strike) routed through computeHit:
-   *  flank via isFlanked; overglow/weld are Phase-2/2.5 concepts, always false this phase. */
+   *  flank via isFlanked; overglow/weld are folded in upstream, always false here. Strike is
+   *  the free lane, so it passes `null` for the spell — §9.3's Objection is armed against it
+   *  and §9.2's shield gate never lets it pierce. */
   private meleeHit(attacker: UnitState, target: UnitState, base: number, color: number): void {
-    if (wardenAbsorbs('strike', target.isBoss, this.shields)) {
+    if (this.wardenObjection(attacker, target)) return;
+    if (wardenAbsorbs(null, target.isBoss, this.shields)) {
       this.floatText(target, 'shielded', P.waterLight);
       return;
     }
@@ -1829,6 +1910,8 @@ export class CombatScene extends Phaser.Scene {
     if (this.destroyed) return;
     if (!unit.alive) { this.advanceTurn(); return; }
     this.state = 'enemy';
+    // §9.4 — his own turn counter drives the "every OTHER Warden turn" Injunction cadence.
+    if (unit.isBoss) this.wardenTurns += 1;
     const party = this.units.filter((u) => u.team === 'party');
     // §3 Bound/Dimmed feed the AI's OWN move budget without editing ai.ts: hand decideEnemy a
     // shallow clone whose `.move` is already the effective value (ai.ts stays pure/untouched).
@@ -1838,9 +1921,14 @@ export class CombatScene extends Phaser.Scene {
 
     const doAttack = () => {
       if (this.destroyed) return;
-      if (intent.attackTargetId) {
-        const tgt = this.unitById(intent.attackTargetId);
-        if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
+      // §9.4 — on the turns his phase script fires (Crown Injunction / Call the Clause) the
+      // Warden spends his whole action on it; otherwise he falls through to his base kit, the
+      // Writ of Seizure (enemyStrike's push branch below).
+      if (!(unit.isBoss && this.runWardenScript(unit))) {
+        if (intent.attackTargetId) {
+          const tgt = this.unitById(intent.attackTargetId);
+          if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
+        }
       }
       this.endTurnDecay(unit);
       this.time.delayedCall(460, () => this.advanceTurn());
@@ -1861,6 +1949,115 @@ export class CombatScene extends Phaser.Scene {
     } else {
       this.time.delayedCall(200, doAttack);
     }
+  }
+
+  // ---- §9.4 the Warden's phase script ------------------------------------
+
+  /** §9.5 — the label to SHOW for one of the Warden's moves: the pack's optional relabel
+   *  (`BossSpec.moveLabels`) when present, else the engine-generic default. Flavor only —
+   *  the script itself is engine data (S5). */
+  private wardenLabel(move: WardenMove): string {
+    return wardenMoveLabel(move, this.launch.room.boss?.moveLabels);
+  }
+
+  /**
+   * §9.4 — runs the Warden's deterministic phase script for THIS turn. Returns true when the
+   * script consumed his action (the caller then skips his ordinary attack); false means "base
+   * kit", i.e. fall through to the Writ of Seizure melee.
+   *
+   * The decision itself is pure (`wardenMove` in boss.ts); everything here is the scene-side
+   * application — targeting, board mutation, presentation.
+   */
+  private runWardenScript(unit: UnitState): boolean {
+    const move = wardenMove({
+      phaseIndex: this.phaseIndex,
+      wardenTurns: this.wardenTurns,
+      clauseAvailable: this.clauseAvailable(),
+    });
+    if (move === 'summon') return this.callTheClause(unit);
+    if (move === 'injunction') return this.crownInjunction(unit);
+    return false; // 'seizure' — his base kit, applied by enemyStrike's push branch
+  }
+
+  /**
+   * §9.4 Crown Injunction (phase 2+, every other Warden turn): Bound(1) on the highest-HP
+   * party unit within range 3 — no line-of-fire needed (a writ does not need to see you).
+   *
+   * Bound is movement denial ONLY: §3's Bound explicitly leaves acting untouched, so the
+   * player can still answer every question on their turn (souls S2/S4 — no mechanic may deny
+   * or discourage a question). Falls through to his ordinary attack when nobody is in range,
+   * so the turn is never wasted.
+   */
+  private crownInjunction(unit: UnitState): boolean {
+    const target = this.units
+      .filter((u) => u.team === 'party' && u.alive && manhattan(unit, u) <= 3)
+      .sort((a, b) => b.hp - a.hp)[0];
+    if (!target) return false;
+    target.statuses = applyStatus(target, 'bound', 1);
+    this.drawHpBar(target);
+    this.floatText(target, STATUS_DEFS.bound.label, STATUS_DEFS.bound.tint);
+    this.attackerTell(unit, target, STATUS_DEFS.bound.tint);
+    this.hud.showBanner(this.wardenLabel('injunction'), P.orchid);
+    this.actionLog.push({ action: 'injunction', dmg: 0, overlay: false });
+    this.refreshParty();
+    return true;
+  }
+
+  /** §9.4 — is the once-per-battle summon available? Once per battle, at most one clause-wisp
+   *  alive at a time, and only when a free enemy-spawn tile actually exists. */
+  private clauseAvailable(): boolean {
+    if (this.clauseSpawned) return false;
+    const living = this.clauseWispId ? this.unitById(this.clauseWispId) : null;
+    if (living?.alive) return false;
+    return this.freeEnemySpawn() !== null;
+  }
+
+  /** The first enemy-spawn tile with no living unit standing on it (walls are never spawns). */
+  private freeEnemySpawn(): Coord | null {
+    const taken = new Set(this.units.filter((u) => u.alive).map((u) => key(u.c, u.r)));
+    return this.layout.enemySpawns.find((t) => !taken.has(key(t.c, t.r))) ?? null;
+  }
+
+  /** §9.4 Call the Clause (phase 3+, once per battle): the Warden cites a clause into being. */
+  private callTheClause(unit: UnitState): boolean {
+    const at = this.freeEnemySpawn();
+    if (!at) return false;
+    const wisp = this.spawnReinforcement({ archetype: 'wisp' }, at);
+    if (!wisp) return false;
+    this.clauseSpawned = true;
+    this.clauseWispId = wisp.id;
+    this.attackerTell(unit, at, P.orchid);
+    this.hud.showBanner(this.wardenLabel('summon'), P.orchid);
+    this.actionLog.push({ action: 'summon', dmg: 0, overlay: false });
+    return true;
+  }
+
+  /**
+   * §9.4 — the small mid-battle spawn machinery: build the unit + its view and APPEND its id
+   * to the initiative order.
+   *
+   * Appending is wrap-safe with `nextInOrder` (initiative.ts:25-39) because that function reads
+   * `order.length` fresh on every call and normalizes its cursor with `idx -= order.length`
+   * only after the bounds test — a grown array can therefore never leave `orderIndex` dangling
+   * past the end, and the wrap that flags `newRound` simply happens one slot later. The new
+   * unit takes the LAST initiative slot rather than a speed-sorted one, which is the point:
+   * a summon should never jump the queue ahead of units that have already acted.
+   *
+   * Everything it creates is per-battle only — the unit, its view, and the appended order entry
+   * all die with `create()`'s reset block (trap 1); nothing here is persisted (§14).
+   */
+  private spawnReinforcement(spec: EnemySpec, at: Coord): UnitState | null {
+    if (this.destroyed) return null;
+    // `units.length` is strictly greater than every index makeEnemy has already consumed
+    // (spawnUnits indexes off `room.enemies`, which is always a prefix of `units`), so this
+    // id can never collide with an existing one.
+    const unit = makeEnemy(spec, this.units.length, at.c, at.r);
+    this.units.push(unit);
+    this.makeUnitView(unit);
+    this.order.push(unit.id);
+    this.hud.setTurnOrder(this.units.map((u) => ({ id: u.id, kind: u.kind, team: u.team })));
+    this.hud.setActive(this.activeId, this.aliveIds());
+    return unit;
   }
 
   /**
@@ -1885,7 +2082,9 @@ export class CombatScene extends Phaser.Scene {
 
     const flank = !attacker.ranged && isFlanked(attacker, target, attacker.team, this.units);
     let bumpBonus = 0;
-    if (attacker.kind === 'construct') {
+    // §8 construct Vault-Slam and §9.4 the Warden's Writ of Seizure are the same primitive: a
+    // melee hit that pushes 1, +1 bump damage when the destination is blocked.
+    if (attacker.kind === 'construct' || attacker.isBoss) {
       const dir = this.dirTo(attacker, target);
       if (dir) {
         const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
@@ -1916,7 +2115,13 @@ export class CombatScene extends Phaser.Scene {
     }
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, P.berry);
     if (bumpBonus > 0) this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
-    this.hud.showBanner(`${attacker.name} strikes ${target.name} (−${result.hpDamage}).`, P.berry);
+    // §9.4/§9.5 — the Warden's ordinary blow IS the Writ of Seizure, so it announces itself by
+    // its (pack-relabelable) move name; the damage still reads off the target's own −N float,
+    // exactly as it does for every other hit.
+    this.hud.showBanner(
+      attacker.isBoss ? this.wardenLabel('seizure') : `${attacker.name} strikes ${target.name} (−${result.hpDamage}).`,
+      P.berry,
+    );
   }
 
   /**
@@ -1941,12 +2146,13 @@ export class CombatScene extends Phaser.Scene {
 
   /**
    * Player → enemy damage, honoring the Warden's shield absorption: while the boss is
-   * shielded, only Cast wounds it (wardenAbsorbs) — so a free Strike (or any un-gated
-   * move) can never brute-force the boss to its fallback-victory and skip the mandatory
-   * phase questions. Regular enemies take the hit normally.
+   * shielded, only an Attestation carrying `bossRider: 'strip-shield'` wounds it
+   * (wardenAbsorbs) — so a free Strike (or any un-gated move) can never brute-force the boss
+   * to its fallback-victory and skip the mandatory phase questions. Regular enemies take the
+   * hit normally. `spell` is null for the free lane (§9.2).
    */
-  private hitEnemy(enemy: UnitState, amount: number, color: number, action: ActionKind): void {
-    if (wardenAbsorbs(action, enemy.isBoss, this.shields)) {
+  private hitEnemy(enemy: UnitState, amount: number, color: number, spell: SpellDef | null): void {
+    if (wardenAbsorbs(spell, enemy.isBoss, this.shields)) {
       this.floatText(enemy, 'shielded', P.waterLight);
       return;
     }
@@ -2396,6 +2602,13 @@ export class CombatScene extends Phaser.Scene {
       depth: this.views.get(id)?.container.depth ?? 0,
       statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
     };
+  }
+
+  /** Debug: the live initiative order, by unit id (e2e-only — §9.4: proves Call the Clause's
+   *  reinforcement was really APPENDED to `order` and is really reachable by the turn loop,
+   *  which a unit count alone would not show). */
+  orderDebug(): string[] {
+    return this.order.slice();
   }
 
   /** Debug: apply a status directly, bypassing spellcasting (e2e-only — Phase 2 wires real
