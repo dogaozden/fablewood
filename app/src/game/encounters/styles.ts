@@ -150,6 +150,14 @@ const CSS = `
 .fw-ledger-row.is-reclaim .fw-ledger-val { color: var(--amber); text-shadow: 0 0 10px rgba(247,206,107,.45); }
 .fw-ledger-signoff { margin: 0; text-align: center; font-style: italic; color: var(--ink-soft); line-height: 1.5; }
 
+/* the ledger amended — the supersession re-teach card (supersession-reteach.md §3).
+   Both lines stay: the old truth is struck, never removed, and keeps readable contrast. */
+.fw-amend-old { margin: 20px 0 0; font-size: 1.16rem; line-height: 1.4; color: var(--ink-soft);
+  text-decoration: line-through; text-decoration-color: rgba(166,84,32,.85); text-decoration-thickness: 2px; }
+.fw-amend-caption { margin: .5em 0 0; font-size: .84rem; font-style: italic; line-height: 1.45; color: var(--ink-soft); }
+.fw-amend-new { margin: 1.05em 0 0; font-size: 1.42rem; line-height: 1.3; color: var(--ink-2); text-wrap: balance; }
+.fw-amend-new::before { content: '⟳'; margin-right: .4em; color: var(--ember-deep); font-size: .95em; }
+
 /* free recall */
 .fw-textarea { width: 100%; min-height: 122px; resize: vertical; font: inherit; font-size: 1.06rem;
   line-height: 1.5; color: var(--ink); padding: .8em .9em; border-radius: 12px;

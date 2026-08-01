@@ -63,6 +63,8 @@ interface Metrics {
 interface RawFact {
   id: string;
   statement: string;
+  /** supersession-reteach.md §6 — present ⇒ the Realm has moved past this fact */
+  superseded_by?: string;
 }
 interface RawPack {
   meta?: { title?: string };
@@ -106,11 +108,18 @@ async function computeMetrics(): Promise<Metrics> {
   const domains: DomainMastery[] = [];
   const allFactIds: string[] = [];
   const statementsById = new Map<string, string>();
+  /** supersession-reteach.md §6 — superseded facts drop out of the forecast, the weakest
+   *  bindings and the mastery aggregates FROM PACK LOAD (their SRS rows are preserved
+   *  forever; the Library still shows them, marked). */
+  const superseded = new Set<string>();
 
   for (const p of packs) {
     const pack = p.pack as RawPack;
-    const factIds = (pack.facts ?? []).map((f) => f.id);
-    for (const f of pack.facts ?? []) statementsById.set(f.id, f.statement);
+    const factIds = (pack.facts ?? []).filter((f) => !f.superseded_by).map((f) => f.id);
+    for (const f of pack.facts ?? []) {
+      statementsById.set(f.id, f.statement);
+      if (f.superseded_by) superseded.add(f.id);
+    }
     allFactIds.push(...factIds);
     const boxCounts = boxDistribution(factIds, srsFacts);
     domains.push({
@@ -124,7 +133,7 @@ async function computeMetrics(): Promise<Metrics> {
 
   const forecast = dueForecast(allFactIds, srsFacts, Date.now());
   const history = flattenHistory(srsFacts);
-  const weak = weakestBindings(srsFacts, WEAKEST_LIMIT).map((w) => ({
+  const weak = weakestBindings(srsFacts, WEAKEST_LIMIT, superseded).map((w) => ({
     id: w.id,
     box: w.box,
     statement: statementsById.get(w.id) ?? w.id,

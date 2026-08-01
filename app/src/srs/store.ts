@@ -26,6 +26,7 @@ const realBridge: Bridge = { getState: realGetState, putState: realPutState };
 const SRS_FILE = 'srs.json';
 const SAVE_FILE = 'save.json';
 const SETTINGS_FILE = 'settings.json';
+const AMENDMENTS_FILE = 'amendments.json';
 
 const DEFAULT_SAVE: SaveData = { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
 const DEFAULT_SETTINGS = { muted: false, volume: 100 };
@@ -248,5 +249,33 @@ export class SettingsStore extends ObjectStore<{ muted: boolean; volume: number 
       DEFAULT_SETTINGS as { muted: boolean; volume: number } & Record<string, unknown>,
       bridge,
     );
+  }
+}
+
+/**
+ * "The Ledger Amended" witness store (supersession-reteach.md §4/§10.5) — its own small
+ * state file, deliberately NOT a new field in srs.json: the sacred file stays untouched
+ * and an old fact's SRS rows are preserved forever, never migrated, never copied (§6).
+ *
+ * Shape: a FLAT map of superseded factId → witnessed-at ISO date, so ObjectStore's
+ * shallow merge-write is exactly right — two tabs witnessing different amendments both
+ * survive, and an unknown key from a future version is preserved rather than dropped.
+ * No `version` key on purpose: the file's only keys are fact ids, so nothing can be
+ * mistaken for one. Non-string values (a hand-edited or half-written file) read as
+ * "not witnessed" rather than silently excluding a fact from every draw path.
+ */
+export class AmendmentsStore extends ObjectStore<Record<string, string>> {
+  constructor(bridge: Bridge = realBridge) {
+    super(AMENDMENTS_FILE, {}, bridge);
+  }
+
+  /** Has the Clerk's amendment card for this superseded fact been read and witnessed? */
+  isWitnessed(factId: string): boolean {
+    return typeof this.get()[factId] === 'string';
+  }
+
+  /** Record the witness beat. Merge-write, so a concurrent tab's witnesses survive. */
+  witness(factId: string, now: number = Date.now()): Promise<void> {
+    return this.save({ [factId]: new Date(now).toISOString() });
   }
 }

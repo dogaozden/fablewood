@@ -206,4 +206,20 @@ describe('weakestBindings', () => {
   it('a fact with empty history is never a candidate', () => {
     expect(weakestBindings({ a: entry(0, 0, []) })).toEqual([]);
   });
+
+  /** supersession-reteach.md §6 — a superseded fact keeps its SRS rows forever but stops
+   *  being worth a return trip: the Realm moved past it, so it can never be renewed. */
+  it('excludes superseded facts, keeping the rest (§6)', () => {
+    const miss = [{ ts: new Date(NOW - 1000).toISOString(), quality: 0 as const, encounter_id: 'e' }];
+    const facts = { amended: entry(1, 0, miss), current: entry(1, 0, miss) };
+
+    expect(weakestBindings(facts, 5).map((w) => w.id).sort()).toEqual(['amended', 'current']);
+    expect(weakestBindings(facts, 5, new Set(['amended'])).map((w) => w.id)).toEqual(['current']);
+  });
+
+  it('an empty exclude set changes nothing (every pack shipped today)', () => {
+    const miss = [{ ts: new Date(NOW - 1000).toISOString(), quality: 0 as const, encounter_id: 'e' }];
+    const facts = { a: entry(1, 0, miss) };
+    expect(weakestBindings(facts, 5, new Set())).toEqual(weakestBindings(facts, 5));
+  });
 });

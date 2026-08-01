@@ -8,16 +8,29 @@
  * dueQueue ordering needs.
  */
 import { services } from '../game/contracts';
+import type { Fact, Pack } from '../packs/types';
 import { getPacks } from '../bridge/client';
 import { buildFactMeta, dueQueue, type FactMeta } from './leitner';
-import { SaveStore, SettingsStore, SrsStore } from './store';
+import {
+  buildAmendmentIndex,
+  eligibleFactIds,
+  emptyAmendmentIndex,
+  firstAmendedAppearance,
+  isSuspended,
+  pendingAmendments,
+  type AmendmentIndex,
+} from './amendments';
+import { AmendmentsStore, SaveStore, SettingsStore, SrsStore } from './store';
 
 const srsStore = new SrsStore();
 const saveStore = new SaveStore();
 const settingsStore = new SettingsStore();
+const amendmentsStore = new AmendmentsStore();
 
 // packId → (factId → { prereqs }), built once from the installed packs.
 let factMetaByPack = new Map<string, Map<string, FactMeta>>();
+// supersession-reteach.md §4 — the superseded/superseding shape of those same packs.
+let amendmentIndex: AmendmentIndex = emptyAmendmentIndex();
 let pullPromise: Promise<void> | null = null;
 
 /**
@@ -30,17 +43,33 @@ function pullPacks(): Promise<void> {
   return (pullPromise ??= (async () => {
     const { packs } = await getPacks();
     factMetaByPack = buildFactMeta(packs);
+    amendmentIndex = buildAmendmentIndex(
+      packs.map((entry) => ({
+        id: entry.id,
+        facts: ((entry.pack as Partial<Pack>)?.facts ?? []) as Fact[],
+      })),
+    );
   })());
 }
+
+const isWitnessed = (supersededFactId: string): boolean => amendmentsStore.isWitnessed(supersededFactId);
+
+/** §4 THE suspension predicate — exported through services.amendments for the handful of
+ *  sites that build a raw pack-order fact list without passing through dueQueue. */
+const suspended = (factId: string): boolean => isSuspended(factId, amendmentIndex, isWitnessed);
 
 services.srs = {
   async ready() {
     // Load persisted state and the prereq index together (both idempotent).
-    await Promise.all([srsStore.ready(), pullPacks()]);
+    await Promise.all([srsStore.ready(), amendmentsStore.ready(), pullPacks()]);
   },
   dueQueue(packId: string, factIds: string[], now: number = Date.now()) {
     const meta = factMetaByPack.get(packId) ?? new Map<string, FactMeta>();
-    return dueQueue(srsStore.snapshot(), factIds, meta, now);
+    // supersession-reteach.md §4 — THE canonical filter site. One predicate here covers
+    // combat's dueFactIds + snapshotDueSet, the Wellspring recompute and the hamlet due
+    // badge. Filtering the INPUT (not the result) also keeps a suspended fact out of the
+    // unseen-in-prereq-order tail dueQueue appends, which a result-side filter would miss.
+    return dueQueue(srsStore.snapshot(), eligibleFactIds(factIds, suspended), meta, now);
   },
   record(factId, quality, encounterId, factType) {
     return srsStore.record(factId, quality, encounterId, Date.now(), factType);
@@ -66,4 +95,24 @@ services.settings = {
   ready: () => settingsStore.ready(),
   get: () => settingsStore.get(),
   set: (patch) => settingsStore.save(patch),
+};
+
+/** "The Ledger Amended" (supersession-reteach.md) — witness state, the suspension predicate
+ *  every draw surface funnels through, and the §5 mercy read. Shares the srs pack pull. */
+services.amendments = {
+  async ready() {
+    await Promise.all([amendmentsStore.ready(), srsStore.ready(), pullPacks()]);
+  },
+  isWitnessed,
+  isSuspended: suspended,
+  eligible: (factIds) => eligibleFactIds(factIds, suspended),
+  pending: (packId) =>
+    pendingAmendments(
+      amendmentIndex.pairsByPack.get(packId) ?? [],
+      isWitnessed,
+      (factId) => srsStore.historyQualities(factId).length > 0,
+    ),
+  witness: (supersededFactId) => amendmentsStore.witness(supersededFactId),
+  firstAmendedAppearance: (factIds) =>
+    firstAmendedAppearance(factIds, amendmentIndex, (factId) => srsStore.historyQualities(factId).length),
 };

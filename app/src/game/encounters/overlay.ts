@@ -6,11 +6,18 @@
  * ESC policy (task teeth): in a Wellspring 'drill' you may flee (quality 0); in combat / boss /
  * parley ESC does nothing — you answer or you don't.
  */
-import type { EncounterRequest, EncounterResult, Judge, FactLite, NightLedgerData } from '../contracts';
+import type {
+  Amendment,
+  EncounterRequest,
+  EncounterResult,
+  Judge,
+  FactLite,
+  NightLedgerData,
+} from '../contracts';
 import type { Encounter, EncounterDifficulty } from '../../packs/types';
 import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
-import { RENDERERS } from './kinds';
+import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
 
 export interface EncounterCtx {
@@ -393,6 +400,79 @@ export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean
     // auto-drive / dev flows must never hang on a click that won't come: auto-advance after a
     // readable beat (the dungeon cards' 'auto' CardMode idiom). Real play waits for input. The
     // window is generous so an e2e can capture the card even under fleet CPU load.
+    if (opts.auto) setTimeout(done, 2000);
+  });
+}
+
+/**
+ * "The Ledger Amended" (supersession-reteach.md §3) — the supersession re-teach card, one
+ * amendment per card. Same parchment scaffolding as presentNightLedger (quiet keyboard, arm
+ * guard, teardown safety, Space/Enter/click to confirm).
+ *
+ * Teach-only: no question, no grade, no SRS record, no HP, no Glow — the ONLY outcome is the
+ * caller's witness write when this resolves. Every player-facing string below is Fable-written
+ * and FINAL (doc §3), transcribed verbatim.
+ */
+export const AMENDMENT_TITLE = 'The Ledger Amended';
+export const AMENDMENT_OPENING = 'The Realm moved. The Ledger moves with it.';
+export const AMENDMENT_CAPTION = 'What was true is not unwritten. It is amended. Both lines stay.';
+export const AMENDMENT_CONFIRM = 'Read and witnessed ▸';
+export const AMENDMENT_SIGNOFF = 'So amended. What the Ledger keeps, it keeps honestly.';
+
+export function presentAmendment(
+  card: Amendment,
+  opts: { last?: boolean; auto?: boolean } = {},
+): Promise<void> {
+  return new Promise((resolve) => {
+    const o = buildOverlay();
+
+    const body: Array<Node | string> = [
+      el('div', { class: 'fw-ledger-head' }, [
+        el('h2', { class: 'fw-ledger-title', text: AMENDMENT_TITLE }),
+        el('span', { class: 'fw-ledger-sub', text: AMENDMENT_OPENING }),
+      ]),
+      el('hr', { class: 'fw-rule' }),
+      // the old truth, struck — then the caption that explains the strike, right under it
+      el('p', { class: 'fw-amend-old', text: card.old.statement }),
+      el('p', { class: 'fw-amend-caption', text: AMENDMENT_CAPTION }),
+      // the new truth beneath it
+      el('p', { class: 'fw-amend-new', text: card.next.statement }),
+    ];
+    if (card.next.detail) body.push(el('p', { class: 'fw-docdetail', text: card.next.detail }));
+    // the new fact's source quote + citation — the same treatment free_recall's earned page gives it
+    const excerpt = excerptBlock(card.next);
+    if (excerpt) body.push(excerpt);
+    if (opts.last) body.push(el('p', { class: 'fw-ledger-signoff', text: AMENDMENT_SIGNOFF }));
+
+    o.body.replaceChildren(...body);
+
+    let closed = false;
+    const done = (): void => {
+      if (closed) return;
+      closed = true;
+      void o.close().then(resolve);
+    };
+    const cont = el('button', {
+      class: 'fw-btn fw-btn-primary',
+      type: 'button',
+      text: AMENDMENT_CONFIRM,
+      onclick: () => {
+        if (o.isArmed()) done();
+      },
+    });
+    o.footer.replaceChildren(
+      el('span', { class: 'fw-hint', text: 'Space, Enter, or click to witness the amendment.' }),
+      el('span', { class: 'fw-spacer' }),
+      cont,
+    );
+    o.onKey((e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && o.isArmed()) {
+        e.preventDefault();
+        done();
+      }
+      // no ESC: the Clerk's amendment is read and witnessed, not dismissed
+    });
+    requestAnimationFrame(() => cont.focus());
     if (opts.auto) setTimeout(done, 2000);
   });
 }

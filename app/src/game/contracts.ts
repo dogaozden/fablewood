@@ -213,6 +213,43 @@ export interface SettingsApi {
   set(patch: Partial<{ muted: boolean; volume: number }>): Promise<void>;
 }
 
+// ---------------------------------------------------------------- the ledger amended
+
+/** One superseded→superseding pair: the Clerk's amendment (supersession-reteach.md §3). */
+export interface Amendment {
+  /** the old truth — struck through on the card, and excluded from every draw once witnessed */
+  old: FactLite;
+  /** the new truth, carrying its own verbatim source quote */
+  next: FactLite;
+}
+
+/**
+ * "The Ledger Amended" (supersession-reteach.md §4) — witness state + the ONE suspension
+ * predicate every draw/scheduling surface funnels through. Sync after ready(), like SrsApi.
+ *
+ * An amendment suspends BOTH truths until it is witnessed: the superseded fact retires at
+ * pack load (permanently), and the superseding fact is gated out of play until the Clerk
+ * has amended the record. After the witness beat the new fact enters play as a normal new
+ * fact — due immediately, box 1.
+ */
+export interface AmendmentsApi {
+  /** resolve cached state from state/amendments.json + the pack supersession index */
+  ready(): Promise<void>;
+  /** has this superseded fact's amendment card been read and witnessed? */
+  isWitnessed(supersededFactId: string): boolean;
+  /** §4 THE predicate: retired (superseded) or gated (superseding, unwitnessed) */
+  isSuspended(factId: string): boolean;
+  /** isSuspended over a list, preserving order — what draw surfaces call */
+  eligible(factIds: readonly string[]): string[];
+  /** §2 amendments awaiting the Clerk in this pack, pack order (uncapped; the scene batches) */
+  pending(packId: string): Amendment[];
+  /** the witness beat — persists, and the new truth enters play from here on */
+  witness(supersededFactId: string): Promise<void>;
+  /** §5 the mercy rule: which of these facts (if any) is a superseding fact on its FIRST
+   *  graded appearance. Read BEFORE record() — a fresh history disarms it. */
+  firstAmendedAppearance(factIds: readonly string[]): string | null;
+}
+
 // ---------------------------------------------------------------- night's ledger
 
 /**
@@ -241,11 +278,15 @@ export interface Services {
   save: SaveApi;
   settings: SettingsApi;
   inventory: InventoryApi;
+  amendments: AmendmentsApi;
   /** teach-and-test: modal "discovered documents" cards, resolves on dismiss (encounters agent owns UI) */
   showTeaching: (facts: FactLite[]) => Promise<void>;
   /** §3.2 the Night's Ledger run-harvest screen (encounters agent owns UI); resolves on dismiss.
    *  `opts.auto` (dev/e2e auto-drive) auto-advances after a beat so the pipeline never hangs. */
   showNightLedger: (data: NightLedgerData, opts?: { auto?: boolean }) => Promise<void>;
+  /** "The Ledger Amended" card (supersession-reteach.md §3; encounters agent owns UI); resolves
+   *  when the player confirms "Read and witnessed ▸". `last` adds the batch sign-off. */
+  showAmendment: (card: Amendment, opts?: { last?: boolean; auto?: boolean }) => Promise<void>;
 }
 
 /**
