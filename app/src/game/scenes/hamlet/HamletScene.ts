@@ -239,14 +239,16 @@ export class HamletScene extends Phaser.Scene {
         .image(records.center.x, records.center.y, 'fx.glow')
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(-790)
-        .setAlpha(0.24)
-        .setScale(1.7)
+        .setAlpha(0.34)
+        .setScale(2.1)
         .setVisible(false);
       this.worldGroup.add(this.recordsPulse);
+      // Wider and warmer than a lantern: the office is a 3x2-tile building, so a
+      // lantern-sized glow behind it would be hidden by the sprite instead of haloing it.
       this.tweens.add({
         targets: this.recordsPulse,
-        alpha: 0.5,
-        scale: 2.0,
+        alpha: 0.66,
+        scale: 2.6,
         duration: 1750,
         yoyo: true,
         repeat: -1,
