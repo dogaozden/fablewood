@@ -27,7 +27,7 @@ import {
   forceMove, blocksSight, hasLineOfFire, type Layout, type MoveField, type ForceMoveBoard,
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
-import { resolveAction, isFlanked } from './damage';
+import { resolveAction, isFlanked, applyAmendedMercy, stripPartyHarmOps, AMENDED_MERCY_LINE } from './damage';
 import {
   applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
   shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
@@ -1241,6 +1241,9 @@ export class CombatScene extends Phaser.Scene {
     // This applies to every T1 cast too, not just T2/T3 — the SRS loop is the mana engine
     // regardless of which tier answering the question happens to buy.
     const dueSetAtCast = this.snapshotDueSet();
+    // supersession-reteach.md §5 — same capture-before-record duty (the mercy reads the
+    // superseding fact's PRIOR history, which record() is about to make non-empty).
+    const mercy = this.amendedFirstMiss(result);
     // Record FIRST — the learning record is sacred: never dropped, even if the
     // scene tears down mid-overlay (record() is pure service work, safe when dead).
     this.results.push(result);
@@ -1275,7 +1278,10 @@ export class CombatScene extends Phaser.Scene {
       : dmgQuality;
     const rider = quality === 1 && riderBonus(1, result.difficulty ?? 2, this.packDifficultyClassified) === 1;
     const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-    const outcome = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider });
+    const base = resolveAction(action, dmgQuality, { miraBonus, vsBoss, branchTag: result.branchTag, rider });
+    // §5 the one mercy rule — 0 HP to the party on the amended fact's first miss, Clerk's
+    // line composed after the base copy. The SRS record above stays honest.
+    const outcome = mercy ? applyAmendedMercy(base) : base;
     if (action === 'smite' || action === 'weave' || action === 'sequence' || action === 'cast') {
       this.attackerTell(unit, tile, ACTIONS[action].tint);
     }
@@ -1337,6 +1343,8 @@ export class CombatScene extends Phaser.Scene {
     // §5.5 the weld edge: capture every involved fact's box BEFORE record() mutates it (trap
     // 14 — same capture-before-record duty as the due-renewal snapshot above).
     const factBoxesAtCast = result.factIds.map((id) => this.boxOfSafe(id));
+    // supersession-reteach.md §5 — the amendment mercy, captured before record() too.
+    const mercy = this.amendedFirstMiss(result);
     this.results.push(result);
     const { reclaimedId } = await this.record(result);
     if (this.destroyed) return;
@@ -1380,14 +1388,19 @@ export class CombatScene extends Phaser.Scene {
       miraBonus,
       vsBoss,
     };
-    const ops = resolveSpell(spell, quality, opts);
+    // §5 the one mercy rule at the T2/T3 seam: strip every party-facing cost from the
+    // resolved ops (the ActionOutcome equivalent is damage.ts's applyAmendedMercy).
+    const resolved = resolveSpell(spell, quality, opts);
+    const ops = mercy ? stripPartyHarmOps(resolved, opts.partyIds ?? []) : resolved;
 
     if (spell.shape !== 'self' && spell.shape !== 'burst1') this.attackerTell(unit, tile, ACTIONS[action].tint);
     const before = this.enemyHpSum();
-    const bannerText = ops
+    const baseBanner = ops
       .filter((o): o is Extract<BoardOp, { op: 'banner' }> => o.op === 'banner')
       .map((o) => o.text)
       .join('\n');
+    // the Clerk's line composes AFTER the base copy (§5)
+    const bannerText = mercy ? (baseBanner ? `${baseBanner}\n${AMENDED_MERCY_LINE}` : AMENDED_MERCY_LINE) : baseBanner;
     this.applySpellOps(unit, action, spell, ops);
     this.actionLog.push({ action, dmg: before - this.enemyHpSum(), overlay: true });
 
@@ -2362,11 +2375,26 @@ export class CombatScene extends Phaser.Scene {
       for (const id of this.tagToIds.get(t) ?? []) cand.add(id);
     }
     if (cand.size === 0) for (const id of this.allFactIds) cand.add(id);
-    const arr = [...cand];
+    // supersession-reteach.md §4 — dueQueue filters suspended facts itself, but the
+    // empty-queue fallback below serves this raw list directly, so filter at the source.
+    const arr = this.eligibleFactIds([...cand]);
     let due: string[] = [];
     try { due = services.srs.dueQueue(this.launch.packId, arr); } catch { due = []; }
     const ordered = due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
     return partitionByRecency(ordered, sessionRecentFactIds);
+  }
+
+  /** §4 suspension filter, tolerant of a stub/offline amendments service. */
+  private eligibleFactIds(ids: string[]): string[] {
+    try { return services.amendments.eligible(ids); } catch { return ids; }
+  }
+
+  /** §5 — the superseding fact on its FIRST graded appearance, or null. MUST be read before
+   *  record() writes the fact's own first history row and disarms the mercy. */
+  private amendedFirstMiss(result: EncounterResult): boolean {
+    if (result.quality !== 0) return false;
+    try { return services.amendments.firstAmendedAppearance(result.factIds) !== null; }
+    catch { return false; }
   }
 
   private miraBonusActive(): boolean {

@@ -13,6 +13,8 @@ import './shell.css';
 interface Fact {
   id: string;
   statement: string;
+  /** supersession-reteach.md §6 — present ⇒ amended; the row stays, marked (both lines stay) */
+  superseded_by?: string;
 }
 interface RawPack {
   meta?: { title?: string };
@@ -53,11 +55,25 @@ function FactRow({ fact, srs }: { fact: Fact; srs: SrsState }) {
         ? until(entry.next_due)
         : 'cast';
   const dueNow = due === 'ready to cast';
+  // §6 — an amended fact keeps its row and its history, marked, and no longer reports a
+  // review time: the Realm has moved past it, so it is never scheduled again.
+  const amended = !!fact.superseded_by;
   return (
-    <div className="lib-fact">
+    <div className={amended ? 'lib-fact is-amended' : 'lib-fact'}>
       <BoxBadge box={box} />
-      <span className="lib-statement">{fact.statement}</span>
-      <span className={dueNow ? 'lib-due now' : 'lib-due'}>{due}</span>
+      <span className="lib-statement">
+        {amended && (
+          <span className="lib-amended" title="amended — the Realm moved past this fable" aria-label="amended">
+            ⟳
+          </span>
+        )}
+        {fact.statement}
+      </span>
+      {amended ? (
+        <span className="lib-due">amended</span>
+      ) : (
+        <span className={dueNow ? 'lib-due now' : 'lib-due'}>{due}</span>
+      )}
     </div>
   );
 }

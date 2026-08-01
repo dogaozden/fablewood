@@ -39,8 +39,10 @@ function teachBlock(head: string, answer: string, fact?: FactLite): HTMLElement 
   ]);
 }
 
-/** The book's own words — verbatim excerpt + citation, shown win or lose (the source is the reward). */
-function excerptBlock(fact: FactLite): HTMLElement | null {
+/** The book's own words — verbatim excerpt + citation, shown win or lose (the source is the reward).
+ *  Exported so the amendment card (overlay.ts) gives the new truth's source the SAME treatment
+ *  free_recall's earned page does (supersession-reteach.md §3) rather than cloning it a third time. */
+export function excerptBlock(fact: FactLite): HTMLElement | null {
   const src = fact.source_ref;
   if (!src?.quote) return null;
   const loc = src.loc ? ` › ${src.loc}` : '';

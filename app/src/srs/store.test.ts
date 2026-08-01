@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readState, writeState } from '../bridge/plugin';
 import type { Bridge } from './store';
-import { SaveStore, SettingsStore, SrsStore } from './store';
+import { AmendmentsStore, SaveStore, SettingsStore, SrsStore } from './store';
 
 /**
  * In-memory stand-in for the dev bridge. Stores JSON *strings* (like the real
@@ -356,6 +356,80 @@ describe('SettingsStore', () => {
     await s.save({ muted: true });
     expect(s.get().muted).toBe(true);
     expect((b.raw('settings.json') as any).muted).toBe(true);
+  });
+});
+
+describe('AmendmentsStore — the witness store (supersession-reteach.md §4/§10.5)', () => {
+  it('starts empty and never touches srs.json', async () => {
+    const b = new FakeBridge();
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    expect(s.isWitnessed('fx-old')).toBe(false);
+    await s.witness('fx-old', NOW);
+    expect(b.keys()).toEqual(['amendments.json']); // the sacred file is untouched
+  });
+
+  it('records the witness beat as a factId → ISO date map', async () => {
+    const b = new FakeBridge();
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    await s.witness('fx-old', NOW);
+    expect(s.isWitnessed('fx-old')).toBe(true);
+    expect(b.raw('amendments.json')).toEqual({ 'fx-old': new Date(NOW).toISOString() });
+  });
+
+  it('persists across a store reload (a fresh store on the same disk)', async () => {
+    const b = new FakeBridge();
+    const first = new AmendmentsStore(b);
+    await first.ready();
+    await first.witness('fx-old', NOW);
+
+    const reloaded = new AmendmentsStore(b);
+    await reloaded.ready();
+    expect(reloaded.isWitnessed('fx-old')).toBe(true);
+    expect(reloaded.isWitnessed('other-old')).toBe(false);
+  });
+
+  it('merge-writes: a concurrent tab\'s witness survives (and foreign keys are preserved)', async () => {
+    const b = new FakeBridge();
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    // another tab witnessed a different amendment after our load
+    b.seed('amendments.json', { 'other-old': '2026-01-01T00:00:00.000Z' });
+    await s.witness('fx-old', NOW);
+    expect(b.raw('amendments.json')).toEqual({
+      'other-old': '2026-01-01T00:00:00.000Z',
+      'fx-old': new Date(NOW).toISOString(),
+    });
+  });
+
+  it('backs up a wrong-shaped file before starting fresh (state/ is never discarded)', async () => {
+    const b = new FakeBridge();
+    b.seed('amendments.json', ['not', 'an', 'object']);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    expect(s.isWitnessed('fx-old')).toBe(false);
+    expect(b.keys().some((k) => k.startsWith('amendments.corrupt-'))).toBe(true);
+  });
+
+  it('a non-string value reads as NOT witnessed (never suspends a fact on corrupt bytes)', async () => {
+    const b = new FakeBridge();
+    b.seed('amendments.json', { 'fx-old': 1, 'ok-old': '2026-01-01T00:00:00.000Z' });
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    expect(s.isWitnessed('fx-old')).toBe(false);
+    expect(s.isWitnessed('ok-old')).toBe(true);
+  });
+
+  it('degrades in-memory with no bridge (static build)', async () => {
+    const b = new FakeBridge();
+    b.offline = true;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = new AmendmentsStore(b);
+    await s.ready();
+    await s.witness('fx-old', NOW);
+    expect(s.isWitnessed('fx-old')).toBe(true); // the visit still resolves
   });
 });
 

@@ -300,6 +300,17 @@
   color: var(--amber);
 }
 
+/* supersession-reteach.md §6 — the amended marker. Both lines stay: an amended fable keeps
+   its row and its history, dimmed and marked rather than removed. */
+.lib-fact.is-amended .lib-statement {
+  color: var(--muted);
+}
+.lib-amended {
+  margin-right: 0.4em;
+  color: var(--amber);
+  font-size: 0.95em;
+}
+
 .lib-badge {
   flex: 0 0 auto;
   min-width: 2.9rem;

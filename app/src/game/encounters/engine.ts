@@ -66,6 +66,12 @@ function difficultyEligible(e: Encounter, tier: 1 | 2 | 3): boolean {
  *  2. due-first: the earliest fact in req.factIds that a kind-matching encounter teaches
  *  3. any kind-matching encounter
  *  4. any encounter at all
+ *
+ * Deliberately carries NO supersession filter (supersession-reteach.md §4): a valid pack
+ * cannot contain an encounter teaching a superseded fact (validator invariant,
+ * pipeline/validate_pack.mjs), so encounter-level runtime filtering would be dead code
+ * guarding an impossible state. Suspension is enforced upstream, on the factIds that reach
+ * this function — see srs/amendments.ts.
  */
 export function pick(req: EncounterRequest, packs: Pack[]): Encounter | null {
   const pack = packs.find((p) => p.meta.id === req.packId) ?? packs[0];

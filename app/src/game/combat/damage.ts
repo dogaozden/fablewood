@@ -142,6 +142,36 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
   }
 }
 
+/**
+ * supersession-reteach.md §5 — the one mercy rule. On the SUPERSEDING fact's first graded
+ * appearance a miss costs the party no HP: the player mastered the old truth, the world
+ * moved, and their diligence didn't fail. Zeroes every party-facing cost this table can
+ * produce (Cast's Fade counter, Parley's party hit, a whiff's self-chip) and composes the
+ * Clerk's line AFTER the base copy in the banner slot. Damage dealt is untouched — a miss
+ * still buys nothing — and the SRS record stays honest (the caller records quality 0 as
+ * normal, arming redemption). Second appearance onward: full teeth.
+ */
+export const AMENDED_MERCY_LINE = 'The Realm moved, not you. Read it again.';
+
+export function applyAmendedMercy(outcome: ActionOutcome): ActionOutcome {
+  return {
+    ...outcome,
+    fade: 0,
+    partyHit: 0,
+    selfChip: 0,
+    banner: outcome.banner ? `${outcome.banner}\n${AMENDED_MERCY_LINE}` : AMENDED_MERCY_LINE,
+  };
+}
+
+/** Same mercy at the T2/T3 seam, where the board is driven by BoardOps rather than an
+ *  ActionOutcome: drop the Fade counter and any damage aimed at the party's own units. */
+export function stripPartyHarmOps(ops: readonly BoardOp[], partyIds: readonly string[]): BoardOp[] {
+  const party = new Set(partyIds);
+  return ops.filter(
+    (o) => !(o.op === 'fade' || (o.op === 'damage' && party.has(o.targetId))),
+  );
+}
+
 /** Short label for the turn/HUD, e.g. floating combat text context. */
 export function qualityWord(q: Quality): string {
   return q === 1 ? 'FULL' : q === 0.5 ? 'PARTIAL' : 'MISS';

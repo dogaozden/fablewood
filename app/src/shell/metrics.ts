@@ -147,9 +147,11 @@ export interface WeakBinding {
 export function weakestBindings(
   facts: Record<string, Pick<SrsEntry, 'box' | 'history'>>,
   limit = 5,
+  exclude?: ReadonlySet<string>,
 ): WeakBinding[] {
   const misses: WeakBinding[] = [];
   for (const [id, entry] of Object.entries(facts)) {
+    if (exclude?.has(id)) continue; // supersession-reteach.md §6 — superseded facts drop out
     const history = entry.history ?? [];
     const last = history[history.length - 1];
     if (!last || last.quality !== 0) continue;

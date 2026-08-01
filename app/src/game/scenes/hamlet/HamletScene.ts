@@ -40,6 +40,8 @@ import {
   type Province,
 } from './content';
 import { partitionByRecency, seededShuffle } from '../../recency';
+import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
+import type { Amendment } from '../../contracts';
 
 type Facing = 'up' | 'down' | 'left' | 'right';
 type Key = Phaser.Input.Keyboard.Key;
@@ -100,6 +102,11 @@ export class HamletScene extends Phaser.Scene {
   private provinces: Province[] = [];
   private packId?: string;
   private didShutdown = false;
+
+  /** supersession-reteach.md §2 — amendments awaiting the Clerk, across every installed
+   *  province. Non-empty ⇒ the Records Office pulses and its hover line changes. */
+  private amendedPending: Amendment[] = [];
+  private recordsPulse?: Phaser.GameObjects.Image;
 
   constructor() {
     super('hamlet');
@@ -231,6 +238,33 @@ export class HamletScene extends Phaser.Scene {
         ease: 'Sine.inOut',
       });
     });
+
+    // supersession-reteach.md §2 — the Records Office pulse. A soft lantern glow in the
+    // existing vocabulary above (ADD blend, slow yoyo), hidden until the async bootstrap
+    // finds amendments pending. Built here so it sits in the same depth band as the
+    // lanterns rather than over the props.
+    const records = this.map.locations.find((l) => l.id === 'records');
+    if (records) {
+      this.recordsPulse = this.add
+        .image(records.center.x, records.center.y, 'fx.glow')
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(-790)
+        .setAlpha(0.34)
+        .setScale(2.1)
+        .setVisible(false);
+      this.worldGroup.add(this.recordsPulse);
+      // Wider and warmer than a lantern: the office is a 3x2-tile building, so a
+      // lantern-sized glow behind it would be hidden by the sprite instead of haloing it.
+      this.tweens.add({
+        targets: this.recordsPulse,
+        alpha: 0.66,
+        scale: 2.6,
+        duration: 1750,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.inOut',
+      });
+    }
   }
 
   private buildProps(): void {
@@ -415,6 +449,7 @@ export class HamletScene extends Phaser.Scene {
         services.srs.ready(),
         services.settings.ready(),
         services.inventory.ready(),
+        services.amendments.ready(),
       ]);
     } catch {
       /* stubs/real impls both fine; ignore readiness errors */
@@ -440,6 +475,8 @@ export class HamletScene extends Phaser.Scene {
     } catch {
       this.provinces = [];
     }
+
+    this.refreshAmendments();
 
     try {
       const save = services.save.get();
@@ -686,6 +723,8 @@ export class HamletScene extends Phaser.Scene {
           await this.dialogue.run(berryConv(this.computeDue(), this.streak()));
           break;
         case 'records':
+          // supersession-reteach.md §2 — amendments are presented BEFORE normal conversation.
+          await this.doAmendments();
           await this.dialogue.run(clerkConv(this.computeDue(), this.lastPlayed()));
           break;
         case 'wellspring':
@@ -712,6 +751,47 @@ export class HamletScene extends Phaser.Scene {
       this.input.keyboard!.resetKeys();
       this.busy = false;
     }
+  }
+
+  /**
+   * "The Ledger Amended" (supersession-reteach.md §2/§3) — up to AMENDMENT_BATCH_CAP cards
+   * per visit, overflow waits for the next visit. Each card is witnessed as it is confirmed,
+   * not at the end of the batch: closing the game (or reloading) mid-batch must leave the
+   * remaining amendments pending, and re-show only those.
+   *
+   * Teach-only — no grade, no SRS record, no HP, no Glow. The witness write is the sole effect.
+   */
+  private async doAmendments(): Promise<void> {
+    const batch = this.amendedPending.slice(0, AMENDMENT_BATCH_CAP);
+    if (batch.length === 0) return;
+    this.input.keyboard!.enabled = false;
+    try {
+      for (let i = 0; i < batch.length; i++) {
+        await services.showAmendment(batch[i], { last: i === batch.length - 1 });
+        await services.amendments.witness(batch[i].old.id);
+      }
+    } catch {
+      /* amendments/encounters may be stubs; never block the Clerk's own conversation */
+    } finally {
+      this.input.keyboard!.enabled = true;
+      this.input.keyboard!.resetKeys();
+      this.refreshAmendments();
+    }
+  }
+
+  /** Recompute the pending set and re-dress the Records Office (pulse + hover line). */
+  private refreshAmendments(): void {
+    try {
+      this.amendedPending = this.provinces.flatMap((pv) => services.amendments.pending(pv.id));
+    } catch {
+      this.amendedPending = []; // stub/offline amendments service — no pulse, no cards
+    }
+    const pending = this.amendedPending.length > 0;
+    this.recordsPulse?.setVisible(pending);
+    const label = this.labels.get('records');
+    const loc = this.map.locations.find((l) => l.id === 'records');
+    // §2's hover line, on the map location's own label — verbatim, and only while pending.
+    if (label && loc) label.setText(pending ? `${loc.name}\nThe Clerk has amendments.` : loc.name);
   }
 
   private async doCottage(): Promise<void> {
@@ -741,7 +821,11 @@ export class HamletScene extends Phaser.Scene {
     if (!choice || choice === '__cancel__') return;
     try {
       const pv = this.provinces.find((p) => p.id === this.packId);
-      const baseFactIds = pv?.factIds ?? [];
+      // supersession-reteach.md §4 — dueQueue filters suspended facts itself, but the
+      // empty-queue fallback below hands out this raw pack-order list directly, so it has to
+      // be filtered at the source or an unwitnessed amendment's new truth could be drilled
+      // with no ceremony (and a retired old truth re-asked).
+      const baseFactIds = eligibleOf(pv?.factIds ?? []);
       const initialDue = services.srs.dueQueue(this.packId, baseFactIds);
       for (let i = 0; i < 3; i++) {
         // Due queue drives selection (Goal 5), never raw pack order. Recompute each
@@ -861,6 +945,16 @@ function resolveMoveFeet(
 ): { x: number; y: number } {
   const r = resolveMove(solid, x, y - FOOT, dx, dy, HW, HH);
   return { x: r.x, y: r.y + FOOT };
+}
+
+/** supersession-reteach.md §4 — the suspension filter, tolerant of a stub/offline service
+ *  (an unavailable amendments provider must never empty a drill's candidate list). */
+function eligibleOf(factIds: string[]): string[] {
+  try {
+    return services.amendments.eligible(factIds);
+  } catch {
+    return factIds;
+  }
 }
 
 function mulberry32(seed: number): () => number {

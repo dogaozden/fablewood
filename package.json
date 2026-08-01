@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:amendments": "playwright test -c playwright.amendments.config.ts",
     "shot": "node scripts/shot.mjs",
     "check:zero-packs": "bash scripts/check-zero-packs.sh",
     "dev:native": "vite --port 5219 --strictPort",

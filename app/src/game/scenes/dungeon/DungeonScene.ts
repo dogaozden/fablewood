@@ -250,9 +250,12 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private teachingFacts(room: DungeonRoom): FactLite[] {
-    return (room.teaching ?? [])
-      .map((id) => this.facts.get(id))
-      .filter((f): f is FactLite => !!f);
+    // supersession-reteach.md §4 — an outdated truth must never be re-taught as current, and
+    // the new truth waits for the Clerk's ceremony; both are suspended facts. Tolerant of a
+    // stub amendments service (then nothing is suspended and the room teaches as before).
+    let ids = room.teaching ?? [];
+    try { ids = services.amendments.eligible(ids); } catch { /* stub/offline */ }
+    return ids.map((id) => this.facts.get(id)).filter((f): f is FactLite => !!f);
   }
 
   // ---- node interaction -----------------------------------------------------
