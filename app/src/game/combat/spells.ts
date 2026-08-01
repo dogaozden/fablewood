@@ -397,14 +397,14 @@ export const SPELLBOOK: Record<SpellId, SpellDef> = {
  * overglow/weld:false (already baked in here, so they are never double-counted). Flank is
  * always false — spells never flank (§4.1).
  */
-function primaryAmount(base: number, opts: ResolveSpellOpts): number {
+function primaryAmount(base: number, opts: ResolveSpellOpts, welded: boolean): number {
   const { hpDamage } = computeHit({
     base,
     attackerStatuses: [],
     targetStatuses: [],
     flank: false,
     overglow: !!opts.overglow,
-    weld: !!opts.weld,
+    weld: welded,
     rider: !!opts.rider,
   });
   return hpDamage + (opts.miraBonus ?? 0);
@@ -440,6 +440,14 @@ export function resolveSpell(def: SpellDef, quality: Quality, opts: ResolveSpell
   const effect = def.effects[slot];
   const ops: BoardOp[] = [];
 
+  // §5.5 grants the weld edge to "a q1 cast" — the quality gate lives HERE, at the single
+  // point the weld is consumed, rather than at each caller. Every call site previously passed
+  // `weld` straight through from weldBonus(boxes), which is quality-agnostic by design, so a
+  // PARTIAL answer collected the mastery dividend and the "welded truth" banner it had not
+  // earned. Gating here fixes the T1 adapter and castGatedSpell at once and leaves no call
+  // site able to reintroduce it.
+  const welded = !!opts.weld && quality === 1;
+
   // Line shapes carry a fixed MAX depth in their SpellDef, but the depth actually hit varies
   // by quality (§7: Rite of Sealing q05 is depth 2, not its q1 depth of 4) — trim the
   // caller's aoeTargetIds to what THIS quality slot really reaches rather than trusting it
@@ -456,7 +464,7 @@ export function resolveSpell(def: SpellDef, quality: Quality, opts: ResolveSpell
   } else {
     const rawPrimary = opts.vsBoss && effect.vsBossHits !== undefined ? effect.vsBossHits : effect.hits;
     if (rawPrimary > 0 && opts.primaryTargetId) {
-      ops.push({ op: 'damage', targetId: opts.primaryTargetId, amount: primaryAmount(rawPrimary, opts) });
+      ops.push({ op: 'damage', targetId: opts.primaryTargetId, amount: primaryAmount(rawPrimary, opts, welded) });
     }
     if (effect.aoeHit > 0) {
       for (const id of aoeIds) ops.push({ op: 'damage', targetId: id, amount: effect.aoeHit });
@@ -488,7 +496,7 @@ export function resolveSpell(def: SpellDef, quality: Quality, opts: ResolveSpell
   }
 
   ops.push({ op: 'banner', text: def.banner[slot] });
-  if (opts.weld) ops.push({ op: 'banner', text: 'The welded truth strikes true.' });
+  if (welded) ops.push({ op: 'banner', text: 'The welded truth strikes true.' });
   if (opts.rider) ops.push({ op: 'banner', text: 'The truth burns brighter. (+1)' });
   return ops;
 }

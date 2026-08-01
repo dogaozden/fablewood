@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Quality } from '../game/contracts';
-import { isRedemption, reclaimedFactId } from './redemption';
+import { isRedemption, reclaimedFactId, reclaimedFactIds } from './redemption';
 
 // The exact spec table (fun-review.md §3.1 / build brief): prior history → q1 now → bell?
 const SPEC_TABLE: ReadonlyArray<readonly [Quality[], boolean]> = [
@@ -76,5 +76,45 @@ describe('reclaimedFactId — first qualifying fact (capture-before-record)', ()
 
   it('handles the empty fact set', () => {
     expect(reclaimedFactId([], 1, priorOf)).toBeNull();
+  });
+});
+
+// crucible-2 reclaimed-undercount — the Night's Ledger's "Reclaimed from the Fade" row counts
+// FACTS (contracts.ts: "facts reclaimed from the Fade"), and its sibling tally `newWelds` is
+// already computed per-fact. But CombatScene.record() drove the reclaimed tally off
+// reclaimedFactId — deliberately SINGULAR, so the bell's Clerk-line hash stays stable — and
+// did `if (reclaimedId) this.reclaimed++`. A match/order encounter carrying several facts
+// therefore reported 1 no matter how many were actually redeemed. The bell staying
+// once-per-encounter is correct; the TALLY needed the full set, which is what this adds.
+describe('reclaimedFactIds — the run tally (all qualifiers, not just the first)', () => {
+  const hist: Record<string, Quality[]> = {
+    a: [0],          // pending miss → redeems
+    b: [1, 0],       // missed after a pass → redeems
+    c: [0, 1],       // already cleared → does not
+    clean: [1],      // never missed → does not
+  };
+  const priorOf = (id: string): Quality[] => hist[id] ?? [];
+
+  it('counts EVERY redeemed fact in a multi-fact encounter, not only the first', () => {
+    expect(reclaimedFactIds(['a', 'b'], 1, priorOf)).toEqual(['a', 'b']);
+    // the exact undercount the finding names: one encounter, two genuine reclamations
+    expect(reclaimedFactIds(['a', 'b'], 1, priorOf)).toHaveLength(2);
+    expect(reclaimedFactId(['a', 'b'], 1, priorOf)).toBe('a'); // the bell still picks one
+  });
+
+  it('skips non-qualifying facts in a mixed set', () => {
+    expect(reclaimedFactIds(['clean', 'a', 'c', 'b'], 1, priorOf)).toEqual(['a', 'b']);
+  });
+
+  it('preserves the given order, so the first entry always matches reclaimedFactId', () => {
+    for (const ids of [['a', 'b'], ['b', 'a'], ['clean', 'b', 'a']]) {
+      expect(reclaimedFactIds(ids, 1, priorOf)[0] ?? null).toBe(reclaimedFactId(ids, 1, priorOf));
+    }
+  });
+
+  it('is empty on a non-q1 answer and on an empty fact set', () => {
+    expect(reclaimedFactIds(['a', 'b'], 0.5, priorOf)).toEqual([]);
+    expect(reclaimedFactIds(['a', 'b'], 0, priorOf)).toEqual([]);
+    expect(reclaimedFactIds([], 1, priorOf)).toEqual([]);
   });
 });

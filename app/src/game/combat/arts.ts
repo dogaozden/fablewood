@@ -58,6 +58,36 @@ export const ARTS: Record<ArtId, ArtMeta> = {
   courtcraft: { art: 'courtcraft', label: 'Courtcraft', encounter: 'scenario_branch' },
 };
 
+/**
+ * Does lantern grace mean anything for this Art?
+ *
+ * Grace (§5, the shipped mercy) softens a MISS's damage quality from 0 to 0.5 while the SRS
+ * record stays honest. That only does something when the Art's outcome is actually derived
+ * from quality. Courtcraft's is not: its outcome comes from the scenario's branchTag
+ * (kinds.ts renderScenario; damage.ts's Parley adapter re-derives its slot from branchTag and
+ * ignores the quality argument entirely). Applying grace to a Parley therefore changed
+ * NOTHING while still burning the once-per-battle charge and telling the player it had
+ * helped — crucible-2 lantern-grace-false-banner.
+ */
+export function graceAppliesTo(art: ArtId): boolean {
+  return art !== 'courtcraft';
+}
+
+/**
+ * §9 — is this cast a boss NEGOTIATION beat: one that must draw from the current phase's
+ * recallTags and then advance the phase?
+ *
+ * The rule is "an Attestation aimed at the boss", at ANY tier. The T1 path expressed it as
+ * `action === 'cast' && vsBoss`, which is the same statement for the only tier it could see;
+ * once Rank 2/3 opened Attested Ward and Verbatim Decree, that spelling silently excluded
+ * them, so a T2/T3 Attestation at the Warden drew from roomTags instead of the phase's
+ * recallTags and never advanced phaseIndex — letting a high-Rank player strip shields while
+ * skipping the mandatory phase branches entirely (crucible-2 attestation-phase-skip).
+ */
+export function isBossPhaseCast(art: ArtId | undefined, vsBoss: boolean): boolean {
+  return art === 'attestation' && vsBoss;
+}
+
 export interface GlowState {
   pips: number;
 }

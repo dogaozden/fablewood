@@ -54,6 +54,11 @@ export interface ResolveOpts {
   vsBoss?: boolean;
   /** difficulty-rewards.md §4 rider, already gated by the caller */
   rider?: boolean;
+  /** magic-combat-depth.md §5.5 the weld edge — every fact of the drawn encounter sat at
+   *  box ≥ 4 at CAST time (weldBonus over a capture-before-record snapshot, trap 14). §5.5
+   *  scopes the dividend to "a q1 cast" with no tier restriction, so the T1 Arts need it too;
+   *  resolveSpell applies the q1 gate itself, so passing it here is always safe. */
+  weld?: boolean;
   /** scenario_branch outcome, for Parley / boss branches */
   branchTag?: string;
 }
@@ -80,6 +85,7 @@ function outcomeFromSpell(def: SpellDef, quality: Quality, opts: ResolveOpts): A
     aoeTargetIds: T1_AOE,
     miraBonus: opts.miraBonus,
     rider: opts.rider,
+    weld: opts.weld,
     vsBoss: opts.vsBoss,
   };
   const ops = resolveSpell(def, quality, spellOpts);
