@@ -1,5 +1,6 @@
 // validate_pack.test.mjs — unit tests for the pure supersession-checking piece
-// of the pack validator (docs/design/knowledge-platform-vision.md §3b, §9.3).
+// of the pack validator (docs/design/knowledge-platform-vision.md §3b, §9.3),
+// plus a crucible-2 regression test for the match-encounter cross-check.
 // Node's built-in test runner — no framework, matching pipeline/'s existing
 // "node ESM + python, no frameworks" style (see expand_pack.test.mjs). Runs
 // standalone (does NOT go through vitest — vite.config.ts scopes vitest's
@@ -9,7 +10,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { checkSupersession } from './validate_pack.mjs';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPT = join(root, 'pipeline', 'validate_pack.mjs');
 
 // Minimal fact builder — only the fields checkSupersession actually reads
 // (id, as_of, supersedes, superseded_by) matter; the rest are filler so the
@@ -218,4 +227,54 @@ test('an encounter targeting the successor fact (not the superseded one) is clea
   const { errors, warnings } = checkSupersession(pack);
   assert.deepEqual(errors, []);
   assert.deepEqual(warnings, []);
+});
+
+// ============================================================================
+// crucible-2 — a non-array match option column must be REPORTED, not crash
+// the validator with a TypeError. The match cross-check lives inside main(),
+// which isn't exported (it's a script, not a module of pure helpers), so this
+// drives the real CLI over a temp fixture — same pattern as
+// validate_dungeon.test.mjs's runValidator.
+// ============================================================================
+
+function runValidator(pack) {
+  const dir = mkdtempSync(join(tmpdir(), 'fw-pack-'));
+  try {
+    const packPath = join(dir, 'pack.json');
+    writeFileSync(packPath, JSON.stringify(pack));
+    const res = spawnSync(process.execPath, [SCRIPT, packPath], { encoding: 'utf8' });
+    return { status: res.status, out: `${res.stdout}${res.stderr}` };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function packWithMatch(options, answer = [['x', 'b']]) {
+  return {
+    meta: { id: 'test-pack' },
+    facts: [],
+    encounters: [
+      { id: 'enc.match.bad', kind: 'match', fact_ids: [], prompt: 'p', options, answer },
+    ],
+    quests: [],
+    metaphor_map: {},
+  };
+}
+
+test('a match encounter with a non-array LEFT option column is reported, not a crash', () => {
+  const { status, out } = runValidator(packWithMatch([{}, ['b', 'c']]));
+  assert.equal(status, 1);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /\[enc\.match\.bad\] match options\[0\] and options\[1\] must both be arrays/);
+  assert.match(out, /PACK VALIDATION FAILED/);
+});
+
+test('a match encounter with a non-array RIGHT option column is reported, not a crash', () => {
+  // pair[0] ('a') must be found in the (valid) left column so evaluation
+  // reaches the right column's .includes() call instead of short-circuiting
+  // past it on the left check alone.
+  const { status, out } = runValidator(packWithMatch([['a'], 5], [['a', 'z']]));
+  assert.equal(status, 1);
+  assert.ok(!/TypeError/.test(out), `expected a clean validation error, not a crash:\n${out}`);
+  assert.match(out, /\[enc\.match\.bad\] match options\[0\] and options\[1\] must both be arrays/);
 });

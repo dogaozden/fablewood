@@ -204,11 +204,15 @@ function main(packPathArg) {
         push(`[${e.id}] match options must be [colA, colB] and answer an array of pairs`);
       } else {
         const [left, right] = cols;
-        if (a.length !== left.length) push(`[${e.id}] match answer count != left column count`);
-        for (const pair of a) {
-          if (!Array.isArray(pair) || pair.length !== 2 ||
-              !left.includes(pair[0]) || !right.includes(pair[1])) {
-            push(`[${e.id}] match pair not drawn from the two columns: ${JSON.stringify(pair)}`);
+        if (!Array.isArray(left) || !Array.isArray(right)) {
+          push(`[${e.id}] match options[0] and options[1] must both be arrays`);
+        } else {
+          if (a.length !== left.length) push(`[${e.id}] match answer count != left column count`);
+          for (const pair of a) {
+            if (!Array.isArray(pair) || pair.length !== 2 ||
+                !left.includes(pair[0]) || !right.includes(pair[1])) {
+              push(`[${e.id}] match pair not drawn from the two columns: ${JSON.stringify(pair)}`);
+            }
           }
         }
       }
