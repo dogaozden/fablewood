@@ -41,7 +41,7 @@ export function difficultyOf(e: Encounter): EncounterDifficulty {
 export const DIFFICULTY_DEFS: Record<EncounterDifficulty, { name: string; glyph: string; tint: number }> = {
   1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
   2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
-  3: { name: 'Beacon', glyph: '■', tint: 0xfff1c6 },
+  3: { name: 'Beacon', glyph: '■', tint: 0xa65420 },
 };
 
 /** Short policy badge for the tier flyout: floors use +, T3's preference uses ?. */
