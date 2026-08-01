@@ -331,6 +331,36 @@ test.describe.serial('The Ledger Amended', () => {
       expect(recorded, `${old} is retired and must never be drilled`).not.toContain(old);
     }
   });
+
+  test('§6 the Library keeps both lines (⟳ marker); the Dashboard drops the old ones', async ({ page }) => {
+    await page.goto('/?seed=7');
+    await waitReady(page, 'boot');
+    await resetLedger(page);
+
+    // The Library: an amended fable keeps its row, marked, and stops reporting a review time.
+    await page.getByRole('button', { name: 'Library' }).click();
+    await expect(page.locator('.lib-fact').first()).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => page.locator('.lib-fact').count(), { message: 'every fixture fable is shelved' })
+      .toBe(10);
+    await expect(page.locator('.lib-fact.is-amended')).toHaveCount(4);
+    await expect(page.locator('.lib-amended')).toHaveCount(4);
+    for (const statement of OLD_STATEMENTS) {
+      const row = page.locator('.lib-fact', { hasText: statement });
+      await expect(row).toHaveClass(/is-amended/);
+      await expect(row.locator('.lib-due')).toHaveText('amended');
+    }
+    // the new truths are ordinary rows — unmarked, still scheduled
+    const newRow = page.locator('.lib-fact', { hasText: 'The bridge toll is five copper.' });
+    await expect(newRow).not.toHaveClass(/is-amended/);
+    await page.screenshot({ path: `${EV}/e2e-amended-library.png` });
+
+    // The Dashboard: 10 fixture facts, 4 superseded → the mastery aggregate counts 6.
+    await page.getByRole('button', { name: 'The Ledger' }).click();
+    await expect(page.locator('.dash-domain-count')).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.dash-domain-count')).toHaveText(/\/ 6 welded/);
+    await page.screenshot({ path: `${EV}/e2e-amended-dashboard.png` });
+  });
 });
 
 /** Answer whichever kind the overlay shows (fixture drills are mcq; kept general).
