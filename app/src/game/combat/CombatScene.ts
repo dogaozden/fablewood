@@ -944,7 +944,9 @@ export class CombatScene extends Phaser.Scene {
   private wardenObjection(attacker: UnitState, target: UnitState): boolean {
     if (!wardenObjects(null, target.isBoss, this.objectionSpent)) return false;
     this.objectionSpent = true;
-    this.floatText(target, OBJECTION_BANNER, P.waterLight);
+    // Banner only — the spec names a banner, and a float here sat directly over the riposte's
+    // own −1 on the adjacent attacker (they collided illegibly in the first e2e screenshot).
+    // The negation already reads on the board: the Warden's HP bar simply does not move.
     this.hud.showBanner(OBJECTION_BANNER, P.berry);
     this.actionLog.push({ action: 'objection', dmg: 0, overlay: false });
     this.damageUnit(attacker, OBJECTION_RIPOSTE, P.berry);
@@ -1170,8 +1172,15 @@ export class CombatScene extends Phaser.Scene {
       const outcome = resolveAction('strike', 1, { miraBonus, vsBoss: !!target?.isBoss });
       const before = this.enemyHpSum();
       this.attackerTell(unit, tile, ACTIONS.strike.tint);
+      // §9.3 — if the Warden Objected to this swing, HIS banner is the outcome; the Strike's
+      // own "a quick blow" line would otherwise overwrite it in the same frame and the player
+      // would never see why nothing happened. `objectionSpent` flipping across applyOutcome is
+      // exactly "the Objection was spent BY this action" (it is re-armed only at a round
+      // boundary, never mid-turn).
+      const objectedBefore = this.objectionSpent;
       this.applyOutcome(unit, 'strike', tile, outcome, target);
-      this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
+      const objected = this.objectionSpent && !objectedBefore;
+      if (!objected) this.hud.showBanner(outcome.banner, ACTIONS.strike.tint);
       const dealt = before - this.enemyHpSum();
       this.actionLog.push({ action: 'strike', dmg: dealt, overlay: false });
       // §5.1 Glow source 1 — a Strike that deals damage grants the party +1 Glow. `dealt` is
@@ -2580,6 +2589,13 @@ export class CombatScene extends Phaser.Scene {
       depth: this.views.get(id)?.container.depth ?? 0,
       statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
     };
+  }
+
+  /** Debug: the live initiative order, by unit id (e2e-only — §9.4: proves Call the Clause's
+   *  reinforcement was really APPENDED to `order` and is really reachable by the turn loop,
+   *  which a unit count alone would not show). */
+  orderDebug(): string[] {
+    return this.order.slice();
   }
 
   /** Debug: apply a status directly, bypassing spellcasting (e2e-only — Phase 2 wires real
