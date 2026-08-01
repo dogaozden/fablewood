@@ -7,7 +7,7 @@
  * that kind straight from the fixture (how shot.mjs / e2e capture each one without combat).
  */
 import { services, type EncounterRequest, type EncounterResult, type FactLite } from '../contracts';
-import type { Fact, Pack } from '../../packs/types';
+import type { EncounterDifficulty, Fact, Pack } from '../../packs/types';
 import { getPacks } from '../../bridge/client';
 import { pick, reskin, stampDifficulty } from './engine';
 import { presentEncounter, presentTeaching, presentNightLedger } from './overlay';
@@ -66,13 +66,23 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
   if (kind) {
     const seedParam = Number(new URLSearchParams(window.location.search).get('seed'));
     const seed = Number.isFinite(seedParam) && seedParam !== 0 ? seedParam : 7;
+    // Optional `&difficulty=1|2|3` (difficulty-rewards.md §7): forces the drawn tier so the
+    // eyebrow's difficulty span can be shot at every tier without a classified pack. The
+    // fixture encounters carry no `difficulty`, so without this every dev overlay renders
+    // Lantern (difficultyOf's `?? 2`). Applied BEFORE reskin — reskin structuredClones its
+    // input, so the override rides through untouched; omitting the param is a no-op, which
+    // is why the existing ?overlay= specs are unaffected.
+    const forcedParam = Number(new URLSearchParams(window.location.search).get('difficulty'));
+    const forced: EncounterDifficulty | undefined =
+      forcedParam === 1 || forcedParam === 2 || forcedParam === 3 ? forcedParam : undefined;
     const openDevOverlay = (): void => {
       if (kind === 'teaching') {
         void presentTeaching(FIXTURE_TEACHING);
         return;
       }
-      const enc = FIXTURE_PACK.encounters.find((e) => e.kind === kind);
-      if (!enc) return;
+      const found = FIXTURE_PACK.encounters.find((e) => e.kind === kind);
+      if (!found) return;
+      const enc = forced === undefined ? found : { ...found, difficulty: forced };
       const facts = factsFor(enc.fact_ids, FIXTURE_PACK);
       void presentEncounter(reskin(enc, seed), facts, { context: 'drill', judge: services.judge });
     };

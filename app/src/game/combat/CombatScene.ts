@@ -553,9 +553,18 @@ export class CombatScene extends Phaser.Scene {
     try {
       const { packs } = await getPacks();
       const entry = packs.find((pk) => pk.id === this.launch.packId);
+      // difficulty-rewards.md §5's gate must describe the pack the PICKER actually draws
+      // from, not the launch's nominal packId. encounters/engine.ts's pick() resolves its
+      // source as `packs.find(id) ?? packs[0]`, so a fixture launch (packId 'dev-mosslore',
+      // installed nowhere) still draws real, classified encounters and stampDifficulty()
+      // stamps that pack's genuine tier into result.difficulty. Reading the flag off
+      // `entry` alone left the rider structurally dormant against real classified content —
+      // a live tier on the board with a dead gate behind it. Empty packs → undefined → false,
+      // so the zero-packs build is unchanged.
+      const gatePack = (entry ?? packs[0])?.pack as Pack | undefined;
+      this.packDifficultyClassified = gatePack?.meta?.difficultyClassified ?? false;
       if (entry) {
         const pack = entry.pack as Pack;
-        this.packDifficultyClassified = pack.meta.difficultyClassified ?? false;
         for (const f of pack.facts ?? []) {
           this.allFactIds.add(f.id);
           this.factTypeById.set(f.id, f.type);
@@ -2434,6 +2443,14 @@ export class CombatScene extends Phaser.Scene {
   debugSetGlow(pips: number): void {
     this.glow = { pips: Math.max(0, Math.min(GLOW_CAP, Math.floor(pips))) };
     this.refreshParty();
+  }
+
+  /** Debug: force the §5 classification gate (e2e-only, same spirit as debugSetGlow — isolates
+   *  the rider's math from whether a classified pack happens to be installed). loadContent()
+   *  normally derives this from `pack.meta.difficultyClassified`, which only resolves when the
+   *  launch packId matches an installed pack — never true for the dev/e2e fixture launch. */
+  debugSetPackReady(ready: boolean): void {
+    this.packDifficultyClassified = ready;
   }
 
   /** Debug: the tier flyout's current rows/Overglow state, if open (e2e-only — the flyout is

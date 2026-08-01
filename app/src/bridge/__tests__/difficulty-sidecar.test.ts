@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { listPacks } from '../plugin';
 import {
   applyDifficultySidecar,
@@ -13,7 +14,14 @@ import { riderBonus } from '../../game/combat/arts';
 import type { Encounter } from '../../packs/types';
 
 // A tiny 3-encounter pack, mirroring pack.json's shape at the fields the merge touches.
-function toyPack() {
+// Annotated (rather than inferred) so `meta.difficultyClassified` — the flag the merge SETS
+// and every assertion below reads — is part of the type instead of a widening surprise.
+interface ToyPack {
+  meta: { id: string; difficultyClassified?: boolean };
+  encounters: Array<{ id: string; kind: string; prompt: string; difficulty?: 1 | 2 | 3 }>;
+}
+
+function toyPack(): ToyPack {
   return {
     meta: { id: 'toy' },
     encounters: [
@@ -165,5 +173,54 @@ describe('rider gate lit by the loader merge (non-dormant iff classified)', () =
       expect(difficultyOf(asEncounter(e))).toBe(2); // unmarked → Lantern
       expect(riderBonus(1, difficultyOf(asEncounter(e)), packReady)).toBe(0); // rider zero everywhere
     }
+  });
+});
+
+// The real P3 deliverable, guarded against silent regression: vc-law's committed sidecar must
+// keep FULL coverage. If a later pack pass adds an encounter without re-running
+// `--classify`, coverage drops, meta.difficultyClassified goes false, and the rider silently
+// goes dormant across the whole game — the exact failure this asserts against. Resolved from
+// the repo root (not PACKS_DIR) and skipped when absent, so check:zero-packs stays green.
+const REPO_PACKS_DIR = path.resolve(fileURLToPath(import.meta.url), '../../../../../packs');
+const vcLawPresent = fs.existsSync(path.join(REPO_PACKS_DIR, 'vc-law', 'pack.json'));
+
+describe.skipIf(!vcLawPresent)('the real vc-law pack, loaded through listPacks', () => {
+  const loadVcLaw = () => {
+    const entry = listPacks(REPO_PACKS_DIR).find((p) => p.id === 'vc-law');
+    if (!entry) throw new Error('vc-law did not load from the repo packs dir');
+    return entry.pack as {
+      meta: { difficultyClassified?: boolean };
+      encounters: Array<{ id: string; kind: string; difficulty?: 1 | 2 | 3 }>;
+    };
+  };
+
+  it('carries a complete difficulty sidecar — every encounter classified, gate flipped true', () => {
+    const pack = loadVcLaw();
+    const unclassified = pack.encounters.filter((e) => e.difficulty === undefined).map((e) => e.id);
+    expect(unclassified, 'every vc-law encounter needs a sidecar entry').toEqual([]);
+    expect(pack.meta.difficultyClassified).toBe(true);
+  });
+
+  it('spans more than one tier — a uniform pack would make the rider meaningless', () => {
+    const tiers = new Set(loadVcLaw().encounters.map((e) => e.difficulty));
+    expect(tiers.size).toBeGreaterThan(1);
+  });
+
+  it('keeps free_recall off Beacon by default (§9.2 / veto 13 — friction economics)', () => {
+    const beaconFreeRecall = loadVcLaw().encounters.filter((e) => e.kind === 'free_recall' && e.difficulty === 3);
+    // §9.2 permits a genuine synthesis minority here; what it forbids is the old
+    // "free_recall → Beacon, uniformly" heuristic. Assert the shape, not zero.
+    const freeRecall = loadVcLaw().encounters.filter((e) => e.kind === 'free_recall');
+    expect(beaconFreeRecall.length).toBeLessThan(freeRecall.length / 2);
+  });
+
+  it('lights the rider on a real classified draw and keeps it dormant with the gate off', () => {
+    const pack = loadVcLaw();
+    const packReady = pack.meta.difficultyClassified ?? false;
+    const harder = pack.encounters.find((e) => (e.difficulty ?? 2) > 1);
+    if (!harder) throw new Error('no Lantern-or-harder encounter in vc-law');
+    const drawn = difficultyOf(harder as unknown as Encounter);
+    expect(riderBonus(1, drawn, packReady)).toBe(1); // T1 punching up into real content
+    expect(riderBonus(1, drawn, false)).toBe(0); // same draw, gate off → fully dormant
   });
 });
