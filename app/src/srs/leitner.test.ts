@@ -217,6 +217,20 @@ describe('record — history & purity', () => {
     expect(before.history).toHaveLength(frozenLen);
     expect(before.box).toBe(2);
   });
+
+  // `?? []` only guards null/undefined. A mangled srs.json whose history is any other
+  // non-array (a number, an object — SrsStore validates the `facts` container, never the
+  // entries) makes the spread throw "is not iterable", and it throws on EVERY subsequent
+  // answer too: the failed write never replaces the bad shape on disk, so that fact is
+  // permanently unanswerable. Heal it the way a corrupted box is healed.
+  it('rebuilds history from scratch when the persisted history is not an array', () => {
+    const mangled = { box: 3, next_due: NOW, history: 5 } as unknown as SrsEntry;
+    const r = record(mangled, 1, NOW, 'e1');
+    expect(r.box).toBe(4);
+    expect(r.history).toEqual([
+      { ts: new Date(NOW).toISOString(), quality: 1, encounter_id: 'e1' },
+    ]);
+  });
 });
 
 describe('boxOf & masteryAvg', () => {
@@ -231,6 +245,30 @@ describe('boxOf & masteryAvg', () => {
     expect(masteryAvg(s, [])).toBe(0);
     expect(masteryAvg(s, ['a', 'b'])).toBe(4); // (3+5)/2
     expect(masteryAvg(s, ['a', 'b', 'unseen'])).toBeCloseTo(8 / 3); // (3+5+0)/3
+  });
+
+  // A persisted box is only as trustworthy as the file it came from: SrsStore's shape
+  // check validates that `facts` is an object, never each entry, so a hand-edited or
+  // mangled srs.json can carry a non-number box straight into these two. masteryAvg
+  // accumulates with `+`, so a string box concatenated instead of adding — "0"+"3"+5
+  // = "035" → 17.5 — and that number is what the Dashboard and the companion mastery
+  // gate read. Same tolerance record() already applies to a corrupted box.
+  it('adds a numeric-string box arithmetically instead of concatenating it', () => {
+    const mangled = state({
+      a: { box: '3', next_due: NOW, history: [] } as unknown as SrsEntry,
+      b: entry(5, NOW),
+    });
+    expect(boxOf(mangled, 'a')).toBe(3);
+    expect(masteryAvg(mangled, ['a', 'b'])).toBe(4); // (3+5)/2, NOT "035"/2
+  });
+
+  it('treats an unparseable box as unseen instead of poisoning the average', () => {
+    const mangled = state({
+      a: { box: {}, next_due: NOW, history: [] } as unknown as SrsEntry,
+      b: entry(4, NOW),
+    });
+    expect(boxOf(mangled, 'a')).toBe(0);
+    expect(masteryAvg(mangled, ['a', 'b'])).toBe(2); // (0+4)/2, NOT NaN
   });
 });
 
