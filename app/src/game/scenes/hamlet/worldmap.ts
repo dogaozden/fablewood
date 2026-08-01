@@ -33,6 +33,10 @@ export interface LocationSpec {
   name: string;
   /** verb shown in the prompt, e.g. "talk to Berry" */
   prompt: string;
+  /** one line of Fable-written flavor, shown in the hover tooltip (fun-review §3.6b).
+   *  Verbatim per-location text; always paired with `name` (the in-code display name,
+   *  which wins over any differing name implied by the flavor line itself). */
+  blurb: string;
   /** approach point the player walks to (world px) */
   door: { x: number; y: number };
   /** building centre, for the facing check (world px) */
@@ -74,6 +78,7 @@ interface Building {
   id: LocationId;
   name: string;
   prompt: string;
+  blurb: string;
   key: string;
   c0: number;
   r0: number;
@@ -83,11 +88,16 @@ interface Building {
   door: [number, number];
 }
 
+// Hover-tooltip flavor (fun-review §3.6b), Fable-written, transcribed verbatim. Two of the
+// six source lines named the location differently before their em-dash than this file's own
+// `name` ("The Keeper's Cottage" vs "Keeper's Cottage" below; "Mira's Post" vs "Mira the
+// Factor" on the factor location further down) — per spec the in-code `name` wins, so only
+// the flavor half (after the em-dash) is kept here; `name` is unchanged. Flagged for the author.
 const BUILDINGS: Building[] = [
-  { id: 'cottage', name: "Keeper's Cottage", prompt: 'rest & record', key: 'prop.cottage', c0: 3, r0: 2, w: 3, h: 2, door: [4, 4] },
-  { id: 'tavern', name: 'The Gilded Acorn', prompt: 'call on Berry', key: 'prop.tavern', c0: 15, r0: 2, w: 3, h: 2, door: [16, 4] },
-  { id: 'records', name: 'The Records Office', prompt: 'consult the Clerk', key: 'prop.records-office', c0: 2, r0: 9, w: 3, h: 2, door: [3, 11] },
-  { id: 'gate', name: 'The South Gate', prompt: 'set out', key: 'prop.south-gate', c0: 14, r0: 10, w: 3, h: 2, door: [15, 12] },
+  { id: 'cottage', name: "Keeper's Cottage", prompt: 'rest & record', blurb: 'a small door, a warm lamp, the flame well tended.', key: 'prop.cottage', c0: 3, r0: 2, w: 3, h: 2, door: [4, 4] },
+  { id: 'tavern', name: 'The Gilded Acorn', prompt: 'call on Berry', blurb: "ale, rumor, and the day's third-best advice.", key: 'prop.tavern', c0: 15, r0: 2, w: 3, h: 2, door: [16, 4] },
+  { id: 'records', name: 'The Records Office', prompt: 'consult the Clerk', blurb: 'where the Clerk keeps what the Realm forgets.', key: 'prop.records-office', c0: 2, r0: 9, w: 3, h: 2, door: [3, 11] },
+  { id: 'gate', name: 'The South Gate', prompt: 'set out', blurb: 'the road answers, if you brought some.', key: 'prop.south-gate', c0: 14, r0: 10, w: 3, h: 2, door: [15, 12] },
 ];
 
 /** Build the whole clearing. Deterministic — same layout every call. */
@@ -128,6 +138,7 @@ export function buildHamlet(): HamletMap {
       id: b.id,
       name: b.name,
       prompt: b.prompt,
+      blurb: b.blurb,
       door: tc(b.door[0], b.door[1]),
       center: { x: bx, y: (b.r0 + b.h / 2) * TILE },
       label: { x: bx, y: b.r0 * TILE - 4 },
@@ -142,6 +153,7 @@ export function buildHamlet(): HamletMap {
     id: 'wellspring',
     name: 'The Wellspring',
     prompt: 'draw a bounty',
+    blurb: 'old light rises where the first Oath was written.',
     door: tc(10, 8),
     center: { x: wellX, y: wellY },
     label: { x: wellX, y: 5 * TILE - 4 },
@@ -176,6 +188,7 @@ export function buildHamlet(): HamletMap {
     id: 'factor',
     name: 'Mira the Factor',
     prompt: 'weigh the wares',
+    blurb: 'the Factor weighs your gold, and now and then your judgment.',
     door: tc(18, 9),
     center: { x: 18 * TILE + TILE / 2, y: 8 * TILE + TILE / 2 },
     label: { x: 18 * TILE + TILE / 2, y: 8 * TILE - 12 },

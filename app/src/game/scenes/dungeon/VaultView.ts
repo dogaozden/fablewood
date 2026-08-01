@@ -36,6 +36,10 @@ export class VaultView {
   private handlers?: NodeHandlers;
   private headerText?: Phaser.GameObjects.Text;
   private statusText?: Phaser.GameObjects.Text;
+  private tooltipCont?: Phaser.GameObjects.Container;
+  private tooltipBg?: Phaser.GameObjects.Graphics;
+  private tooltipName?: Phaser.GameObjects.Text;
+  private tooltipBlurb?: Phaser.GameObjects.Text;
 
   constructor(private scene: Phaser.Scene) {}
 
@@ -83,6 +87,97 @@ export class VaultView {
       })
       .setOrigin(1, 0.5)
       .setDepth(6);
+
+    this.buildTooltip();
+  }
+
+  /**
+   * Hover/focus tooltip for map nodes (fun-review §3.6a: "names visible on hover
+   * everywhere, one line of flavor per node"). Built once, retexted/repositioned per
+   * hover — a parchment callout above the node, never on top of it, so it can never
+   * obstruct the node's own click: Phaser only hit-tests objects that opt into
+   * setInteractive() (this tooltip never does), so drawing over a node can't steal
+   * its pointerdown regardless of z-order.
+   */
+  private buildTooltip(): void {
+    const s = this.scene;
+    const cont = s.add.container(0, 0).setDepth(60).setAlpha(0);
+    const bg = s.add.graphics();
+    const name = s.add
+      .text(0, 0, '', {
+        fontFamily: FONT,
+        fontSize: '15px',
+        color: hex(C.barkShadow),
+        fontStyle: 'bold',
+        align: 'center',
+      })
+      .setOrigin(0.5, 0);
+    const blurb = s.add
+      .text(0, 0, '', {
+        fontFamily: FONT,
+        fontSize: '12px',
+        color: hex(C.darkBark),
+        align: 'center',
+        lineSpacing: 3,
+        wordWrap: { width: 200 },
+      })
+      .setOrigin(0.5, 0);
+    cont.add([bg, name, blurb]);
+    this.tooltipCont = cont;
+    this.tooltipBg = bg;
+    this.tooltipName = name;
+    this.tooltipBlurb = blurb;
+  }
+
+  /** Show the tooltip above a node centred at (cx,cy) with body radius r. `blurb` optional
+   *  (the Camp has no pack-provided flavor — name alone still shows, "everywhere" per §3.6a). */
+  private showNodeTooltip(cx: number, cy: number, r: number, name: string, blurb?: string): void {
+    if (!this.tooltipCont || !this.tooltipBg || !this.tooltipName || !this.tooltipBlurb) return;
+    const s = this.scene;
+    this.tooltipName.setText(name);
+    this.tooltipBlurb.setText(blurb ?? '').setVisible(!!blurb);
+    const padX = 14;
+    const padY = 10;
+    const gap = blurb ? 6 : 0;
+    const contentW = Math.max(this.tooltipName.width, blurb ? this.tooltipBlurb.width : 0);
+    const w = Math.min(240, contentW + padX * 2);
+    this.tooltipName.setWordWrapWidth(w - padX * 2);
+    this.tooltipBlurb.setWordWrapWidth(w - padX * 2);
+    const h = this.tooltipName.height + (blurb ? this.tooltipBlurb.height + gap : 0) + padY * 2;
+    // clamp horizontally so edge nodes (camp, boss) never spill the tooltip off-canvas
+    const clampedCx = Phaser.Math.Clamp(cx, w / 2 + 8, W - w / 2 - 8);
+    const bottomY = cy - r - 14; // sits above the node — never over its clickable circle
+    const topY = bottomY - h;
+
+    this.tooltipBg.clear();
+    this.tooltipBg.fillStyle(C.voidBlack, 0.3).fillRoundedRect(clampedCx - w / 2 - 2, topY - 2, w + 4, h + 6, 12);
+    this.tooltipBg.fillStyle(C.parchment, 0.97).fillRoundedRect(clampedCx - w / 2, topY, w, h, 10);
+    this.tooltipBg.lineStyle(2, C.bark, 1).strokeRoundedRect(clampedCx - w / 2, topY, w, h, 10);
+    if (blurb) {
+      // lanternGold accent hairline between name and blurb (goldRule's idiom, miniaturized)
+      this.tooltipBg
+        .fillStyle(C.lanternGold, 0.8)
+        .fillRect(clampedCx - w / 2 + 12, topY + padY + this.tooltipName.height + gap / 2 - 1, w - 24, 2);
+    }
+    this.tooltipName.setPosition(clampedCx, topY + padY);
+    this.tooltipBlurb.setPosition(clampedCx, topY + padY + this.tooltipName.height + gap);
+
+    s.tweens.killTweensOf(this.tooltipCont);
+    s.tweens.add({ targets: this.tooltipCont, alpha: 1, duration: 140, ease: 'Quad.out' });
+  }
+
+  private hideNodeTooltip(): void {
+    if (!this.tooltipCont) return;
+    this.scene.tweens.killTweensOf(this.tooltipCont);
+    this.scene.tweens.add({ targets: this.tooltipCont, alpha: 0, duration: 120 });
+  }
+
+  /** Debug: the hover tooltip's live alpha + rendered name/blurb (e2e-only — Phaser-drawn,
+   *  not DOM, so a spec can't read this via a locator; mirrors CombatHud's bannerText()/
+   *  flyoutBounds() idiom). */
+  tooltipDebug(): { alpha: number; name: string; blurb: string } | null {
+    if (!this.tooltipCont || !this.tooltipName || !this.tooltipBlurb) return null;
+    return { alpha: this.tooltipCont.alpha, name: this.tooltipName.text, blurb: this.tooltipBlurb.text };
   }
 
   private lanterns(): void {
@@ -255,7 +350,7 @@ export class VaultView {
       c.add([glow, tent, fire]);
     }
     c.add(this.label(0, 38, 'The Camp', C.parchment));
-    this.makeInteractive(c, 30, onClick);
+    this.makeInteractive(c, 30, onClick, { name: 'The Camp' });
     return c;
   }
 
@@ -317,7 +412,7 @@ export class VaultView {
     c.add(this.label(0, r + 16, room.name, labelColor));
 
     // every room node is interactive; the scene decides behaviour by state
-    this.makeInteractive(c, r, onClick);
+    this.makeInteractive(c, r, onClick, { name: room.name, blurb: room.blurb });
     return c;
   }
 
@@ -333,11 +428,22 @@ export class VaultView {
       .setOrigin(0.5, 0);
   }
 
-  private makeInteractive(c: Phaser.GameObjects.Container, r: number, onClick: () => void): void {
+  private makeInteractive(
+    c: Phaser.GameObjects.Container,
+    r: number,
+    onClick: () => void,
+    tip?: { name: string; blurb?: string },
+  ): void {
     c.setSize(r * 2 + 8, r * 2 + 8);
     c.setInteractive({ useHandCursor: true });
-    c.on('pointerover', () => c.setScale(1.07));
-    c.on('pointerout', () => c.setScale(1));
+    c.on('pointerover', () => {
+      c.setScale(1.07);
+      if (tip) this.showNodeTooltip(c.x, c.y, r, tip.name, tip.blurb);
+    });
+    c.on('pointerout', () => {
+      c.setScale(1);
+      if (tip) this.hideNodeTooltip();
+    });
     c.on('pointerdown', () => onClick());
   }
 
