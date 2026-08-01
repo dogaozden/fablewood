@@ -69,4 +69,4 @@ Test fixture: a tiny fixture pack carrying one superseded pair — vc-law needs 
 
 ## 10. Defaulted calls (veto anytime)
 
-1. Gentleness window = first graded appearance only (not first day). 2. Batch cap = 3. 3. Old fact draws until witnessed. 4. Dashboard marker `⟳` pending the author's one-worder. 5. Witness store is its own small file, not a new field in srs.json (keeps the sacred file untouched).
+1. Gentleness window = first graded appearance only (not first day). 2. Batch cap = 3. 3. Both truths suspended from pack load until witnessed (first draft said "old fact draws until witnessed" — overturned by the amended §4). 4. Dashboard marker `⟳` pending the author's one-worder. 5. Witness store is its own small file, not a new field in srs.json (keeps the sacred file untouched).
