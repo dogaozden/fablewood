@@ -21,8 +21,14 @@ export async function useItem(store: InventoryStore, id: string): Promise<UseRes
     const cur = services.save.get().hp ?? MAX_HP;
     const next = Math.max(0, Math.min(MAX_HP, cur + effect.amount));
     if (next === cur) return { ok: false, message: 'Already at full vigor.' };
+    // Remove FIRST and respect the result: store.remove() re-reads the freshest
+    // stock before deciding, so it is the true arbiter of "did we actually get
+    // one" under a race (two in-flight Use calls on the last item in a stack).
+    // No removal, no effect — applying the heal before/without checking this
+    // let a losing racer still persist a heal from an item it never got.
+    const removed = await store.remove(id, 1);
+    if (!removed) return { ok: false, message: 'You have none left.' };
     await services.save.save({ hp: next });
-    await store.remove(id, 1);
     return { ok: true, message: `Restored ${next - cur} vigor.` };
   }
   if (effect.kind === 'glow') {
