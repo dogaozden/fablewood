@@ -1,6 +1,6 @@
 # The Ledger Amended — Supersession Re-teach Event
 
-**Status: DESIGN FINAL (Fable, 2026-08-01). Execute-ready. Builder assignment BLOCKED on the Opus-lane freeze — do not implement with a lesser model without the author's say-so.**
+**Status: DESIGN FINAL (Fable, 2026-08-01). Execute-ready. Builder ASSIGNED 2026-08-01: Opus 5 (freeze lifted after in-session verification — alias serves claude-opus-5[1m]).**
 Closes knowledge-platform-vision.md §9 item 3 (the schema/validator half shipped at `faeb11f`; this is the game-event half).
 
 ## 1. What exists, what's missing
