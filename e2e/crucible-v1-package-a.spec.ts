@@ -43,9 +43,16 @@ async function answerGateWrong(page: Page): Promise<void> {
   await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
   await page.locator('.fw-textarea').fill('zzz completely unrelated nonsense zzz qqq');
   await page.getByRole('button', { name: 'Cast' }).click();
-  await page.waitForTimeout(300);
+  // Cast awaits an async judge round-trip (kinds.ts's renderFreeRecall submit() calls
+  // ctx.judge(), a POST to the dev bridge's /api/judge) before the verdict + Onward button
+  // render — under CPU starvation (parallel agent fleets) that round-trip balloons past a
+  // fixed delay. A fixed 300ms wait + single-shot count() check caught the button not yet
+  // rendered and silently skipped the click forever, stranding runGate's pending encounter
+  // promise. Wait for it instead of sampling once — same hardening family as
+  // boss-victory.spec.ts's driveParley (commit 50d7216).
   const cont = page.getByRole('button', { name: 'Onward ▸' });
-  if (await cont.count()) await cont.click();
+  await cont.waitFor({ state: 'visible', timeout: 10_000 });
+  await cont.click();
   await page.waitForTimeout(250);
 }
 
@@ -120,7 +127,20 @@ test('V1-3: a gate-exhausted retreat persists scene:hamlet before the visual tra
     // hp should now read 0 (1 - GATE_FAIL_HP) and the Fade-closes-in branch should have
     // ALREADY persisted scene:'hamlet' — poll immediately rather than waiting for the ~1s
     // visual transition, which is exactly the gap the pre-fix bug lived in.
-    const save = await waitForState<Save>(page, 'save.json', (d) => d?.hp === 0, 10_000);
+    //
+    // runGate() (DungeonScene.ts) persists this in TWO separate awaited save() calls:
+    // applyHp() writes {hp} first, then (after a services.save.get() readback + a toast)
+    // a second call writes {scene:'hamlet'}. Under CPU starvation the gap between those two
+    // awaited round-trips balloons, and a poll keyed on hp alone can catch save.json mid-gap
+    // (hp already 0, scene still 'vaults') — confirmed empirically under 8-burner load. Poll
+    // for the FULL settled condition, not just the half that lands first — same hardening
+    // family as boss-victory.spec.ts's driveParley (commit 50d7216).
+    const save = await waitForState<Save>(
+      page,
+      'save.json',
+      (d) => d?.hp === 0 && d?.scene === 'hamlet',
+      10_000,
+    );
     expect(
       save?.scene,
       'V1-3: scene:hamlet persisted the moment hp hit 0, not only after the visual transition',
