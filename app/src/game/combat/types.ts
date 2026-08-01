@@ -40,12 +40,11 @@ export interface UnitState extends Coord {
   ranged: boolean;
   /** can be Parley'd */
   parley: boolean;
-  /** parley "weaken" stacks here as negative atk; also used for skip */
-  skipNextTurn: boolean;
-  /** NEW (§2) — always [] at spawn; replaces skipNextTurn + Parley's permanent attack-1 for
-   *  new call sites. skipNextTurn itself is KEPT one release for save-less migration ease
-   *  (deleted Phase 3) — reads/writes for the new status system all go through
-   *  hasStatus(u,'staggered') instead. */
+  /** §2/§3 — always [] at spawn. Phase 1 introduced this and migrated every read/write off the
+   *  old `skipNextTurn` boolean and Parley's permanent attack−1 onto statuses; Phase 3 deleted
+   *  the field itself (spec §2's "Delete the field in Phase 3"). "Skips its next turn" is now
+   *  `hasStatus(u.statuses, 'staggered')`, applied/consumed by status.ts. Never persisted (§14
+   *  — per-battle only). */
   statuses: StatusInstance[];
   /** NEW (§4.2) — one opportunity strike DEALT per unit per round; reset each new round. */
   oaSpent: boolean;

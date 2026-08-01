@@ -5,10 +5,12 @@ import {
   blocksSight, forceMove, type TileGrid, type ForceMoveBoard,
 } from '../grid';
 import { resolveAction, isFlanked } from '../damage';
-import { SPELLBOOK, resolveSpell } from '../spells';
-import { applyBranch, reduceShields, bossDefeated, wardenAbsorbs } from '../boss';
+import { SPELLBOOK, resolveSpell, type SpellId } from '../spells';
+import {
+  applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
+} from '../boss';
 import { decideEnemy, occupancyExcept, opportunityStrikers, carefulStepMove } from '../ai';
-import { makeKeeper, makeMira, makeEnemy, ENEMY_STATS } from '../units';
+import { makeKeeper, makeMira, makeEnemy, ENEMY_STATS, WARDEN_BOSS_HP } from '../units';
 import { key, manhattan, GRID_W, GRID_H, type UnitState, type TileType } from '../types';
 import { usableSatchelItems, resolveHealUse } from '../satchel';
 import { itemById } from '../../../inventory/catalog';
@@ -273,13 +275,180 @@ describe('boss reducers', () => {
     expect(bossDefeated(2, 0)).toBe(true);
     expect(bossDefeated(2, 8)).toBe(false);
   });
-  it('shielded Warden absorbs every non-Cast blow (boss questions stay mandatory)', () => {
-    expect(wardenAbsorbs('strike', true, 3)).toBe(true); // free Strike can't brute-force the boss
-    expect(wardenAbsorbs('smite', true, 3)).toBe(true);
-    expect(wardenAbsorbs('weave', true, 1)).toBe(true);
-    expect(wardenAbsorbs('cast', true, 3)).toBe(false); // only Cast pierces the shields
-    expect(wardenAbsorbs('strike', true, 0)).toBe(false); // shields gone → already beaten
-    expect(wardenAbsorbs('strike', false, 3)).toBe(false); // a regular enemy just takes the hit
+  it('shielded Warden absorbs every blow without a strip-shield rider (boss questions stay mandatory)', () => {
+    expect(wardenAbsorbs(null, true, 3)).toBe(true); // free Strike can't brute-force the boss
+    expect(wardenAbsorbs(SPELLBOOK.smite, true, 3)).toBe(true);
+    expect(wardenAbsorbs(SPELLBOOK.weave, true, 1)).toBe(true);
+    expect(wardenAbsorbs(SPELLBOOK.cast, true, 3)).toBe(false); // Attestation pierces the shields
+    expect(wardenAbsorbs(null, true, 0)).toBe(false); // shields gone → already beaten
+    expect(wardenAbsorbs(null, false, 3)).toBe(false); // a regular enemy just takes the hit
+  });
+
+  // §9.2 / trap 10 — the spec's own Phase-3 verification item: the FULL absorb matrix, every
+  // one of the 15 spells against a shielded Warden. The point of moving the gate off the
+  // 'cast' STRING and onto SpellDef.bossRider is that Attested Ward and Verbatim Decree must
+  // pierce (they are Attestation too) while sharing the 'cast' button is NOT what earns it.
+  it('absorb-flag matrix: exactly the three bossRider spells pierce a shielded Warden (§9.2)', () => {
+    const pierce: SpellId[] = [];
+    const bounce: SpellId[] = [];
+    for (const id of Object.keys(SPELLBOOK) as SpellId[]) {
+      (wardenAbsorbs(SPELLBOOK[id], true, 3) ? bounce : pierce).push(id);
+    }
+    expect(pierce.sort()).toEqual(['attested-ward', 'cast', 'verbatim-decree']);
+    expect(bounce.sort()).toEqual([
+      'cinder-rebuke', 'heartening-word', 'injunction', 'lanternfall', 'lattice',
+      'parley', 'processional', 'rite-of-sealing', 'sequence', 'smite', 'snare-knot', 'weave',
+    ]);
+    // …and all 15 are accounted for, so a newly added spell can never silently skip this test.
+    expect(pierce.length + bounce.length).toBe(15);
+  });
+
+  it('every Attestation tier pierces at every shield count; every other Art bounces (§9.2)', () => {
+    for (const shields of [1, 2, 3]) {
+      for (const id of Object.keys(SPELLBOOK) as SpellId[]) {
+        const spell = SPELLBOOK[id];
+        expect(wardenAbsorbs(spell, true, shields), `${id} @ ${shields} shields`)
+          .toBe(spell.art !== 'attestation');
+      }
+    }
+  });
+});
+
+// §9.3/§9.4 — the reforged Warden's own reducers. Pure; the scene applies them.
+describe('the Warden reforged (§9)', () => {
+  it('Objection! fires on the free lane and is once per round', () => {
+    expect(wardenObjects(null, true, false)).toBe(true);   // first free-lane blow this round
+    expect(wardenObjects(null, true, true)).toBe(false);   // already spent this round
+    expect(wardenObjects(null, false, false)).toBe(false); // a regular enemy never objects
+    expect(wardenObjects(null, undefined, false)).toBe(false);
+  });
+
+  // ---- THE S4 TEST ----------------------------------------------------------------------
+  // Soul guarantee S4: "A correct answer always pays — no enemy mechanic may void the payoff
+  // of a correctly answered question. The Warden's Objection counters only FREE actions, by
+  // design — knowledge always lands." This is the guarantee the whole feature is built to
+  // protect, so it is asserted exhaustively rather than by sample: every spell, every tier,
+  // every Art, in both the fresh and spent states.
+  it('S4 — Objection NEVER fires on an Art: all 15 spells × both Objection states', () => {
+    const ids = Object.keys(SPELLBOOK) as SpellId[];
+    expect(ids.length).toBe(15);
+    for (const id of ids) {
+      for (const spent of [false, true]) {
+        expect(wardenObjects(SPELLBOOK[id], true, spent), `${id} (objectionSpent=${spent})`).toBe(false);
+      }
+    }
+    // The same free-lane swing at the same instant DOES get lawyered — proving the assertions
+    // above fail closed on the spell argument alone, not because the fixture was inert.
+    expect(wardenObjects(null, true, false)).toBe(true);
+  });
+
+  it('§9.4 phase script: Writ of Seizure in phase 1, Crown Injunction every OTHER turn from phase 2', () => {
+    // Phase 1 (phaseIndex 0) is his base kit on every turn, no matter the turn count.
+    for (const t of [1, 2, 3, 4]) {
+      expect(wardenMove({ phaseIndex: 0, wardenTurns: t, clauseAvailable: false })).toBe('seizure');
+    }
+    // Phase 2+ alternates: his 1st/3rd turn is a blow, his 2nd/4th is the Injunction.
+    expect(wardenMove({ phaseIndex: 1, wardenTurns: 1, clauseAvailable: false })).toBe('seizure');
+    expect(wardenMove({ phaseIndex: 1, wardenTurns: 2, clauseAvailable: false })).toBe('injunction');
+    expect(wardenMove({ phaseIndex: 1, wardenTurns: 3, clauseAvailable: false })).toBe('seizure');
+    expect(wardenMove({ phaseIndex: 1, wardenTurns: 4, clauseAvailable: false })).toBe('injunction');
+  });
+
+  it('§9.4 Call the Clause: phase 3+ only, and only while actually available', () => {
+    expect(wardenMove({ phaseIndex: 1, wardenTurns: 1, clauseAvailable: true })).not.toBe('summon');
+    expect(wardenMove({ phaseIndex: 2, wardenTurns: 1, clauseAvailable: true })).toBe('summon');
+    // Once spent (or with a clause-wisp still alive / no free spawn tile) the script falls back.
+    expect(wardenMove({ phaseIndex: 2, wardenTurns: 1, clauseAvailable: false })).toBe('seizure');
+    expect(wardenMove({ phaseIndex: 2, wardenTurns: 2, clauseAvailable: false })).toBe('injunction');
+  });
+
+  it('§9.5 move labels: engine-generic by default, pack-relabelable, blank relabels ignored', () => {
+    expect(wardenMoveLabel('seizure')).toBe('Writ of Seizure');
+    expect(wardenMoveLabel('injunction')).toBe('Crown Injunction');
+    expect(wardenMoveLabel('summon')).toBe('Call the Clause');
+    expect(wardenMoveLabel('injunction', { injunction: "Injunction of the '33 Codex" }))
+      .toBe("Injunction of the '33 Codex");
+    // a partial map only overrides what it names
+    expect(wardenMoveLabel('seizure', { injunction: 'x' })).toBe('Writ of Seizure');
+    // whitespace-only is not a label
+    expect(wardenMoveLabel('summon', { summon: '   ' })).toBe('Call the Clause');
+  });
+
+  it('§9.1 boss HP 12: the fallback kill still costs two apex q1 answers, and one Decree never suffices', () => {
+    expect(WARDEN_BOSS_HP).toBe(12);
+    // Verbatim Decree deals 6 vs a boss (§7's vsBossHits), not its usual 8.
+    const decree = resolveSpell(SPELLBOOK['verbatim-decree'], 1, { primaryTargetId: 'warden', vsBoss: true })
+      .find((o) => o.op === 'damage');
+    expect(decree).toMatchObject({ op: 'damage', amount: 6 });
+    expect(6).toBeLessThan(WARDEN_BOSS_HP);   // one Decree cannot end him — phases stay mandatory
+    expect(6 * 2).toBeGreaterThanOrEqual(WARDEN_BOSS_HP); // two apex q1 answers do
+    // Even upcast to the ceiling (Overglow +1, weld +1, rider +1, Mira +1) a single q1 Decree
+    // leaves him standing — the negotiation can never be skipped by one perfect answer.
+    const maxed = resolveSpell(SPELLBOOK['verbatim-decree'], 1, {
+      primaryTargetId: 'warden', vsBoss: true, overglow: true, weld: true, rider: true, miraBonus: 1,
+    }).find((o) => o.op === 'damage') as { amount: number };
+    expect(maxed.amount).toBeLessThan(WARDEN_BOSS_HP);
+    // The room's regular 'warden' archetype trash (the Root-Husk) is NOT reforged with him.
+    expect(ENEMY_STATS.warden.hp).toBe(8);
+  });
+});
+
+// §9.4 — appending a mid-battle reinforcement to the initiative order must not break the
+// turn cursor. nextInOrder reads order.length fresh on every call, so a grown array is safe.
+describe('spawnReinforcement initiative wrap-safety (§9.4)', () => {
+  const allAlive = () => true;
+
+  it('an id appended mid-round is reached, without disturbing the cursor', () => {
+    const order = ['keeper', 'mira', 'warden'];
+    // cursor sits on the Warden (index 2) — the turn on which he calls the clause
+    order.push('wisp-3');
+    expect(nextInOrder(order, 2, allAlive)).toEqual({ id: 'wisp-3', index: 3, newRound: false });
+    // and the round still wraps correctly one slot later, with the grown length
+    expect(nextInOrder(order, 3, allAlive)).toEqual({ id: 'keeper', index: 0, newRound: true });
+  });
+
+  it('appending while the cursor is on the OLD last index never runs off the end', () => {
+    const order = ['keeper', 'warden'];
+    const fromIndex = 1; // the old final slot
+    order.push('wisp-2');
+    const next = nextInOrder(order, fromIndex, allAlive);
+    expect(next).not.toBeNull();
+    expect(next!.index).toBeLessThan(order.length);
+    expect(next!.id).toBe('wisp-2');
+  });
+
+  // The exhaustive statement of the safety property, over every cursor a spawn can actually
+  // produce. `orderIndex` is only ever assigned from a previous nextInOrder result (already
+  // normalized into [0, len)) or the initial -1, and `order` only ever GROWS — so after any
+  // append the live cursor is always in [-1, oldLength-1], which is what this sweeps.
+  //
+  // NOTE (documented boundary, not a bug reachable from this feature): nextInOrder normalizes
+  // with a single `idx -= order.length`, not a modulo, so a cursor MORE than one length past
+  // the end would not be brought back into range. That needs the array to SHRINK, which
+  // nothing in combat ever does — spawnReinforcement only appends, and units are removed by
+  // dying (alive:false), never by splicing out of `order`.
+  it('every cursor an append can produce stays in bounds and returns a real id', () => {
+    for (let oldLength = 1; oldLength <= 5; oldLength++) {
+      const order = Array.from({ length: oldLength }, (_, i) => `u${i}`);
+      for (let cursor = -1; cursor < oldLength; cursor++) {
+        order.push('wisp-clause');           // the mid-battle spawn
+        const next = nextInOrder(order, cursor, allAlive);
+        expect(next, `len ${oldLength}, cursor ${cursor}`).not.toBeNull();
+        expect(next!.index).toBeGreaterThanOrEqual(0);
+        expect(next!.index).toBeLessThan(order.length);
+        expect(order[next!.index]).toBe(next!.id);
+        order.pop();                          // reset for the next cursor
+      }
+    }
+  });
+
+  it('a dead spawn is skipped like any other unit, and the order never deadlocks', () => {
+    const order = ['keeper', 'warden', 'wisp-2'];
+    const alive = (id: string) => id !== 'wisp-2';
+    expect(nextInOrder(order, 1, alive)).toEqual({ id: 'keeper', index: 0, newRound: true });
+    // Reaching the lone survivor requires a full lap, so the wrap is correctly reported —
+    // which is what re-arms Objection and clears oaSpent for the round it starts.
+    expect(nextInOrder(order, 2, (id) => id === 'wisp-2')).toEqual({ id: 'wisp-2', index: 2, newRound: true });
   });
 });
 
