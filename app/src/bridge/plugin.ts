@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { PackEntry } from './types';
+import { applyDifficultySidecar, DIFFICULTY_SIDECAR_FILE, type DifficultyProvenance } from './difficulty';
 
 // --- Directory resolution (env overrides, cwd-relative defaults) -------------
 
@@ -21,7 +22,20 @@ export function stateDir(): string {
 
 // --- Packs (read-only, from disk at request time) ----------------------------
 
-/** List packs found at <dir>/<name>/pack.json. Missing dir → []. Bad JSON is skipped. */
+/** Read a pack's difficulty-classification sidecar (difficulty-rewards.md §8). Missing,
+ *  unreadable, or invalid JSON → null, so the loader leaves the pack unmarked — rider fully
+ *  dormant, every encounter Lantern(2). Never touches pack.json. */
+function readDifficultySidecar(packRoot: string): DifficultyProvenance | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(packRoot, DIFFICULTY_SIDECAR_FILE), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** List packs found at <dir>/<name>/pack.json. Missing dir → []. Bad JSON is skipped.
+ *  Each pack's difficulty sidecar (if present) is folded into the in-memory copy here so the
+ *  engine resolves real tiers without any change to the on-disk pack.json (§8, veto item 10). */
 export function listPacks(dir: string): PackEntry[] {
   let entries: fs.Dirent[];
   try {
@@ -32,9 +46,11 @@ export function listPacks(dir: string): PackEntry[] {
   const packs: PackEntry[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const file = path.join(dir, entry.name, 'pack.json');
+    const packRoot = path.join(dir, entry.name);
+    const file = path.join(packRoot, 'pack.json');
     try {
       const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
+      applyDifficultySidecar(pack, readDifficultySidecar(packRoot));
       const id =
         typeof pack?.meta?.id === 'string' ? (pack.meta.id as string) : entry.name;
       packs.push({ id, dir: entry.name, pack });
