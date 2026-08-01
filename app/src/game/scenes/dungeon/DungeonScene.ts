@@ -408,7 +408,7 @@ export class DungeonScene extends Phaser.Scene {
 
     // gate door must open before the node can clear
     if (room.gate) {
-      const gate = await this.runGate(room);
+      const gate = await this.runGate(room, outcome);
       if (gate.transitioned) return { transitioned: true };
     }
 
@@ -493,8 +493,10 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
-  /** free_recall gate: pass (≥0.5) opens; miss costs HP with immediate retry; HP-out = Fade retreat. */
-  private async runGate(room: DungeonRoom): Promise<{ transitioned: boolean }> {
+  /** free_recall gate: pass (≥0.5) opens; miss costs HP with immediate retry; HP-out = Fade retreat.
+   *  `outcome` is the room's already-won combat result (resolveCombat's caller), needed here so an
+   *  HP-out mid-gate can fold it into the Night's Ledger harvest, same as any other run-ending retreat. */
+  private async runGate(room: DungeonRoom, outcome: CombatOutcome): Promise<{ transitioned: boolean }> {
     const gate = room.gate!;
     for (let attempt = 0; attempt < 20; attempt++) {
       const res = await services.runEncounter({
@@ -524,6 +526,11 @@ export class DungeonScene extends Phaser.Scene {
         await services.save.save({ scene: 'hamlet' });
         this.view.toast('The Fade closes in — you wake at the hamlet camp.', 'warn');
         await this.wait(1000);
+        // §3.2 the Night's Ledger — a gate HP-out is a run-ending retreat too (fun-review follow-up:
+        // this path used to skip the ledger entirely). Mirror resolveCombat's own retreat branch:
+        // fold this room's already-won combat in with no gold (no loot on a retreat), then show it.
+        this.accrueHarvest(outcome, 0);
+        await this.runNightLedger('retreat', services.save.get().streak);
         this.scene.start('hamlet', { seed: this.seed });
         return { transitioned: true };
       }
