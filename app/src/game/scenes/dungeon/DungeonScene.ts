@@ -637,6 +637,12 @@ export class DungeonScene extends Phaser.Scene {
   private wait(ms: number): Promise<void> {
     return new Promise((resolve) => this.time.delayedCall(ms, resolve));
   }
+
+  /** Debug: the map node hover tooltip's live alpha + rendered name/blurb (e2e-only —
+   *  fun-review §3.6a; Phaser-drawn, not DOM, so a spec can't read this via a locator). */
+  tooltipDebug(): { alpha: number; name: string; blurb: string } | null {
+    return this.view.tooltipDebug();
+  }
 }
 
 // ---- helpers ----------------------------------------------------------------

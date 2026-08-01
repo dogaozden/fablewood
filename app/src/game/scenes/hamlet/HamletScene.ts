@@ -84,6 +84,15 @@ export class HamletScene extends Phaser.Scene {
   private labels = new Map<LocationId, Phaser.GameObjects.Text>();
   private prompt!: Phaser.GameObjects.Text;
 
+  // Mouse-hover tooltip (fun-review §3.6b: name + one line of flavor, independent of the
+  // walk-proximity `labels` above — a mouse can discover a location's name without the
+  // Keeper having to walk up to its door first).
+  private hoverCont!: Phaser.GameObjects.Container;
+  private hoverBg!: Phaser.GameObjects.Graphics;
+  private hoverName!: Phaser.GameObjects.Text;
+  private hoverBody!: Phaser.GameObjects.Text;
+  private hoveredLoc: LocationId | null = null;
+
   private facing: Facing = 'down';
   private walkT = 0;
   private busy = false;
@@ -112,6 +121,7 @@ export class HamletScene extends Phaser.Scene {
     this.buildNpcs();
     this.buildFireflies();
     this.buildPlayer();
+    this.buildHoverZones();
 
     // Follow camera over the zoomed world.
     const cam = this.cameras.main;
@@ -295,6 +305,26 @@ export class HamletScene extends Phaser.Scene {
     this.worldGroup.add(this.player);
   }
 
+  /** Mouse-hover hit zones (fun-review §3.6b) — one invisible Phaser Zone per named
+   *  location, world-space so it tracks the camera's zoom/scroll automatically like every
+   *  other world object. Added to worldGroup BEFORE create()'s uiCam.ignore(...) snapshot
+   *  (below) picks up its children, so the UI camera correctly ignores these too. Sized to
+   *  a generous typical building footprint; never gameplay-relevant (no physics body —
+   *  movement collision is the separate `solid` grid, untouched). */
+  private buildHoverZones(): void {
+    for (const loc of this.map.locations) {
+      const zone = this.add.zone(loc.center.x, loc.center.y, 48, 40).setOrigin(0.5);
+      zone.setInteractive({ useHandCursor: false });
+      zone.on('pointerover', () => {
+        this.hoveredLoc = loc.id;
+      });
+      zone.on('pointerout', () => {
+        if (this.hoveredLoc === loc.id) this.hoveredLoc = null;
+      });
+      this.worldGroup.add(zone);
+    }
+  }
+
   private buildUi(): void {
     this.uiRoot = this.add.container(0, 0).setDepth(10000);
 
@@ -328,6 +358,35 @@ export class HamletScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setAlpha(0);
     this.uiRoot.add(this.prompt);
+
+    // Hover tooltip (fun-review §3.6b) — matches the overlay/hud parchment register (see
+    // encounters/styles.ts, VaultView's card idiom): bark-shadow name, lanternGold hairline
+    // accent, darker bark body text. Built once; updateHoverTip() retexts/repositions it.
+    // Added to uiRoot LAST so it paints above the labels/prompt above (container children
+    // render in list order; nothing else here sets an explicit depth either).
+    this.hoverCont = this.add.container(0, 0).setAlpha(0);
+    this.hoverBg = this.add.graphics();
+    this.hoverName = this.add
+      .text(0, 0, '', {
+        fontFamily: LABEL_FONT,
+        fontSize: '14px',
+        color: hex(C.barkShadow),
+        fontStyle: 'bold',
+        align: 'center',
+      })
+      .setOrigin(0.5, 0);
+    this.hoverBody = this.add
+      .text(0, 0, '', {
+        fontFamily: LABEL_FONT,
+        fontSize: '12px',
+        color: hex(C.darkBark),
+        align: 'center',
+        lineSpacing: 3,
+        wordWrap: { width: 190 },
+      })
+      .setOrigin(0.5, 0);
+    this.hoverCont.add([this.hoverBg, this.hoverName, this.hoverBody]);
+    this.uiRoot.add(this.hoverCont);
 
     this.dialogue = new DialogueBox(this, this.uiRoot);
   }
@@ -451,6 +510,7 @@ export class HamletScene extends Phaser.Scene {
 
     this.updateLabels(locked);
     this.updatePromptAndInteract(locked);
+    this.updateHoverTip(locked);
     this.player.setDepth(this.player.y);
   }
 
@@ -516,7 +576,9 @@ export class HamletScene extends Phaser.Scene {
       const sy = (loc.label.y - cam.worldView.y) * cam.zoom;
       label.setPosition(sx, Math.max(14, sy));
       const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, loc.center.x, loc.center.y);
-      const target = !locked && d < 66 ? 1 : 0;
+      // Defer to the (richer) hover tooltip while this location is being moused over —
+      // both anchor near loc.label, so showing both at once double-prints the name.
+      const target = !locked && d < 66 && this.hoveredLoc !== loc.id ? 1 : 0;
       label.alpha = Phaser.Math.Linear(label.alpha, target, 0.18);
     }
   }
@@ -537,6 +599,60 @@ export class HamletScene extends Phaser.Scene {
     } else {
       this.prompt.alpha = Phaser.Math.Linear(this.prompt.alpha, 0, 0.25);
     }
+  }
+
+  /** Mouse-hover tooltip (fun-review §3.6b) — name + one line of flavor, independent of
+   *  walking proximity (updateLabels above): hovering any of the six locations' Zones
+   *  (buildHoverZones) shows it regardless of where the Keeper stands. Suppressed while
+   *  locked (dialogue/busy), same as the labels and prompt. Fades via opacity — an
+   *  e2e can poll `hoverTipDebug().alpha`, the Phaser-drawn HUD idiom (see combat/hud.ts). */
+  private updateHoverTip(locked: boolean): void {
+    const loc = !locked && this.hoveredLoc ? this.map.locations.find((l) => l.id === this.hoveredLoc) : undefined;
+    if (loc) {
+      const cam = this.cameras.main;
+      this.hoverName.setText(loc.name);
+      this.hoverBody.setText(loc.blurb);
+      const padX = 12;
+      const padY = 8;
+      const gap = 5;
+      const contentW = Math.max(this.hoverName.width, this.hoverBody.width);
+      const w = Math.min(210, contentW + padX * 2);
+      this.hoverName.setWordWrapWidth(w - padX * 2);
+      this.hoverBody.setWordWrapWidth(w - padX * 2);
+      const h = this.hoverName.height + this.hoverBody.height + gap + padY * 2;
+
+      const sx = (loc.label.x - cam.worldView.x) * cam.zoom;
+      const sy = (loc.label.y - cam.worldView.y) * cam.zoom;
+      const cx = Phaser.Math.Clamp(sx, w / 2 + 6, this.scale.width - w / 2 - 6);
+      const bottomY = Math.max(14, sy) - 12; // sits just above the name label's own spot
+      const topY = bottomY - h;
+
+      this.hoverBg.clear();
+      this.hoverBg.fillStyle(C.parchment, 0.97).fillRoundedRect(cx - w / 2, topY, w, h, 8);
+      this.hoverBg.lineStyle(2, C.bark, 1).strokeRoundedRect(cx - w / 2, topY, w, h, 8);
+      // lanternGold accent hairline between name and blurb (VaultView's goldRule idiom, mini)
+      this.hoverBg.fillStyle(C.lanternGold, 0.8).fillRect(cx - w / 2 + 10, topY + padY + this.hoverName.height + gap / 2 - 1, w - 20, 2);
+      this.hoverName.setPosition(cx, topY + padY);
+      this.hoverBody.setPosition(cx, topY + padY + this.hoverName.height + gap);
+    }
+    const target = loc ? 1 : 0;
+    this.hoverCont.alpha = Phaser.Math.Linear(this.hoverCont.alpha, target, 0.22);
+  }
+
+  /** Debug: a location's current on-screen anchor point (e2e-only) — lets a spec position
+   *  the real mouse over a moving, zoomed, camera-relative world point without duplicating
+   *  the projection math above. */
+  locationScreenPos(id: LocationId): { x: number; y: number } | null {
+    const loc = this.map.locations.find((l) => l.id === id);
+    if (!loc) return null;
+    const cam = this.cameras.main;
+    return { x: (loc.center.x - cam.worldView.x) * cam.zoom, y: (loc.center.y - cam.worldView.y) * cam.zoom };
+  }
+
+  /** Debug: the hover tooltip's live alpha + rendered name/blurb (e2e-only — Phaser-drawn,
+   *  not DOM, so a spec can't read this via a locator; mirrors CombatHud's bannerText()). */
+  hoverTipDebug(): { alpha: number; name: string; blurb: string } {
+    return { alpha: this.hoverCont.alpha, name: this.hoverName.text, blurb: this.hoverBody.text };
   }
 
   // --------------------------------------------------------------- interactions
