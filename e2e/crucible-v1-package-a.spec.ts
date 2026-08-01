@@ -27,7 +27,7 @@ type Save = {
   hp?: number;
   streak?: number;
   lastPlayed?: string;
-  dungeon?: { roomIndex: number; cleared: string[] };
+  dungeon?: { roomIndex: number; cleared: string[]; gatePending?: string };
 };
 type Srs = { facts?: Record<string, unknown> };
 
@@ -160,8 +160,15 @@ test('V1-3: a gate-exhausted retreat persists scene:hamlet before the visual tra
 // Fable_SPEC.md:31 ("wipes cost the loot roll, never story progress"). resolveCombat now
 // marks + persists the win immediately after the retreat check, before the gate runs — a
 // gate wipe only re-triggers the gate (were sub-room state to exist), never the combat.
+//
+// crucible-2 amendment: that sub-room state now exists. Crediting the win as a FULL room
+// clear overshot — the node came back marked ✓ with its ward, loot and streak gone for good
+// (a cleared node only re-shows its blurb). The win is now banked as `dungeon.gatePending`
+// instead: the room stays uncleared (the ward really is still shut) while re-entry resumes
+// straight into the drill without re-fighting. V1-12's invariant is unchanged and this
+// asserts it more exactly.
 // ---------------------------------------------------------------------------------------
-test('V1-12: a gate wipe still credits the room as cleared (combat win survives the wipe)', async ({ page }) => {
+test('V1-12: a gate wipe banks the combat win without granting passage (fight not re-litigated)', async ({ page }) => {
   test.setTimeout(60_000);
   const before = await readState<Save>(page, 'save.json');
   try {
@@ -179,9 +186,14 @@ test('V1-12: a gate wipe still credits the room as cleared (combat win survives 
 
     const save = await readState<Save>(page, 'save.json');
     expect(
+      save?.dungeon?.gatePending,
+      'V1-12: the won fight is banked, so re-entry resumes the ward instead of the battle',
+    ).toBe('under-3');
+    // …and passage is NOT granted: an unopened ward is not a passed vault (crucible-2).
+    expect(
       save?.dungeon?.cleared ?? [],
-      'V1-12: the room whose combat was won stays credited even though the gate wiped',
-    ).toContain('under-3');
+      'crucible-2: the wiped gate room is not marked cleared',
+    ).not.toContain('under-3');
 
     // control: loot/streak are still correctly withheld on a gate wipe — only story
     // progress (the combat clear) survives, matching Fable_SPEC.md:31 exactly.

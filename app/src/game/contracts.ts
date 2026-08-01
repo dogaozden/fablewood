@@ -151,7 +151,8 @@ export interface SrsApi {
 export interface SaveData {
   scene: string;
   pos?: { x: number; y: number };
-  dungeon?: { roomIndex: number; cleared: string[] };
+  /** `gatePending` = the room whose combat is won but whose gate has not opened (roomFlow). */
+  dungeon?: { roomIndex: number; cleared: string[]; gatePending?: string };
   hp: number;
   streak: number;
   /** chosen retinue for the next crawl; absent = 'mira'. Primitive on purpose — the save

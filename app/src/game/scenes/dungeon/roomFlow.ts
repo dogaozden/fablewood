@@ -10,6 +10,13 @@ export interface DungeonProgress {
   roomIndex: number;
   /** ids of rooms fully cleared (combat won + any gate opened) */
   cleared: string[];
+  /**
+   * Id of the room whose combat is won but whose gate has NOT opened yet. Such a room is
+   * deliberately not in `cleared` — an unopened ward is not a passed vault — but re-entry
+   * must not re-litigate the fight either (Fable_SPEC.md:31 — a wipe costs the loot roll,
+   * never story progress). At most one at a time: the crawl only stands before one ward.
+   */
+  gatePending?: string;
 }
 
 export type NodeState = 'cleared' | 'current' | 'locked';
@@ -62,7 +69,17 @@ export function markRoomCleared(
   const cleared = progress.cleared.includes(roomId)
     ? progress.cleared
     : [...progress.cleared, roomId];
-  return { cleared, roomIndex: firstUnclearedIndex(rooms, cleared) };
+  return {
+    cleared,
+    roomIndex: firstUnclearedIndex(rooms, cleared),
+    // clearing a room settles its own ward; any other room's stays pending
+    gatePending: progress.gatePending === roomId ? undefined : progress.gatePending,
+  };
+}
+
+/** Immutably record "combat won here, ward still shut" (see DungeonProgress.gatePending). */
+export function markGatePending(progress: DungeonProgress, roomId: string): DungeonProgress {
+  return { ...progress, gatePending: roomId };
 }
 
 export function allCleared(rooms: readonly DungeonRoom[], cleared: readonly string[]): boolean {
