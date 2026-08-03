@@ -27,9 +27,10 @@ import { gradeWithWarmWorker, prewarmJudgePool } from './judge-worker';
 
 // Measured 2026-07-19: with the user's MCP servers loading, a haiku one-shot ran
 // 17–26s; with MCP disabled, 7–13s from an idle shell and a few seconds worse when
-// the dev server is busy. 20s converts most would-be fallbacks into real verdicts
-// while still bounding the worst case (the deliberating quill covers the wait).
-const TIMEOUT_MS = 20_000;
+// the dev server is busy. Re-measured 2026-08-02 (4.4–14.4s): 20s left almost no
+// headroom, so 60s — the deliberating quill covers the wait, and a wrong
+// "Clerk is away" costs far more than a few extra seconds.
+const TIMEOUT_MS = 60_000;
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
@@ -104,7 +105,13 @@ function runClaude(prompt: string): Promise<string> {
     // The Clerk needs zero tools: skipping MCP server startup is a 3x latency win.
     const child = spawn(
       'claude',
-      ['-p', prompt, '--model', 'haiku', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}'],
+      [
+        '-p', prompt, '--model', 'haiku',
+        '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+        // Closed-book grading: no user/project/local settings. See
+        // src-tauri/src/judge.rs's tier-2 spawn for the measured rationale.
+        '--setting-sources', '',
+      ],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: process.env,

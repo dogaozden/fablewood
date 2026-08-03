@@ -54,8 +54,10 @@ use tokio::sync::Mutex;
 /// How many spare `claude` processes stay pre-warmed. See module doc.
 const POOL_TARGET_SIZE: usize = 2;
 
-/// Per-grade cap on a warm (or cold-fresh) attempt. See module doc.
-const WARM_TIMEOUT: Duration = Duration::from_secs(20);
+/// Per-grade cap on a warm (or cold-fresh) attempt. Matches judge.rs's
+/// TIER_TIMEOUT — see that file for the 2026-08-02 latency re-measurement that
+/// raised both from 20s.
+const WARM_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Same stream-json invocation as judge-worker.ts's SPAWN_ARGS.
 const SPAWN_ARGS: &[&str] = &[
@@ -65,6 +67,11 @@ const SPAWN_ARGS: &[&str] = &[
     "--strict-mcp-config",
     "--mcp-config",
     "{\"mcpServers\":{}}",
+    // Closed-book grading: load no user/project/local settings. See the same
+    // pair of args in judge.rs's tier-2 spawn for the measured rationale —
+    // both tiers must be isolated or the two would grade differently.
+    "--setting-sources",
+    "",
     "--input-format",
     "stream-json",
     "--output-format",
@@ -168,7 +175,7 @@ pub(crate) fn spawn_stderr_logger(tag: &'static str, mut stderr: tokio::process:
         let trimmed = buf.trim();
         if !trimmed.is_empty() {
             let head: String = trimmed.chars().take(500).collect();
-            eprintln!("[clerk-native] {tag} child stderr: {head}");
+            crate::clerk_log::record(&format!("{tag} child stderr: {head}"));
         }
     });
 }
@@ -329,6 +336,22 @@ mod tests {
             n.fetch_add(1, Ordering::SeqCst);
             PoolEntry { proc: make(), alive: true }
         }
+    }
+
+    /// The warm worker must grade closed-book. Without this, the pooled child
+    /// loads the developer's global CLAUDE.md, plugins and skills — measured
+    /// 2026-08-02 at 28.3k cached prompt tokens, with one observed grade
+    /// spending a 547-token thinking block arguing with a plugin's
+    /// "you MUST invoke a skill" reminder instead of returning its verdict.
+    #[test]
+    fn warm_workers_spawn_with_no_ambient_settings() {
+        let i = SPAWN_ARGS
+            .iter()
+            .position(|a| *a == "--setting-sources")
+            .expect("warm workers must isolate settings");
+        assert_eq!(SPAWN_ARGS.get(i + 1), Some(&""), "--setting-sources must load nothing");
+        // MCP isolation is the other half of the same contract.
+        assert!(SPAWN_ARGS.contains(&"--strict-mcp-config"));
     }
 
     #[tokio::test]

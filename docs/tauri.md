@@ -21,7 +21,7 @@ runtime:
 | `PUT /api/state/:name` | `state_write` | atomic tmp+rename, mkdir -p |
 | `GET /api/packs` | `packs_list` | bad pack.json skipped, id = meta.id or dir |
 | `GET /api/packs/:id/assets/:path` | `pack_asset` | traversal-rejected, bytes + mime-by-extension |
-| `POST /api/judge` | `judge_grade` | spawns `claude -p --model haiku`, MCP-free, 20s cap |
+| `POST /api/judge` | `judge_grade` | spawns `claude -p --model haiku`, MCP-free, settings-free, 60s cap |
 
 The Rust side (`src-tauri/src/bridge.rs`, `judge.rs`) is a 1:1 port of the vite
 plugins — same name validation, same atomic write, same prompt, same strict-JSON
@@ -38,11 +38,42 @@ launch's stripped-down execution context was measurably slowing the child's
 own startup and, via a cwd-rooted scan wandering into `~/Pictures`, could
 trigger a Photos-library TCC prompt attributed to Fablewood.
 
-At boot, `main.rs` eagerly warms the Clerk pool and logs
-`[clerk-native] warm pool ready (N workers, claude at <path>)` — grep for
-that line (terminal for a dev/direct launch, `log stream`/Console.app for a
-real Finder launch) as the one-line smoke check that a new bundle's Clerk is
-healthy, no UI interaction required.
+### The Clerk log — read this first when the Clerk is "away"
+
+Every Clerk event (boot readiness, each verdict with its latency and tier, and
+every fallback WITH its reason) is appended to:
+
+    ~/Library/Logs/Fablewood/clerk.log      # override: FABLEWOOD_CLERK_LOG
+
+This exists because a Finder-launched .app has nowhere for stdout/stderr to go,
+so the old println!/eprintln!-only diagnostics were invisible in exactly the
+launch mode that matters — "the Clerk is momentarily away from his desk" arrived
+with its cause discarded, indistinguishable from a broken judge. The first line
+after launch is the one-line smoke check that a new bundle's Clerk is healthy,
+no UI interaction required:
+
+    [clerk-native] warm pool ready (2 workers, claude at /Users/you/.local/bin/claude)
+
+A fallback line names which failure it was — `spawn failed:`, `judge timeout`,
+`claude exited Some(1)`, `unparseable output after …`, or the child's own stderr
+— so an away-line is always traceable.
+
+### Timeouts and settings isolation
+
+Both tiers cap a grade at 60s, and the whole two-tier grade is bounded at 90s
+(`judge.rs`'s `TIER_TIMEOUT`/`GRADE_BUDGET`; the dev twins match). The previous
+20s cap was too tight: re-measured 2026-08-02 against the live CLI, a healthy
+grade runs 4.4–14.4s and one real warm grade took **17.7s** — so an ordinary
+slow link tipped straight into a fallback the player read as a broken Clerk.
+
+Both tiers also spawn with `--setting-sources ''`. By default the CLI hands the
+judge the developer's entire ambient Claude Code config — global `CLAUDE.md`,
+every installed plugin and skill (28.3k cached prompt tokens, and one observed
+grade spent a 547-token thinking block arguing with a plugin's "you MUST invoke
+a skill before ANY response" reminder instead of returning its verdict). A judge
+whose verdict can be swayed by an unrelated plugin install is not a judge.
+Note that `--bare` is NOT usable here: it disables OAuth/keychain and demands an
+API key, and Fablewood runs on the subscription CLI only.
 
 ## Running
 
