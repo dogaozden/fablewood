@@ -30,6 +30,14 @@ Why each flag:
 - Wall-clock: even trivial prompts run ~80–90 s at high effort — budget 2+ min timeouts minimum; poll, don't wait synchronously.
 - Known benign noise: repeated `codex_models_manager … failed to refresh available models: timeout` lines — does not affect the exec; ignore.
 
+## Field notes (2026-08-03 SRD digestion run — 13 execs, 11 briefs, zero redos)
+
+- **Long prompts via stdin**: `codex exec -s <mode> -` reads the prompt from stdin — use it for anything long or quote-heavy instead of shell-escaped inline strings.
+- **Wall time**: even a trivial PONG took ~90 s at max effort; real tasks blow past Bash's sync timeout. Always `run_in_background` + notification-driven waiting.
+- **Files lie until exit**: Codex keeps silently revising its output file after it first appears (observed: a brief read mid-revision at 87 lines settled at 106 minutes later). Never judge an output until the process actually exits.
+- **Concurrency confirmed**: 3-way concurrent execs ran as genuinely independent OS processes (ps-verified, no serialization) — batch 3-wide freely within the 3–5 guidance.
+- **This SRD source specifically**: raw PDF-to-text, zero markdown — bare title-case line matches produce false positives (a wrong line-hint fed to Luna once; it caught it when told to verify independently). Tell workers to distrust structural hints and verify against content. Multi-column tables arrive scrambled; Luna un-scrambles them correctly when asked to reconstruct rather than transcribe.
+
 ## Chaperone verification contract (non-negotiable)
 
 1. Schema conformance ≠ truthfulness. For every worker: independently re-check **at least one** claim (`git diff --stat` on claimed files; re-run one claimed test; open the file at a cited line).
