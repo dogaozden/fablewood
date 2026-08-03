@@ -93,3 +93,44 @@ export function drawDue(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): strin
   ids = sourceSpread(ids, index, opts.seed);
   return ids.slice(0, opts.count);
 }
+
+/**
+ * Introduction-pacing draw: surfaces only unseen facts (no SRS record yet)
+ * whose prereqs are all already-recorded, grouped per pack in pack-internal
+ * order, then interleaved by STRICT round-robin rotation across
+ * index.packIds — NOT the seeded permutation drawDue's tie-break uses.
+ * opts.seed picks only the starting pack (seed % packIds.length); rotation
+ * order past that is fixed installation order, skipping exhausted packs.
+ */
+export function drawNew(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): string[] {
+  const queues = new Map<string, string[]>();
+  for (const packId of index.packIds) queues.set(packId, []);
+  for (const id of index.factById.keys()) {
+    if (deps.hasRecord(id)) continue;
+    const prereqs = index.factById.get(id)!.prereqs ?? [];
+    if (!prereqs.every(deps.hasRecord)) continue;
+    queues.get(index.packIdByFactId.get(id)!)!.push(id);
+  }
+
+  const n = index.packIds.length;
+  if (n === 0) return [];
+  const start = ((opts.seed % n) + n) % n;
+  const order = [...index.packIds.slice(start), ...index.packIds.slice(0, start)];
+  const cursor = new Map<string, number>(order.map(packId => [packId, 0]));
+
+  const out: string[] = [];
+  let active = order.length;
+  while (out.length < opts.count && active > 0) {
+    active = 0;
+    for (const packId of order) {
+      if (out.length >= opts.count) break;
+      const q = queues.get(packId)!;
+      const i = cursor.get(packId)!;
+      if (i >= q.length) continue;
+      out.push(q[i]);
+      cursor.set(packId, i + 1);
+      active++;
+    }
+  }
+  return out;
+}
