@@ -13,6 +13,7 @@ state/
 # transient test + e2e artifacts
 .state-e2e/
 .state-e2e-amendments/
+.state-e2e-dragdrop/
 test-results/
 playwright-report/
 playwright/.cache/

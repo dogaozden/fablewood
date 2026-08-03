@@ -187,13 +187,14 @@ const CSS = `
 .fw-chip:disabled { cursor: default; }
 
 /* order */
-.fw-order { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.fw-order { position: relative; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .fw-step { display: flex; align-items: center; gap: .7em; padding: .5em .6em; border-radius: 12px;
-  background: rgba(255,241,198,.5); border: 1.5px solid rgba(104,70,40,.42);
+  background: rgba(255,241,198,.5); border: 1.5px solid rgba(104,70,40,.42); touch-action: none; user-select: none;
   transition: transform .16s, box-shadow .16s, border-color .16s, background .16s; }
 .fw-step.is-active { border-color: var(--ember-deep); box-shadow: 0 0 0 3px rgba(247,206,107,.4); background: rgba(255,241,198,.72); }
 .fw-step.is-correct { border-color: var(--green); background: rgba(124,156,70,.24); }
 .fw-step.is-wrong { border-color: var(--berry); background: rgba(196,68,62,.16); }
+.fw-step:not(.is-correct):not(.is-wrong) { cursor: grab; }
 .fw-idx { flex: none; width: 1.7em; height: 1.7em; display: grid; place-items: center; border-radius: 8px;
   font-weight: 700; color: var(--ink-2); background: linear-gradient(var(--gold), var(--amber));
   box-shadow: inset 0 1px 0 rgba(255,241,198,.85); }
@@ -204,8 +205,11 @@ const CSS = `
 .fw-move button { font: inherit; line-height: 1; cursor: pointer; color: var(--ink-soft); background: transparent;
   border: 1px solid rgba(104,70,40,.4); border-radius: 6px; width: 1.6em; height: 1.15em; display: grid; place-items: center; padding: 0; }
 .fw-move button:hover { color: var(--ink-2); border-color: var(--ember-deep); background: rgba(255,241,198,.5); }
-.fw-step[draggable="true"] { cursor: grab; }
-.fw-step.is-dragging { opacity: .5; }
+.fw-step.is-lifted { cursor: grabbing; z-index: 5; border-color: var(--ember-deep); background: rgba(255,241,198,.92);
+  box-shadow: 0 14px 28px -10px rgba(16,11,10,.5), 0 0 0 2px rgba(247,206,107,.55), inset 0 1px 0 rgba(255,241,198,.9); }
+.fw-order-drop { position: absolute; left: 0; right: 0; z-index: 0; border-radius: 12px;
+  border: 3px dashed rgba(247,206,107,.9); background: rgba(247,206,107,.2);
+  transition: top .16s ease; pointer-events: none; }
 
 /* teaching — discovered documents */
 .fw-doctype { display: inline-block; font-size: .68rem; letter-spacing: .18em; text-transform: uppercase; font-weight: 700;
@@ -239,7 +243,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .fw-overlay, .fw-panel, .fw-verdict, .fw-teach, .fw-reclaim { animation: none !important; }
-  .fw-opt, .fw-chip, .fw-step, .fw-btn { transition: none !important; }
+  .fw-opt, .fw-chip, .fw-step, .fw-order-drop, .fw-btn { transition: none !important; }
   .fw-deliberate .fw-nib, .fw-dots span, .fw-reclaim .fw-reclaim-flare { animation: none !important; }
 }
 `;
