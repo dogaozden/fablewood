@@ -63,12 +63,18 @@ const POOL_TARGET_SIZE = 2;
 // just short of success. Worst case if tier 1 is genuinely wedged (not just
 // slow) is ~40s before the heuristic, vs today's single 20s — that only
 // bites on a true double failure, which every real run so far has avoided.
-const WORKER_TIMEOUT_MS = 20_000;
+// Raised 20s → 60s on 2026-08-02 alongside the native twin (src-tauri/src/judge.rs):
+// re-measuring the live CLI showed 4.4–14.4s on a healthy link, so 20s left almost
+// no headroom and an ordinary slow network read as a broken Clerk.
+const WORKER_TIMEOUT_MS = 60_000;
 
 const SPAWN_ARGS = [
   '-p',
   '--model', 'haiku',
   '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+  // Closed-book grading: no user/project/local settings. See src-tauri/src/judge.rs's
+  // tier-2 spawn for the measured rationale — dev and native must grade identically.
+  '--setting-sources', '',
   '--input-format', 'stream-json',
   '--output-format', 'stream-json',
   '--verbose', // required by the CLI when --output-format=stream-json is combined with --print
