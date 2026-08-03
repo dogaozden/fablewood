@@ -138,6 +138,7 @@ function installServices(initial: Partial<SaveData>): Harness {
     dueQueue: () => [],
     record: async () => {},
     boxOf: () => 0,
+    hasRecord: () => false,
     masteryAvg: () => 0,
     historyQualities: () => [],
   };

@@ -77,6 +77,9 @@ services.srs = {
   boxOf(factId) {
     return srsStore.boxOf(factId);
   },
+  hasRecord(factId) {
+    return srsStore.boxOf(factId) > 0;
+  },
   masteryAvg(factIds) {
     return srsStore.masteryAvg(factIds);
   },

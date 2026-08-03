@@ -4,6 +4,7 @@
  * their register.ts (side-effect imported in scenes/index.ts). Consumers (hamlet,
  * dungeon, combat) use `services.*` only — never import provider internals.
  */
+import type { Fact, Encounter } from '../packs/types';
 
 export type Quality = 0 | 0.5 | 1;
 export type EncounterKind = 'mcq' | 'free_recall' | 'scenario_branch' | 'match' | 'order';
@@ -146,6 +147,9 @@ export interface SrsApi {
   /** prior answer qualities for a fact, oldest first (empty if unseen). The redemption bell
    *  (§3.1) reads this BEFORE record() to see a fact's PRIOR history. */
   historyQualities(factId: string): Quality[];
+  /** True once the fact has any SRS record (boxOf(factId) > 0) — i.e. has been introduced.
+   *  draw/register.ts's fresh()/due() adapters read this to gate "unseen" facts. */
+  hasRecord(factId: string): boolean;
 }
 
 export interface SaveData {
@@ -201,6 +205,43 @@ export interface InventoryApi {
   buy(id: string, cost: number, qty?: number): Promise<boolean>;
   /** atomic sale: held check + remove + credit in ONE store write; false (no write) if not enough held */
   sell(id: string, price: number, qty?: number): Promise<boolean>;
+}
+
+// ---------------------------------------------------------------- draw
+
+/**
+ * Query params for services.draw.due()/fresh(). Deliberately mirrors draw/types.ts's
+ * DrawOpts (kept in sync by hand, same relationship FactLite has to packs/types's Fact) —
+ * contracts.ts stays free of any import from a provider's own module (draw/, srs/,
+ * encounters/), only ever from the foundational packs/types.ts.
+ */
+export interface DrawOpts {
+  count: number;
+  seed: number;
+  now: number;
+  kinds?: EncounterKind[];
+}
+
+/**
+ * Global cross-pack question picker (wave-1 interleaving). Wraps draw/index.ts's pure
+ * buildDrawIndex/drawDue/drawNew with the real installed packs (bridge getPacks) and the
+ * real SRS/amendment services — see draw/register.ts. Every wave-1+ draw site (Wellspring,
+ * combat casts, dungeon teaching) calls through this instead of a scene's own packId-scoped
+ * picker.
+ */
+export interface DrawServiceApi {
+  /** Pulls installed packs and builds the draw index (memoized — one getPacks round). */
+  ready(): Promise<void>;
+  /** Global schedule-first draw: eligible, due-first, capped at opts.count. */
+  due(opts: DrawOpts): string[];
+  /** Introduction-pacing draw: eligible, unseen, prereq-clear facts (drawNew). */
+  fresh(opts: DrawOpts): string[];
+  /** Which installed pack a fact belongs to. */
+  sourceOf(factId: string): string | undefined;
+  factOf(factId: string): Fact | undefined;
+  encountersOf(factId: string): Encounter[];
+  /** True with zero packs installed. */
+  isEmpty(): boolean;
 }
 
 // ---------------------------------------------------------------- service registry
@@ -286,6 +327,7 @@ export interface Services {
   settings: SettingsApi;
   inventory: InventoryApi;
   amendments: AmendmentsApi;
+  draw: DrawServiceApi;
   /** teach-and-test: modal "discovered documents" cards, resolves on dismiss (encounters agent owns UI) */
   showTeaching: (facts: FactLite[]) => Promise<void>;
   /** §3.2 the Night's Ledger run-harvest screen (encounters agent owns UI); resolves on dismiss.
