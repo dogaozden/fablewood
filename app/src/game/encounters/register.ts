@@ -28,11 +28,17 @@ function loadPacks(): Promise<Pack[]> {
   return packsPromise;
 }
 
-function factsFor(factIds: string[], pack: Pack): FactLite[] {
+/**
+ * `factOf` (services.draw.factOf) hydrates cross-pack: chosen.fact_ids may include facts
+ * from a pack other than the one `pack` resolved to (per-fact source resolution — see
+ * pick() in engine.ts). Omitted for the packless FIXTURE_PACK paths (dev harness, the
+ * zero-packs fallback below), where `pack` alone is still the right single source.
+ */
+function factsFor(factIds: string[], pack: Pack, factOf?: (factId: string) => Fact | undefined): FactLite[] {
   const byId = new Map(pack.facts.map((f) => [f.id, f] as const));
   const out: FactLite[] = [];
   for (const id of factIds) {
-    const f: Fact | undefined = byId.get(id);
+    const f: Fact | undefined = factOf ? factOf(id) : byId.get(id);
     if (f) out.push({ id: f.id, type: f.type, statement: f.statement, detail: f.detail, source_ref: f.source_ref });
   }
   return out;
@@ -45,12 +51,22 @@ services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> 
   const packs = installed.length ? installed : [FIXTURE_PACK];
   const sourcePack = packs.find((p) => p.meta.id === req.packId) ?? packs[0];
 
-  const chosen = pick(req, packs);
+  // Per-fact source resolution (wave-1 draw service): req.packId no longer scopes
+  // which pack a fact's encounter/hydration comes from — each fact resolves from its
+  // OWN installed pack via services.draw. Zero packs installed → services.draw.isEmpty()
+  // stays true (its index is built from the same getPacks() as `installed` above), so
+  // this leaves the FIXTURE_PACK fallback path below byte-for-byte unchanged.
+  await services.draw.ready().catch(() => {});
+  const crossPack = !services.draw.isEmpty();
+  const encountersOf = crossPack ? services.draw.encountersOf : undefined;
+  const factOf = crossPack ? services.draw.factOf : undefined;
+
+  const chosen = pick(req, packs, encountersOf);
   if (!chosen) {
     return { encounterId: 'none', kind: req.kinds?.[0] ?? 'mcq', factIds: [], quality: 0, detail: 'The archive is empty.' };
   }
   const reskinned = reskin(chosen, req.seed);
-  const facts = factsFor(chosen.fact_ids, sourcePack);
+  const facts = factsFor(chosen.fact_ids, sourcePack, factOf);
   const result = await presentEncounter(reskinned, facts, { context: req.context, judge: services.judge, flair: req.flair });
   return stampDifficulty(result, reskinned);
 };

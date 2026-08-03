@@ -23,6 +23,7 @@ export interface EncounterRequest {
   flair?: string;
   /** casting spell's tier — biases pick()'s difficulty filter. Absent (Strike/Satchel) = no filtering. */
   spellTier?: 1 | 2 | 3;
+  /** @deprecated resolution is per-fact via the draw index */
   packId: string;
   seed: number;
 }

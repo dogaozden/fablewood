@@ -72,10 +72,29 @@ function difficultyEligible(e: Encounter, tier: 1 | 2 | 3): boolean {
  * pipeline/validate_pack.mjs), so encounter-level runtime filtering would be dead code
  * guarding an impossible state. Suspension is enforced upstream, on the factIds that reach
  * this function — see srs/amendments.ts.
+ *
+ * `encountersOf` (services.draw.encountersOf, wave-1 draw service) is the per-fact
+ * source resolution: req.packId's own pack seeds the pool (still the scope for a forced
+ * req.encounterId and the final any-encounter fallback below), but each req.factIds entry
+ * additionally pulls in ITS OWN encounters wherever they actually live — the due queue is
+ * global now, so the fact teaching it may be installed in a different pack than packId.
+ * Omitted (2-arg callers, e.g. engine.test.ts's single-pack fixtures): behaves exactly as
+ * before — the pool stays scoped to the one resolved pack.
  */
-export function pick(req: EncounterRequest, packs: Pack[]): Encounter | null {
+export function pick(
+  req: EncounterRequest,
+  packs: Pack[],
+  encountersOf?: (factId: string) => Encounter[],
+): Encounter | null {
   const pack = packs.find((p) => p.meta.id === req.packId) ?? packs[0];
-  const all = pack?.encounters ?? [];
+  let all = pack?.encounters ?? [];
+  if (encountersOf) {
+    const byId = new Map(all.map((e) => [e.id, e] as const));
+    for (const factId of req.factIds ?? []) {
+      for (const e of encountersOf(factId)) byId.set(e.id, e);
+    }
+    all = [...byId.values()];
+  }
   if (!all.length) return null;
 
   if (req.encounterId) {
