@@ -448,11 +448,25 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
 
 // --- order · Ritual Sequence -------------------------------------------------
 
+/** Below this many px of vertical movement, a press-and-release still counts as a plain
+ *  click (setActive), not a drag — keeps a quick tap from being swallowed as a zero-move drag. */
+const ORDER_DRAG_THRESHOLD_PX = 4;
+
+/** The drop-indicator sits a few px taller than the row itself, so its dashed edge stays a
+ *  visible "landing zone" halo even when the floating row's pointer-tracked position happens
+ *  to land exactly on top of it (rather than being fully eclipsed). */
+const ORDER_DROP_HALO_PX = 6;
+
+/** The floating row hovers this many px "above the table" relative to its raw pointer-tracked
+ *  position — a literal lift, not just the shadow/scale — so it never fully eclipses the
+ *  drop-indicator slot beneath it, whatever the exact pointer position. Purely visual: the
+ *  hover-slot math below still tracks the true (un-offset) pointer delta. */
+const ORDER_LIFT_OFFSET_PX = 10;
+
 const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   const answer = ((enc.answer as unknown[]) ?? []).map(String);
   const items = ((enc.options as unknown[]) ?? []).map(String);
   let active = 0;
-  let dragFrom: number | null = null;
   let done = false;
 
   const list = el('div', { class: 'fw-order' });
@@ -471,10 +485,114 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     render();
   };
 
+  /** Splice item `from` to sit at `to` — the drag-drop commit path (move() above, used by
+   *  the arrow buttons, stays untouched: it only ever swaps adjacent slots). */
+  const reorder = (from: number, to: number) => {
+    if (done || from === to) return;
+    const [moved] = items.splice(from, 1);
+    items.splice(to, 0, moved);
+    active = to;
+    render();
+  };
+
+  /**
+   * Pointer-based drag-to-reorder. Replaces the old HTML5 draggable API (dragstart/dragover/
+   * drop were wired but effectively inert in the Tauri/WKWebView shell this game actually ships
+   * in — generic-element HTML5 DnD is unreliable there, matching the live-playtest report that
+   * the handles show but dragging itself doesn't work). Pure pointer events + setPointerCapture,
+   * transform-only so nothing reflows mid-drag: the pressed row floats with the pointer
+   * (translateY, lifted shadow) while every row between its origin and the live target slot
+   * shifts by one row-step to open the gap, and a dashed placeholder marks exactly where it
+   * will land. Release commits via reorder(); a tap that never crosses the threshold falls
+   * through to the row's own onclick (setActive), unchanged.
+   */
+  let dropIndicator: HTMLElement | null = null;
+
+  const attachDrag = (row: HTMLElement, i: number): void => {
+    let dragging = false;
+    let pointerId = -1;
+    let startY = 0;
+    let step = 0;
+    let minDelta = 0;
+    let maxDelta = 0;
+    let hoverIndex = i;
+    let originTop = 0;
+
+    const slotTop = (target: number): number => originTop + (target - i) * step - ORDER_DROP_HALO_PX;
+
+    const applyShift = (target: number): void => {
+      const rows = [...list.children] as HTMLElement[];
+      rows.forEach((r, ri) => {
+        if (ri === i) return;
+        const shift = target >= i ? (ri > i && ri <= target ? -1 : 0) : ri >= target && ri < i ? 1 : 0;
+        r.style.transform = shift ? `translateY(${shift * step}px)` : '';
+      });
+      if (dropIndicator) dropIndicator.style.top = `${slotTop(target)}px`;
+    };
+
+    const end = (commit: boolean): void => {
+      if (row.hasPointerCapture(pointerId)) row.releasePointerCapture(pointerId);
+      if (!dragging) return;
+      dragging = false;
+      row.classList.remove('is-lifted');
+      row.style.transform = '';
+      dropIndicator?.remove();
+      dropIndicator = null;
+      if (commit && hoverIndex !== i) reorder(i, hoverIndex);
+      else render(); // clear the siblings' shift transforms
+    };
+
+    row.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (done || e.button !== 0 || items.length < 2) return;
+      if ((e.target as HTMLElement).closest('button')) return; // the ▲▼ buttons keep their own click
+      pointerId = e.pointerId;
+      startY = e.clientY;
+      const rows = [...list.children] as HTMLElement[];
+      step = rows.length > 1 ? rows[1].offsetTop - rows[0].offsetTop : row.offsetHeight;
+      originTop = row.offsetTop;
+      minDelta = -i * step;
+      maxDelta = (items.length - 1 - i) * step;
+      hoverIndex = i;
+      row.setPointerCapture(pointerId);
+    });
+
+    row.addEventListener('pointermove', (e: PointerEvent) => {
+      if (e.pointerId !== pointerId || done) return;
+      const rawDelta = e.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(rawDelta) < ORDER_DRAG_THRESHOLD_PX) return;
+        dragging = true;
+        active = i; // dragging a row also makes it the keyboard-active one (no re-render mid-drag)
+        row.classList.add('is-lifted');
+        dropIndicator = el('div', { class: 'fw-order-drop' });
+        dropIndicator.style.height = `${row.offsetHeight + ORDER_DROP_HALO_PX * 2}px`;
+        dropIndicator.style.top = `${slotTop(hoverIndex)}px`;
+        list.appendChild(dropIndicator);
+      }
+      e.preventDefault();
+      const delta = Math.max(minDelta, Math.min(maxDelta, rawDelta));
+      row.style.transform = `translateY(${delta - ORDER_LIFT_OFFSET_PX}px) scale(1.03)`;
+      const next = Math.max(0, Math.min(items.length - 1, i + Math.round(delta / step)));
+      if (next !== hoverIndex) {
+        hoverIndex = next;
+        applyShift(hoverIndex);
+      }
+    });
+
+    row.addEventListener('pointerup', (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      end(true);
+    });
+    row.addEventListener('pointercancel', (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      end(false);
+    });
+  };
+
   const stepRow = (label: string, i: number) => {
     const row = el(
       'div',
-      { class: `fw-step${i === active ? ' is-active' : ''}`, draggable: !done, onclick: () => setActive(i) },
+      { class: `fw-step${i === active ? ' is-active' : ''}`, onclick: () => setActive(i) },
       [
         el('span', { class: 'fw-idx', 'aria-hidden': 'true', text: String(i + 1) }),
         el('span', { class: 'fw-steplabel', text: label }),
@@ -485,22 +603,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
         ]),
       ],
     );
-    row.addEventListener('dragstart', () => {
-      if (done) return;
-      dragFrom = i;
-      row.classList.add('is-dragging');
-    });
-    row.addEventListener('dragend', () => row.classList.remove('is-dragging'));
-    row.addEventListener('dragover', (e) => e.preventDefault());
-    row.addEventListener('drop', (e) => {
-      e.preventDefault();
-      if (dragFrom === null || dragFrom === i) return;
-      const [m] = items.splice(dragFrom, 1);
-      items.splice(i, 0, m);
-      active = i;
-      dragFrom = null;
-      render();
-    });
+    if (!done) attachDrag(row, i);
     return row;
   };
 
@@ -515,7 +618,6 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     const rows = [...list.children] as HTMLElement[];
     rows.forEach((row, i) => {
       row.classList.remove('is-active');
-      row.setAttribute('draggable', 'false');
       row.classList.add(items[i] === answer[i] ? 'is-correct' : 'is-wrong');
       row.querySelectorAll('button').forEach((b) => ((b as HTMLButtonElement).disabled = true));
     });
