@@ -95,17 +95,19 @@ export function drawDue(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): strin
 }
 
 /**
- * Introduction-pacing draw: surfaces only unseen facts (no SRS record yet)
- * whose prereqs are all already-recorded, grouped per pack in pack-internal
- * order, then interleaved by STRICT round-robin rotation across
- * index.packIds — NOT the seeded permutation drawDue's tie-break uses.
- * opts.seed picks only the starting pack (seed % packIds.length); rotation
- * order past that is fixed installation order, skipping exhausted packs.
+ * Introduction-pacing draw: surfaces only eligible (not amendment-suspended),
+ * unseen facts (no SRS record yet) whose prereqs are all already-recorded,
+ * grouped per pack in pack-internal order, then interleaved by STRICT
+ * round-robin rotation across index.packIds — NOT the seeded permutation
+ * drawDue's tie-break uses. opts.seed picks only the starting pack
+ * (seed % packIds.length); rotation order past that is fixed installation
+ * order, skipping exhausted packs.
  */
 export function drawNew(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): string[] {
   const queues = new Map<string, string[]>();
   for (const packId of index.packIds) queues.set(packId, []);
   for (const id of index.factById.keys()) {
+    if (!deps.eligible(id)) continue;
     if (deps.hasRecord(id)) continue;
     const prereqs = index.factById.get(id)!.prereqs ?? [];
     if (!prereqs.every(deps.hasRecord)) continue;

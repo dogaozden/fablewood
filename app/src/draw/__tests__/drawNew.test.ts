@@ -29,4 +29,12 @@ describe('drawNew', () => {
     expect(out).not.toContain('fx.a.one');
     expect(out).not.toContain('fx.b.one');
   });
+
+  it('excludes ineligible facts even when unseen and prereq-clear (amendment suspension)', () => {
+    const eligDeps: DrawDeps = {
+      dueOrder: ids => ids, eligible: id => id !== 'fx.a.three', hasRecord: () => false,
+    };
+    const out = drawNew(idx, eligDeps, { count: 8, seed: 1, now: 0 });
+    expect(out).not.toContain('fx.a.three');
+  });
 });
