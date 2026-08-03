@@ -48,6 +48,9 @@ services.draw = {
   async ready() {
     await Promise.all([services.srs.ready(), services.amendments.ready(), loadIndex()]);
   },
+  indexReady() {
+    return loadIndex();
+  },
   due(opts) {
     return drawDue(index, deps, opts);
   },

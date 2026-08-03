@@ -131,6 +131,46 @@ describe('pick — difficulty filter (§3 difficulty-rewards.md)', () => {
   });
 });
 
+describe('pick — per-fact source resolution keeps forced/fallback tiers pack-scoped (cross-pack)', () => {
+  // Two independently-authored packs that happen to collide on an encounter id — the
+  // shape a byId.set(...)-style union would silently corrupt: homePack's OWN 'shared-id'
+  // teaches f1; a FOREIGN 'shared-id' (reachable only through encountersOf) teaches f2.
+  const homeShared: Encounter = { id: 'shared-id', fact_ids: ['f1'], kind: 'mcq', prompt: 'home', options: ['x'], answer: 'x' };
+  const homeOnly: Encounter = { id: 'home-only', fact_ids: ['f3'], kind: 'mcq', prompt: 'home3', options: ['x'], answer: 'x' };
+  const homePack = mkPack([homeShared, homeOnly]);
+
+  const foreignShared: Encounter = { id: 'shared-id', fact_ids: ['f2'], kind: 'mcq', prompt: 'foreign', options: ['y'], answer: 'y' };
+  const foreignOnly: Encounter = { id: 'foreign-only', fact_ids: ['f2'], kind: 'mcq', prompt: 'foreign2', options: ['y'], answer: 'y' };
+  const encountersOf = (factId: string): Encounter[] =>
+    factId === 'f2' ? [foreignShared, foreignOnly] : factId === 'f1' ? [homeShared] : [];
+
+  it('a forced req.encounterId resolves from the packId-scoped pool ONLY, even when a same-id encounter is reachable cross-pack', () => {
+    const result = pick(
+      req({ encounterId: 'shared-id', factIds: ['f2'], kinds: ['mcq'] }),
+      [homePack],
+      encountersOf,
+    );
+    // Must be homePack's OWN 'shared-id' (teaches f1) — never the foreign 'shared-id'
+    // that encountersOf('f2') would resolve (teaches f2). A union-before-lookup bug
+    // would return fact_ids ['f2'] here instead.
+    expect(result?.fact_ids).toEqual(['f1']);
+  });
+
+  it('the any-kind-match / any-encounter-at-all fallbacks stay pack-scoped too, when the due-queue loop finds nothing', () => {
+    // req.kinds excludes every encounter, home AND foreign (all are 'mcq') — the due-queue
+    // loop's own kind filter rejects encountersOf('f2')'s hits, so it falls through to the
+    // pack-scoped any-encounter-at-all fallback (all[0]).
+    const result = pick(
+      req({ factIds: ['f2'], kinds: ['free_recall'] }),
+      [homePack],
+      encountersOf,
+    );
+    // Must be homePack's own all[0] (teaches f1) — never the foreign encounter a
+    // union-before-lookup bug would have put in that slot (teaches f2).
+    expect(result?.fact_ids).toEqual(['f1']);
+  });
+});
+
 describe('reskin — deterministic surface randomization', () => {
   const enc: Encounter = {
     id: 'm',

@@ -73,13 +73,19 @@ function difficultyEligible(e: Encounter, tier: 1 | 2 | 3): boolean {
  * guarding an impossible state. Suspension is enforced upstream, on the factIds that reach
  * this function — see srs/amendments.ts.
  *
- * `encountersOf` (services.draw.encountersOf, wave-1 draw service) is the per-fact
- * source resolution: req.packId's own pack seeds the pool (still the scope for a forced
- * req.encounterId and the final any-encounter fallback below), but each req.factIds entry
- * additionally pulls in ITS OWN encounters wherever they actually live — the due queue is
- * global now, so the fact teaching it may be installed in a different pack than packId.
- * Omitted (2-arg callers, e.g. engine.test.ts's single-pack fixtures): behaves exactly as
- * before — the pool stays scoped to the one resolved pack.
+ * `encountersOf` (services.draw.encountersOf, wave-1 draw service) is per-fact source
+ * resolution for step 2 ONLY (the due-queue loop): req.packId's own pack (`all`/
+ * `candidates` below) is, and stays, the ENTIRE scope for step 1 (forced req.encounterId),
+ * step 3 (any kind-match — candidates[0]) and step 4 (any encounter at all — all[0]) — none
+ * of those three are touched by encountersOf, deliberately, so a cross-pack encounter can
+ * never shadow (or, worse, id-collide with and silently replace) a req.packId-owned one for
+ * those tiers. Only the due-queue loop additionally consults encountersOf(factId), per
+ * factId, because the due queue is global now — the fact teaching it may be installed in a
+ * different pack than packId. `tierNarrowed` mirrors, for that loop, the exact narrow-vs-
+ * honest-fallback decision `candidates` just made over the pack-scoped pool, so a cross-pack
+ * candidate is held to the identical kind+tier bar as a pack-scoped one would be. Omitted
+ * (2-arg callers, e.g. engine.test.ts's single-pack fixtures): the loop falls back to
+ * searching `candidates` exactly as before — byte-for-byte unchanged.
  */
 export function pick(
   req: EncounterRequest,
@@ -87,14 +93,7 @@ export function pick(
   encountersOf?: (factId: string) => Encounter[],
 ): Encounter | null {
   const pack = packs.find((p) => p.meta.id === req.packId) ?? packs[0];
-  let all = pack?.encounters ?? [];
-  if (encountersOf) {
-    const byId = new Map(all.map((e) => [e.id, e] as const));
-    for (const factId of req.factIds ?? []) {
-      for (const e of encountersOf(factId)) byId.set(e.id, e);
-    }
-    all = [...byId.values()];
-  }
+  const all = pack?.encounters ?? [];
   if (!all.length) return null;
 
   if (req.encounterId) {
@@ -104,16 +103,28 @@ export function pick(
 
   const kinds = req.kinds;
   const kindMatches = (e: Encounter) => !kinds || kinds.length === 0 || kinds.includes(e.kind);
-  let candidates = all.filter(kindMatches);
+  const kindOnly = all.filter(kindMatches);
+  let candidates = kindOnly;
+  let tierNarrowed = false;
 
   if (req.spellTier) {
-    const narrowed = candidates.filter((e) => difficultyEligible(e, req.spellTier!));
-    if (narrowed.length) candidates = narrowed; // else honest fallback: keep the wider pool
+    const narrowed = kindOnly.filter((e) => difficultyEligible(e, req.spellTier!));
+    if (narrowed.length) {
+      candidates = narrowed; // else honest fallback: keep the wider pool
+      tierNarrowed = true;
+    }
   }
 
   for (const factId of req.factIds ?? []) {
-    const hit = candidates.find((e) => e.fact_ids.includes(factId));
-    if (hit) return hit;
+    if (encountersOf) {
+      const hit = encountersOf(factId).find(
+        (e) => kindMatches(e) && (!tierNarrowed || difficultyEligible(e, req.spellTier!)),
+      );
+      if (hit) return hit;
+    } else {
+      const hit = candidates.find((e) => e.fact_ids.includes(factId));
+      if (hit) return hit;
+    }
   }
 
   if (candidates.length) return candidates[0];

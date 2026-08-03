@@ -233,6 +233,15 @@ export interface DrawOpts {
 export interface DrawServiceApi {
   /** Pulls installed packs and builds the draw index (memoized — one getPacks round). */
   ready(): Promise<void>;
+  /**
+   * Resolves once the draw index ITSELF has settled — independent of the srs/amendments
+   * legs ready() also awaits via Promise.all. isEmpty()/factOf()/encountersOf() only ever
+   * read the index, so a caller that needs just those safe to call (not due()/fresh(),
+   * which also need srs/amendments) should await this instead: ready() can reject early on
+   * an unrelated srs/amendments failure while the index is still mid-build, which would
+   * leave isEmpty() reading the still-default (empty) index even with real packs installed.
+   */
+  indexReady(): Promise<void>;
   /** Global schedule-first draw: eligible, due-first, capped at opts.count. */
   due(opts: DrawOpts): string[];
   /** Introduction-pacing draw: eligible, unseen, prereq-clear facts (drawNew). */

@@ -46,18 +46,40 @@ function factsFor(factIds: string[], pack: Pack, factOf?: (factId: string) => Fa
 
 services.judge = judgeClient;
 
+let warnedDrawIndexFailure = false;
+
+/**
+ * Per-fact source resolution (wave-1 draw service) gate: whether to thread
+ * services.draw.encountersOf/factOf into pick()/factsFor at all. Awaits ONLY
+ * services.draw.indexReady() — never the fuller ready() — because ready()'s
+ * Promise.all rejects early on an unrelated srs/amendments failure while the index
+ * itself may still be mid-build, which would read isEmpty() against the still-default
+ * (empty) index and silently revert to single-pack resolution even with real packs
+ * installed. On a genuine index-load failure, fall back to the legacy single-pack
+ * path for this call (never throws out of runEncounter); warns once, not per-call.
+ */
+async function resolveCrossPack(): Promise<boolean> {
+  try {
+    await services.draw.indexReady();
+    return !services.draw.isEmpty();
+  } catch {
+    if (!warnedDrawIndexFailure) {
+      warnedDrawIndexFailure = true;
+      console.warn('[encounters] services.draw index failed to load — falling back to single-pack resolution');
+    }
+    return false;
+  }
+}
+
 services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> => {
   const installed = await loadPacks();
   const packs = installed.length ? installed : [FIXTURE_PACK];
   const sourcePack = packs.find((p) => p.meta.id === req.packId) ?? packs[0];
 
-  // Per-fact source resolution (wave-1 draw service): req.packId no longer scopes
-  // which pack a fact's encounter/hydration comes from — each fact resolves from its
-  // OWN installed pack via services.draw. Zero packs installed → services.draw.isEmpty()
-  // stays true (its index is built from the same getPacks() as `installed` above), so
-  // this leaves the FIXTURE_PACK fallback path below byte-for-byte unchanged.
-  await services.draw.ready().catch(() => {});
-  const crossPack = !services.draw.isEmpty();
+  // Zero packs installed → services.draw.isEmpty() stays true (its index is built
+  // from the same getPacks() as `installed` above), so this leaves the FIXTURE_PACK
+  // fallback path below byte-for-byte unchanged.
+  const crossPack = await resolveCrossPack();
   const encountersOf = crossPack ? services.draw.encountersOf : undefined;
   const factOf = crossPack ? services.draw.factOf : undefined;
 
