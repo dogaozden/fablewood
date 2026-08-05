@@ -82,6 +82,9 @@ test('two installed packs: a dungeon teaching room introduces from BOTH installe
   } finally {
     if (priorSrs) await page.request.put('/api/state/srs.json', { data: priorSrs });
     else await page.request.put('/api/state/srs.json', { data: { version: 1, facts: {} } });
+    // Symmetric with srs.json above: fall back to the app's own fresh-save default
+    // (srs/store.ts's DEFAULT_SAVE) rather than leaving this spec's save.json behind.
     if (priorSave) await page.request.put('/api/state/save.json', { data: priorSave });
+    else await page.request.put('/api/state/save.json', { data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });
   }
 });

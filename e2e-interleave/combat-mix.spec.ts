@@ -77,7 +77,9 @@ async function surfaced(page: Page): Promise<Cast[]> {
 /** A genuinely pack-resolved encounter, i.e. NOT one of runPlayerAction/castGatedSpell's
  *  `local-<action>` offline fallbacks (which echo the drawn factIds back without resolving
  *  anything) and not the empty-archive `none`. Both fixture packs id their encounters
- *  `fx.<a|b>.<fact>.<kind>`, so a real resolution is exactly a match on that shape. */
+ *  `fx.<a|b>.<fact>.<kind>`, so a real resolution is exactly a match on that shape.
+ *  General form for real packs (no fixture-id shape to match): resolved = not `local-*`,
+ *  not `none` — don't port this fixture regex literally. */
 function resolvedForReal(c: Cast): boolean {
   return /^fx\.[ab]\./.test(c.encounterId);
 }

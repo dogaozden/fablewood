@@ -678,6 +678,9 @@ export class CombatScene extends Phaser.Scene {
         await this.routeFixtureBossToInstalledPack(packs);
       }
     } catch { /* static build has no bridge */ }
+    // Feeds legacyDraw()'s dueQueue call when drawGlobal is false (unchanged, recordless
+    // order preserved); a real launch over a truly-empty global index shuffles instead
+    // (globalDraw's fallback tier) — FIXTURE_FACTS is no longer dueQueue-ordered there.
     if (this.allFactIds.size === 0) for (const id of FIXTURE_FACTS) this.allFactIds.add(id);
 
     // §6 — one global rank off Leitner box distribution, computed ONCE per battle (cached in

@@ -868,6 +868,8 @@ export class HamletScene extends Phaser.Scene {
           // DISTINCT facts (a fact recorded below drops out of "due" next pass). Only
           // once NOTHING is due anywhere does the round introduce new material instead
           // (services.draw.fresh — unseen, prereq-clear facts, round-robined by source).
+          // Mirror of the legacy branch below — the two are PERMANENT duplicates by
+          // design (draw-index-down fallback), not drift to reconcile. Change both together.
           const now = Date.now();
           const due = services.draw.due({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
           ordered = due.length ? due : services.draw.fresh({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
@@ -880,6 +882,8 @@ export class HamletScene extends Phaser.Scene {
           // facts rather than stalling on nothing; if that's ALSO empty (nothing was
           // due/unseen even at the start), seed-shuffle the raw pack order instead of
           // handing it out verbatim (mirrors CombatScene.dueFactIds()'s fallback).
+          // Mirror of the global branch above — the two are PERMANENT duplicates by
+          // design, not drift to reconcile. Change both together.
           const live = services.srs.dueQueue(this.packId ?? '', baseFactIds);
           ordered = live.length
             ? live

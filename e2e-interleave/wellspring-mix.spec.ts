@@ -4,11 +4,11 @@ import { waitReady, tapKey, waitHamletPlayer, waitProvincesLoaded, warpHamletTo 
 // Wave 1 "the Draw Service" (2026-08-03-wave1-draw-service) task 6 — the two-pack interleave
 // rig. Two real, schema-valid packs (fx-alpha, fx-beta — e2e-interleave/fixture-packs/) are
 // installed together; this proves whether a Wellspring drill draws from BOTH once their facts
-// are due, or only ever from one. Today it's the latter: HamletScene.bootstrap() sets
+// are due, or only from one. Before task 7 it was the latter: HamletScene.bootstrap() set
 // `this.packId = this.provinces[0]?.id` once at boot (HamletScene.ts) and doWellspring() never
-// looks past that single pack for the whole 3-round burst — a second installed pack is silently
-// never drilled. This spec is DELIBERATELY RED (task 7 flips it green by making Wellspring draw
-// globally, across every installed pack, via the new draw service).
+// looked past that single pack for the whole 3-round burst — a second installed pack was
+// silently never drilled. This spec was DELIBERATELY RED at task 6 (task 7 flipped it green by
+// making Wellspring draw globally, across every installed pack, via the new draw service).
 
 type Entry = { box: number; next_due: number; history: Array<{ ts: string; quality: 0 | 0.5 | 1; encounter_id: string }> };
 
@@ -56,7 +56,7 @@ async function answerAnyOverlay(page: Page): Promise<void> {
   await page.waitForTimeout(250);
 }
 
-test('two installed packs: a Wellspring drill only ever surfaces the first pack (RED)', async ({ page }) => {
+test('two installed packs: a Wellspring drill surfaces facts from BOTH installed packs', async ({ page }) => {
   test.setTimeout(90_000);
 
   // Rig sanity: both fixture packs are actually installed (PACKS_DIR wiring works).
