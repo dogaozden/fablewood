@@ -74,8 +74,9 @@ export function graceAppliesTo(art: ArtId): boolean {
 }
 
 /**
- * §9 — is this cast a boss NEGOTIATION beat: one that must draw from the current phase's
- * recallTags and then advance the phase?
+ * §9 — is this cast a boss NEGOTIATION beat: one that must advance the phase once answered?
+ * (It also had to draw from the current phase's recallTags until wave 1; tags have since left
+ * the draw path — design §5 — but the phase-advance duty below is untouched by that.)
  *
  * The rule is "an Attestation aimed at the boss", at ANY tier. The T1 path expressed it as
  * `action === 'cast' && vsBoss`, which is the same statement for the only tier it could see;

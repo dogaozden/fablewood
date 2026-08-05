@@ -76,7 +76,9 @@ export interface EnemySpec {
 export interface BossPhase {
   /** scenario_branch encounter id opening the phase (the Warden proposes a term) */
   branchEncounterId: string;
-  /** tags to draw the follow-up free_recall "cite your authority" strike from */
+  /** Historically: the tags the follow-up free_recall "cite your authority" strike drew from.
+   *  Since wave 1 (design §5) tags have left the draw path entirely — combat draws globally,
+   *  narrowed only by encounter kind — so this is parsed and schema-tolerated, never read. */
   recallTags?: string[];
 }
 

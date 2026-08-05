@@ -19,6 +19,8 @@ import { currentScene, readState } from '../e2e/helpers';
 
 type Entry = { box: number; next_due: number; history: Array<{ ts: string; quality: 0 | 0.5 | 1; encounter_id: string }> };
 type Save = Record<string, unknown>;
+/** One resolved encounter from this battle (CombatScene.castSurfacedDebug()). */
+type Cast = { encounterId: string; factIds: string[] };
 
 /** Verbatim from wellspring-mix.spec.ts (per this repo's per-spec-file duplication convention):
  *  a fact seeded with next_due in the past is due, so the picker prefers it over anything unseen. */
@@ -63,13 +65,21 @@ async function answerAnyOverlay(page: Page): Promise<void> {
   await page.waitForTimeout(250);
 }
 
-/** Fact ids this battle's encounters have surfaced so far (CombatScene.castSurfacedDebug()). */
-async function surfaced(page: Page): Promise<string[]> {
+/** Every encounter this battle has resolved so far, with the facts it carried. */
+async function surfaced(page: Page): Promise<Cast[]> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-    const s = g?.scene?.getScene?.('combat') as { castSurfacedDebug?(): string[] } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { castSurfacedDebug?(): Cast[] } | undefined;
     return s?.castSurfacedDebug?.() ?? [];
   });
+}
+
+/** A genuinely pack-resolved encounter, i.e. NOT one of runPlayerAction/castGatedSpell's
+ *  `local-<action>` offline fallbacks (which echo the drawn factIds back without resolving
+ *  anything) and not the empty-archive `none`. Both fixture packs id their encounters
+ *  `fx.<a|b>.<fact>.<kind>`, so a real resolution is exactly a match on that shape. */
+function resolvedForReal(c: Cast): boolean {
+  return /^fx\.[ab]\./.test(c.encounterId);
 }
 
 test('two installed packs: combat casts reach BOTH installed packs, not just the launch pack', async ({ page }) => {
@@ -121,21 +131,34 @@ test('two installed packs: combat casts reach BOTH installed packs, not just the
       await answerAnyOverlay(page);
       await page.waitForTimeout(500);
     }
-    const seen = await surfaced(page);
-    const where = `surfaced=${JSON.stringify(seen)}`;
+    const casts = await surfaced(page);
+    const where = `casts=${JSON.stringify(casts)}`;
 
     // Rig sanity: the battle genuinely asked questions from the REAL fixture packs — proves the
     // new fx-alpha.dungeon.json resolved and the accessor reads live ids. The packless combat
     // fixture would surface moss.* instead, and a wrong-pack launch would surface neither.
-    expect(seen.length, `the battle surfaced at least one fact id (${where})`).toBeGreaterThan(0);
-    expect(seen.every((id) => /^fx\.[ab]\./.test(id)), `every surfaced fact came from a fixture pack (${where})`).toBe(true);
+    expect(casts.length, `the battle resolved at least one encounter (${where})`).toBeGreaterThan(0);
+    expect(
+      casts.flatMap((c) => c.factIds).every((id) => /^fx\.[ab]\./.test(id)),
+      `every surfaced fact came from a fixture pack (${where})`,
+    ).toBe(true);
 
     // THE ASSERTION. RED before task 8: loadContent() pinned allFactIds to the ONE launch pack
     // (fx-alpha), so fx-beta was never asked in combat no matter how overdue its facts were.
+    //
+    // The fx-beta fact must arrive on a GENUINELY RESOLVED encounter. Asserting on fact ids
+    // alone would accept a manufactured green: if runEncounter throws, the offline fallbacks in
+    // runPlayerAction/castGatedSpell synthesize `local-<action>` results whose factIds are just
+    // the drawn ids echoed back — so a globally-drawn fx.b id would "surface" without fx-beta's
+    // content ever being resolved, reached, or asked.
+    //
     // Which pack leads any single cast rotates by seed (draw/index.ts's sourceSpread, reseeded
     // per cast off encSeed), so this asserts fx-beta is REACHABLE across the battle rather than
     // that it wins a particular draw — the latter would be a coin-flip on the spread's rotation.
-    expect(seen.some((id) => id.startsWith('fx.b.')), `the other installed pack fx-beta is drawn from too (${where})`).toBe(true);
+    expect(
+      casts.some((c) => resolvedForReal(c) && c.factIds.some((id) => id.startsWith('fx.b.'))),
+      `fx-beta was asked via a genuinely resolved encounter, not an offline echo (${where})`,
+    ).toBe(true);
   } finally {
     if (priorSave) await page.request.put('/api/state/save.json', { data: priorSave });
   }

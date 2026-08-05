@@ -634,12 +634,23 @@ export class CombatScene extends Phaser.Scene {
       this.packDifficultyClassified = gatePack?.meta?.difficultyClassified ?? false;
       if (this.drawGlobal) {
         // Wave 1 — the battle's fact pool is the GLOBAL draw index (every installed pack),
-        // not this.launch.packId's alone. dueFactIds() draws across packs now, so everything
-        // derived from the pool — the §6 rank, Mira's mastery gate, the fact→type map record()
-        // writes with — has to describe the SAME widened pool, or a cast could surface a fact
-        // the rank was never computed over. Fact→type comes from the index too (factOf), since
-        // a drawn id may belong to any installed pack. No tag map is built: draws no longer
-        // scope by tags at all (design §5, "enemy.tags and phase.recallTags leave the draw path").
+        // not this.launch.packId's alone. dueFactIds() draws across packs now, so what is
+        // derived from the pool below — the §6 rank, Mira's mastery gate, the fact→type map
+        // record() writes with — describes the SAME widened pool, or a cast could surface a
+        // fact the rank was never computed over. Fact→type comes from the index too (factOf),
+        // since a drawn id may belong to any installed pack. No tag map is built: draws no
+        // longer scope by tags at all (design §5, "enemy.tags and phase.recallTags leave the
+        // draw path").
+        //
+        // ONE EXCEPTION, deliberate and known: packDifficultyClassified (just above) did NOT
+        // widen — it still reads off the LAUNCH pack. With 2+ packs of differing classification
+        // coverage that is a real seam: pick()'s tier 2 can resolve an encounter owned by an
+        // unclassified pack, whose difficultyOf falls back to Lantern (`?? 2`), and the launch
+        // pack's flag arms riderBonus to treat that default as a genuine tier. Latent today
+        // (one real pack installed, and the fixture packs classify nothing), so nothing is
+        // mis-stamped in practice. The fix is a BEHAVIORAL ruling — stamp per RESOLVED pack,
+        // not per launch pack — deliberately deferred to the Task 10 sweep rather than smuggled
+        // into this call-site conversion.
         for (const id of services.draw.allFactIds()) {
           this.allFactIds.add(id);
           const type = services.draw.factOf(id)?.type;
@@ -2757,12 +2768,19 @@ export class CombatScene extends Phaser.Scene {
     return this.results.length ? this.results[this.results.length - 1].encounterId : null;
   }
 
-  /** Debug: every fact id this battle's encounters have actually surfaced, in the order they
-   *  were asked (e2e-only — wave 1 "the Draw Service": proves a cast drew from EVERY installed
-   *  pack, not just this.launch.packId's. Mirrors HamletScene's wellspringDrillDebug(); reads
-   *  the existing `results` log, so it adds no state of its own). */
-  castSurfacedDebug(): string[] {
-    return this.results.flatMap((r) => r.factIds);
+  /** Debug: what this battle's encounters actually surfaced, in the order they were asked —
+   *  each entry pairing the RESOLVED encounter id with the fact ids it carried (e2e-only —
+   *  wave 1 "the Draw Service": proves a cast drew from EVERY installed pack, not just
+   *  this.launch.packId's. Mirrors HamletScene's wellspringDrillDebug(); reads the existing
+   *  `results` log, so it adds no state of its own).
+   *
+   *  The encounterId is what makes the pairing worth reading rather than the fact ids alone:
+   *  runPlayerAction/castGatedSpell's offline fallbacks synthesize `local-<action>` results
+   *  that ECHO BACK the drawn factIds without an encounter ever resolving, so a spec asserting
+   *  on fact ids alone could be handed a green by a thrown runEncounter. Callers should require
+   *  a genuinely pack-resolved id (not `local-*`, not the empty-archive `none`). */
+  castSurfacedDebug(): Array<{ encounterId: string; factIds: string[] }> {
+    return this.results.map((r) => ({ encounterId: r.encounterId, factIds: r.factIds }));
   }
 
   combatSnapshot(): {

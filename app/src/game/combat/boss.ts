@@ -4,10 +4,12 @@
  * to compute effects.
  *
  * Phase rhythm: each phase OPENS with a scenario_branch (the Warden proposes a
- * term) → applyBranch. Between phases the player's Attestation vs the Warden draws
- * from phase.recallTags and a PASS strips an extra shield
- * (damage.resolveAction.extraShield). Shields → 0 = victory; Warden HP → 0 is a
- * fallback victory; party wipe = retreat.
+ * term) → applyBranch. Between phases the player's Attestation vs the Warden is
+ * answered and a PASS strips an extra shield (damage.resolveAction.extraShield).
+ * Shields → 0 = victory; Warden HP → 0 is a fallback victory; party wipe = retreat.
+ * (That Attestation drew from phase.recallTags until wave 1; tags have since left the
+ * draw path — design §5 — and it now draws globally, narrowed only by encounter kind.
+ * The phase rhythm itself is unchanged.)
  */
 import type { SpellDef } from './spells';
 import type { Quality } from './types';
