@@ -101,6 +101,10 @@ export class HamletScene extends Phaser.Scene {
   private saveAccum = 0;
   private provinces: Province[] = [];
   private packId?: string;
+  /** Test-support only: fact ids surfaced across the most recent Wellspring drill (e2e-interleave's
+   *  wellspring-mix.spec.ts reads this via wellspringDrillDebug() to prove which pack(s) a drill
+   *  actually drew from). Reset at the top of every doWellspring() call. */
+  private wellspringSurfaced: string[] = [];
   private didShutdown = false;
 
   /** supersession-reteach.md §2 — amendments awaiting the Clerk, across every installed
@@ -692,6 +696,12 @@ export class HamletScene extends Phaser.Scene {
     return { alpha: this.hoverCont.alpha, name: this.hoverName.text, blurb: this.hoverBody.text };
   }
 
+  /** Debug: fact ids surfaced across the most recent Wellspring drill (e2e-only — the
+   *  drill's encounter resolution isn't DOM-addressable; mirrors hoverTipDebug()'s precedent). */
+  wellspringDrillDebug(): string[] {
+    return [...this.wellspringSurfaced];
+  }
+
   // --------------------------------------------------------------- interactions
 
   private conversationFor(id: LocationId) {
@@ -808,6 +818,7 @@ export class HamletScene extends Phaser.Scene {
   }
 
   private async doWellspring(): Promise<void> {
+    this.wellspringSurfaced = [];
     if (!this.packId) {
       await this.dialogue.run(wellspringEmpty());
       return;
@@ -854,6 +865,7 @@ export class HamletScene extends Phaser.Scene {
         for (const fid of res.factIds) {
           await services.srs.record(fid, res.quality, res.encounterId, pv?.factTypes?.[fid]);
           wellspringRecentFactIds.add(fid);
+          this.wellspringSurfaced.push(fid);
         }
       }
       const s = services.save.get();

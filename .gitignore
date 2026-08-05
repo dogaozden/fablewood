@@ -14,6 +14,7 @@ state/
 .state-e2e/
 .state-e2e-amendments/
 .state-e2e-dragdrop/
+.state-e2e-interleave/
 test-results/
 playwright-report/
 playwright/.cache/
