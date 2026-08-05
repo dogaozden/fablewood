@@ -246,6 +246,13 @@ export interface DrawServiceApi {
   due(opts: DrawOpts): string[];
   /** Introduction-pacing draw: eligible, unseen, prereq-clear facts (drawNew). */
   fresh(opts: DrawOpts): string[];
+  /**
+   * Every indexed fact id, across all installed packs, in index order (installation
+   * order; a duplicate id is held by its first-installed pack only). For a caller that
+   * must ENUMERATE the global pool rather than draw from it — combat's once-per-battle
+   * rank/mastery reads, which have to describe the same widened pool due() draws from.
+   */
+  allFactIds(): string[];
   /** Which installed pack a fact belongs to. */
   sourceOf(factId: string): string | undefined;
   factOf(factId: string): Fact | undefined;

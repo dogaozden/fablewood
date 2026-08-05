@@ -57,6 +57,9 @@ services.draw = {
   fresh(opts) {
     return drawNew(index, deps, opts);
   },
+  allFactIds() {
+    return Array.from(index.factById.keys());
+  },
   sourceOf(factId) {
     return index.packIdByFactId.get(factId);
   },

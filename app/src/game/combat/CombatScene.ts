@@ -71,6 +71,47 @@ const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid span
  */
 const sessionRecentFactIds = new Set<string>();
 
+/**
+ * services.draw.due()/fresh() cap for combat draws (wave-1 draw service; HamletScene's
+ * WELLSPRING_DRAW_COUNT is the same cushion for the same reason). encounters/engine.ts's
+ * pick() walks these ids in order and takes the first whose fact carries a kind-matching
+ * encounter — and due() has already applied that same `kinds` filter — so this needs headroom
+ * only over "the most-due few were all just asked" (partitionByRecency reorders within the
+ * window), not an exhaustive count.
+ */
+const COMBAT_DRAW_COUNT = 20;
+
+let warnedCombatDrawFailure = false;
+
+/**
+ * Wave-1 draw service readiness gate for a battle's draws — mirrors encounters/register.ts's
+ * resolveCrossPack() and HamletScene's wellspringDrawReady(): await ONLY
+ * services.draw.indexReady() (never the fuller ready(), which can reject early on an unrelated
+ * srs/amendments failure while the index is still mid-build), catch, warn once, and let
+ * loadContent() fall back to the pre-wave-1 single-pack pool rather than throw or hang. A
+ * battle must never stall on the picker.
+ *
+ * Also false for the FIXTURE_PACK_ID launch — the standalone `?scene=combat` dev/e2e fixture
+ * and DungeonScene's `dev=1` crawl, which deliberately forces that same sentinel (crucible
+ * V1-16) so a fight is launched all-fixture or all-real, never a mix. Widening its pool to the
+ * installed packs' real facts would rebuild exactly the hybrid that invariant exists to
+ * prevent. Zero packs installed reaches this as `true` and draws an empty index — the
+ * FIXTURE_FACTS fallback in loadContent() then applies unchanged (check:zero-packs).
+ */
+async function combatDrawReady(packId: string): Promise<boolean> {
+  if (packId === FIXTURE_PACK_ID) return false;
+  try {
+    await services.draw.indexReady();
+    return true;
+  } catch {
+    if (!warnedCombatDrawFailure) {
+      warnedCombatDrawFailure = true;
+      console.warn('[combat] services.draw index failed to load — falling back to the legacy single-pack draw');
+    }
+    return false;
+  }
+}
+
 type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'playerTier' | 'resolving' | 'enemy' | 'over';
 
 /**
@@ -164,9 +205,11 @@ export class CombatScene extends Phaser.Scene {
 
   // content resolution
   private allFactIds = new Set<string>();
-  private tagToIds = new Map<string, string[]>();
   private factTypeById = new Map<string, string>();
-  private roomTags: string[] = [];
+  /** wave 1 — whether THIS battle's draws go through the global draw index (every installed
+   *  pack) or the pre-wave-1 single-pack chain. Decided once, in loadContent(); see
+   *  combatDrawReady() for the two ways it lands false (index down, fixture launch). */
+  private drawGlobal = false;
 
   // §2/§5/§6 the Five Arts & Glow (Phase 2 — magic-combat-depth.md)
   /** dev/e2e harness override (?rank=1|2|3); null = use the computed rank. */
@@ -264,9 +307,8 @@ export class CombatScene extends Phaser.Scene {
     this.refreshSeq = 0;
     this.lastHpEvent = null;
     this.allFactIds.clear();
-    this.tagToIds.clear();
     this.factTypeById.clear();
-    this.roomTags = [];
+    this.drawGlobal = false;
     this.boss = null;
     this.shields = 0;
     this.phaseIndex = 0;
@@ -307,7 +349,6 @@ export class CombatScene extends Phaser.Scene {
     this.hud.setTurnOrder(this.units.map((u) => ({ id: u.id, kind: u.kind, team: u.team })));
     this.refreshParty();
 
-    this.roomTags = [...new Set((this.launch.room.enemies ?? []).flatMap((e) => e.tags ?? []))];
     if (this.launch.room.boss) {
       this.shields = this.launch.room.boss.shields;
       this.pendingBossPhase = true;
@@ -576,6 +617,8 @@ export class CombatScene extends Phaser.Scene {
     // packless ?scene=combat dev/e2e harness (never visits hamlet/dungeon first) would
     // read InventoryStore's in-memory defaults instead of the persisted stacks.
     try { await services.inventory.ready(); } catch { /* stub or offline */ }
+    // Wave 1 — decided ONCE per battle, before anything reads the pool (combatDrawReady()).
+    this.drawGlobal = await combatDrawReady(this.launch.packId);
     try {
       const { packs } = await getPacks();
       const entry = packs.find((pk) => pk.id === this.launch.packId);
@@ -589,18 +632,29 @@ export class CombatScene extends Phaser.Scene {
       // so the zero-packs build is unchanged.
       const gatePack = (entry ?? packs[0])?.pack as Pack | undefined;
       this.packDifficultyClassified = gatePack?.meta?.difficultyClassified ?? false;
-      if (entry) {
+      if (this.drawGlobal) {
+        // Wave 1 — the battle's fact pool is the GLOBAL draw index (every installed pack),
+        // not this.launch.packId's alone. dueFactIds() draws across packs now, so everything
+        // derived from the pool — the §6 rank, Mira's mastery gate, the fact→type map record()
+        // writes with — has to describe the SAME widened pool, or a cast could surface a fact
+        // the rank was never computed over. Fact→type comes from the index too (factOf), since
+        // a drawn id may belong to any installed pack. No tag map is built: draws no longer
+        // scope by tags at all (design §5, "enemy.tags and phase.recallTags leave the draw path").
+        for (const id of services.draw.allFactIds()) {
+          this.allFactIds.add(id);
+          const type = services.draw.factOf(id)?.type;
+          if (type) this.factTypeById.set(id, type);
+        }
+      } else if (entry) {
+        // Draw-index-down fallback: the pre-wave-1 single-pack pool, verbatim but for the
+        // tag map, which has left the draw path on BOTH branches.
         const pack = entry.pack as Pack;
         for (const f of pack.facts ?? []) {
           this.allFactIds.add(f.id);
           this.factTypeById.set(f.id, f.type);
-          for (const t of f.tags ?? []) {
-            const arr = this.tagToIds.get(t) ?? [];
-            arr.push(f.id);
-            this.tagToIds.set(t, arr);
-          }
         }
-      } else if (this.launch.packId === FIXTURE_PACK_ID && this.launch.room.boss && packs.length) {
+      }
+      if (!entry && this.launch.packId === FIXTURE_PACK_ID && this.launch.room.boss && packs.length) {
         // crucible #11 — the standalone dev/e2e boss fixture forces a packId/phase ids
         // ('dev-boss-phase-N') that exist in no installed pack, so encounters/engine.ts's
         // pick() silently fell back to the same generic candidate for every phase (its own
@@ -1246,8 +1300,11 @@ export class CombatScene extends Phaser.Scene {
     const kind = meta.encounter as EncounterKind;
     const vsBoss = !!target?.isBoss;
     const isBossCast = action === 'cast' && vsBoss;
-    const tags = isBossCast ? this.launch.room.boss?.phases[this.phaseIndex]?.recallTags : this.roomTags;
-    const factIds = this.dueFactIds(tags);
+    // Wave 1 — the draw is global and no longer scoped by the room's enemy tags (nor, on the
+    // boss branch, by the phase's recallTags): the Art's own encounter kind is the ONLY
+    // narrowing, which is mechanical variety, not a subject lock. isBossCast is untouched —
+    // it still drives the phase advance below, exactly as before.
+    const factIds = this.dueFactIds([kind]);
     const context = action === 'parley' ? 'parley' : vsBoss ? 'boss' : 'combat';
 
     if (action === 'cast') this.hud.setDeliberating(true);
@@ -1350,8 +1407,9 @@ export class CombatScene extends Phaser.Scene {
     // never re-armed, skipping the mandatory branch questions (crucible-2
     // attestation-phase-skip).
     const isBossCast = isBossPhaseCast(spell.art, vsBoss);
-    const tags = isBossCast ? this.launch.room.boss?.phases[this.phaseIndex]?.recallTags : this.roomTags;
-    const factIds = this.dueFactIds(tags);
+    // Wave 1 — global draw, kind-narrowed only (see runPlayerAction's T1 twin). isBossCast
+    // keeps its full §9 duty below: the phase advance, unchanged.
+    const factIds = this.dueFactIds([artKind]);
     const context = spell.art === 'courtcraft' ? 'parley' : vsBoss ? 'boss' : 'combat';
 
     // Spend Glow up front — the flyout only ever offered an enabled row when this would
@@ -1868,8 +1926,12 @@ export class CombatScene extends Phaser.Scene {
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
+        // The phase's branchEncounterId is an AUTHORED setpiece and still forces the encounter
+        // outright (pick() tier 1, pack-scoped) — these factIds only ever feed pick()'s later
+        // tiers. Wave 1: they come from the global draw, kind-narrowed to the same
+        // 'scenario_branch' asked for above; phase.recallTags no longer scope them (design §5).
         context: 'boss', kinds: ['scenario_branch'], encounterId: phase.branchEncounterId,
-        factIds: this.dueFactIds(phase.recallTags), packId: this.launch.packId, seed: this.encSeed++,
+        factIds: this.dueFactIds(['scenario_branch']), packId: this.launch.packId, seed: this.encSeed++,
       });
     } catch {
       result = { encounterId: phase.branchEncounterId, kind: 'scenario_branch', factIds: [], quality: 0.5, branchTag: 'neutral' };
@@ -2410,30 +2472,79 @@ export class CombatScene extends Phaser.Scene {
   // ---- content resolution ----------------------------------------------
 
   /**
-   * §recency — due queue still drives selection (overdue-first, never hidden), but
-   * once it runs dry mid-session the old code fell back to `arr` in raw pack-
-   * declaration order with zero memory of what was just asked, so the same few
-   * facts repeated back-to-back for the rest of the battle. Now: shuffle the empty-
-   * queue fallback with this battle's own seed (varied across battles, reproducible
-   * within one — mirrors buildLayout's layoutSeed discipline in grid.ts) instead of
-   * pack order, then in BOTH branches stable-partition recently-asked ids behind
-   * fresh ones. partitionByRecency only reorders — a due fact that was just asked
-   * still appears, just after other due facts that weren't.
+   * The candidate fact ids for one cast, most-wanted first. `kinds` is the Art's own encounter
+   * kind and is the ONLY narrowing applied — draws are no longer scoped by the room's enemy
+   * tags or a boss phase's recallTags (wave-1 design §5: those leave the draw path entirely,
+   * so a battle asks whatever is genuinely due across every installed pack).
+   *
+   * Two sources, chosen once per battle by loadContent (drawGlobal): the global draw service,
+   * or the pre-wave-1 single-pack chain when the draw index is down or this is a fixture launch.
+   *
+   * §recency applies to BOTH: stable-partition recently-asked ids behind fresh ones, so a
+   * source that legitimately re-offers what was just asked (an empty due queue falling back to
+   * the shuffled pool) doesn't repeat the same few facts back-to-back for the rest of the
+   * battle. partitionByRecency only reorders — a due fact that was just asked still appears,
+   * just after other due facts that weren't.
    */
-  private dueFactIds(tags?: string[]): string[] {
-    const cand = new Set<string>();
-    for (const t of tags ?? []) {
-      if (this.allFactIds.has(t)) cand.add(t);
-      for (const id of this.tagToIds.get(t) ?? []) cand.add(id);
-    }
-    if (cand.size === 0) for (const id of this.allFactIds) cand.add(id);
+  private dueFactIds(kinds?: EncounterKind[]): string[] {
+    const ordered = this.drawGlobal ? this.globalDraw(kinds) : this.legacyDraw();
+    return partitionByRecency(ordered, sessionRecentFactIds);
+  }
+
+  /**
+   * Wave-1 global draw (services.draw): the due-first schedule across EVERY installed pack,
+   * narrowed to `kinds` — the Art's own encounter kind — and nothing else. The
+   * amendment-suspension filter already lives inside the draw service (its `eligible`
+   * adapter), so this must NOT re-apply eligibleFactIds over the result.
+   *
+   * Three tiers, mirroring the pre-wave-1 chain's shape so a battle can never run out of
+   * questions mid-fight: schedule (due) → introduction (fresh: unseen, prereq-clear) →
+   * seed-shuffled pool. That last tier matters more here than it does in the Wellspring:
+   * dueFactIds() is recomputed on EVERY cast, so once a battle has answered everything due,
+   * due() and fresh() both legitimately empty and only the shuffle keeps the casts asking.
+   * It stays deliberately kind-blind, exactly as the pre-wave-1 fallback was — pick() still
+   * receives the same `kinds` and enforces it downstream.
+   *
+   * Never throws: a draw-service fault mid-battle falls through to the same shuffled pool.
+   */
+  private globalDraw(kinds?: EncounterKind[]): string[] {
+    try {
+      const now = Date.now();
+      // The draw seed VARIES per cast — encSeed advances once per encounter, and is READ here,
+      // never incremented, so the seeds runEncounter/reskin consume are untouched. It has to
+      // vary: draw/index.ts's sourceSpread decides which pack leads a run of equally-due facts
+      // by seed-shuffling the installed pack ids, and pick()'s tier-2 loop takes the FIRST
+      // drawn fact that carries a kind-matching encounter. Under a battle-constant seed the
+      // same pack therefore wins the head of every list and every cast of the fight — the
+      // interleave would exist in the drawn array and nowhere the player can see. (Measured:
+      // with a constant seed, three consecutive casts drew a correctly interleaved
+      // [fx.a.f004, fx.b.f004, …] and surfaced fx.a all three times.) HamletScene's Wellspring
+      // varies its own per-round seed for exactly this reason.
+      const seed = this.encSeed;
+      const due = services.draw.due({ kinds, count: COMBAT_DRAW_COUNT, seed, now });
+      if (due.length) return due;
+      // drawNew applies no kind filter (draw/index.ts) — introduction pacing is deliberately
+      // kind-blind, and pick() enforces `kinds` downstream either way.
+      const fresh = services.draw.fresh({ count: COMBAT_DRAW_COUNT, seed, now });
+      if (fresh.length) return fresh;
+    } catch { /* index down mid-battle — the pool below is still honest */ }
+    // The last tier keeps the pre-wave-1 battle-constant shuffle seed, verbatim.
+    return seededShuffle(
+      this.eligibleFactIds([...this.allFactIds]),
+      mulberry32(layoutSeed('recency-fallback', this.launch.seed)),
+    );
+  }
+
+  /** The pre-wave-1 chain, verbatim over whatever pool loadContent() built (single-pack when
+   *  the draw index is down, the fixture facts on the packless dev path). Tags are gone from
+   *  BOTH branches — they left the draw path, not just the global one. */
+  private legacyDraw(): string[] {
     // supersession-reteach.md §4 — dueQueue filters suspended facts itself, but the
     // empty-queue fallback below serves this raw list directly, so filter at the source.
-    const arr = this.eligibleFactIds([...cand]);
+    const arr = this.eligibleFactIds([...this.allFactIds]);
     let due: string[] = [];
     try { due = services.srs.dueQueue(this.launch.packId, arr); } catch { due = []; }
-    const ordered = due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
-    return partitionByRecency(ordered, sessionRecentFactIds);
+    return due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
   }
 
   /** §4 suspension filter, tolerant of a stub/offline amendments service. */
@@ -2644,6 +2755,14 @@ export class CombatScene extends Phaser.Scene {
    *  encounter rather than encounters/engine.ts's generic candidates[0] fallback). */
   lastEncounterId(): string | null {
     return this.results.length ? this.results[this.results.length - 1].encounterId : null;
+  }
+
+  /** Debug: every fact id this battle's encounters have actually surfaced, in the order they
+   *  were asked (e2e-only — wave 1 "the Draw Service": proves a cast drew from EVERY installed
+   *  pack, not just this.launch.packId's. Mirrors HamletScene's wellspringDrillDebug(); reads
+   *  the existing `results` log, so it adds no state of its own). */
+  castSurfacedDebug(): string[] {
+    return this.results.flatMap((r) => r.factIds);
   }
 
   combatSnapshot(): {
