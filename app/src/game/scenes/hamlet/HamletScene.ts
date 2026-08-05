@@ -63,6 +63,14 @@ const LABEL_FONT = 'Georgia, "Times New Roman", serif';
  */
 const wellspringRecentFactIds = new Set<string>();
 
+/**
+ * services.draw.due()/fresh() cap (wave-1 draw service). Wellspring sets no `kinds` filter,
+ * and encounters/engine.ts's pick() returns the FIRST candidate whose fact has ANY encounter
+ * — so this only needs headroom over "the single most-due fact happens to have one", not an
+ * exhaustive count. 20 is a generous cushion across both installed packs.
+ */
+const WELLSPRING_DRAW_COUNT = 20;
+
 interface RawPack {
   meta?: { id?: string; title?: string };
   facts?: { id: string; type?: string }[];
@@ -819,7 +827,12 @@ export class HamletScene extends Phaser.Scene {
 
   private async doWellspring(): Promise<void> {
     this.wellspringSurfaced = [];
-    if (!this.packId) {
+    const drawReady = await wellspringDrawReady();
+    // Wave-1 draw service: gate on the GLOBAL index's own emptiness once it's up; only
+    // fall back to the legacy provinces[0] check (this.packId) if the index itself
+    // failed to load (see wellspringDrawReady()) — same player-visible "no fables yet"
+    // copy either way.
+    if (drawReady ? services.draw.isEmpty() : !this.packId) {
       await this.dialogue.run(wellspringEmpty());
       return;
     }
@@ -831,39 +844,64 @@ export class HamletScene extends Phaser.Scene {
     const choice = await this.dialogue.run(wellspringIntro());
     if (!choice || choice === '__cancel__') return;
     try {
-      const pv = this.provinces.find((p) => p.id === this.packId);
-      // supersession-reteach.md §4 — dueQueue filters suspended facts itself, but the
-      // empty-queue fallback below hands out this raw pack-order list directly, so it has to
-      // be filtered at the source or an unwitnessed amendment's new truth could be drilled
-      // with no ceremony (and a retired old truth re-asked).
-      const baseFactIds = eligibleOf(pv?.factIds ?? []);
-      const initialDue = services.srs.dueQueue(this.packId, baseFactIds);
+      // Legacy per-province plumbing — computed only as the fallback path's input when
+      // the draw index is down; the global path below never touches pv/baseFactIds.
+      let pv: Province | undefined;
+      let baseFactIds: string[] = [];
+      let initialDue: string[] = [];
+      if (!drawReady) {
+        pv = this.provinces.find((p) => p.id === this.packId);
+        // supersession-reteach.md §4 — dueQueue filters suspended facts itself, but the
+        // empty-queue fallback below hands out this raw pack-order list directly, so it has to
+        // be filtered at the source or an unwitnessed amendment's new truth could be drilled
+        // with no ceremony (and a retired old truth re-asked).
+        baseFactIds = eligibleOf(pv?.factIds ?? []);
+        initialDue = services.srs.dueQueue(this.packId ?? '', baseFactIds);
+      }
       for (let i = 0; i < 3; i++) {
-        // Due queue drives selection (Goal 5), never raw pack order. Recompute each
-        // pass so the burst advances through DISTINCT facts — a fact recorded below
-        // drops out of "due" next pass. If the live queue empties (fewer than three
-        // due), fall back to the initial queue so the burst gracefully repeats due
-        // facts rather than stalling on nothing; if that's ALSO empty (nothing was
-        // due/unseen even at the start), seed-shuffle the raw pack order instead of
-        // handing it out verbatim (mirrors CombatScene.dueFactIds()'s fallback).
+        const roundSeed = (this.seed + i * 7 + 1) >>> 0;
+        let ordered: string[];
+        if (drawReady) {
+          // Global schedule-first draw (services.draw.due, wave-1 interleaving) — due
+          // queue drives selection (Goal 5) across EVERY installed pack, never one
+          // province's raw order. Recomputed each pass so the burst advances through
+          // DISTINCT facts (a fact recorded below drops out of "due" next pass). Only
+          // once NOTHING is due anywhere does the round introduce new material instead
+          // (services.draw.fresh — unseen, prereq-clear facts, round-robined by source).
+          const now = Date.now();
+          const due = services.draw.due({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
+          ordered = due.length ? due : services.draw.fresh({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
+        } else {
+          // Draw-index-down fallback: the pre-wave-1 single-province chain, verbatim.
+          // Due queue drives selection (Goal 5), never raw pack order. Recompute each
+          // pass so the burst advances through DISTINCT facts — a fact recorded below
+          // drops out of "due" next pass. If the live queue empties (fewer than three
+          // due), fall back to the initial queue so the burst gracefully repeats due
+          // facts rather than stalling on nothing; if that's ALSO empty (nothing was
+          // due/unseen even at the start), seed-shuffle the raw pack order instead of
+          // handing it out verbatim (mirrors CombatScene.dueFactIds()'s fallback).
+          const live = services.srs.dueQueue(this.packId ?? '', baseFactIds);
+          ordered = live.length
+            ? live
+            : initialDue.length
+              ? initialDue
+              : seededShuffle(baseFactIds, mulberry32(this.seed ^ 0x5eed));
+        }
         // §recency — whichever tier wins, push anything asked already this drill (or
         // a prior Wellspring visit this session) behind fresh alternatives, so a
-        // stale initialDue snapshot can't just re-ask what pass 1 already covered.
-        const live = services.srs.dueQueue(this.packId, baseFactIds);
-        const ordered = live.length
-          ? live
-          : initialDue.length
-            ? initialDue
-            : seededShuffle(baseFactIds, mulberry32(this.seed ^ 0x5eed));
+        // stale snapshot can't just re-ask what an earlier pass already covered.
         const factIds = partitionByRecency(ordered, wellspringRecentFactIds);
         const res = await services.runEncounter({
           context: 'drill',
-          packId: this.packId,
-          seed: (this.seed + i * 7 + 1) >>> 0,
+          packId: this.packId ?? '', // @deprecated (EncounterRequest) — resolution is per-fact once drawReady
+          seed: roundSeed,
           factIds,
         });
         for (const fid of res.factIds) {
-          await services.srs.record(fid, res.quality, res.encounterId, pv?.factTypes?.[fid]);
+          // factOf() resolves type globally (fid may be from any installed pack); pv's own
+          // factTypes map is pack-scoped and only valid on the legacy fallback path.
+          const factType = drawReady ? services.draw.factOf(fid)?.type : pv?.factTypes?.[fid];
+          await services.srs.record(fid, res.quality, res.encounterId, factType);
           wellspringRecentFactIds.add(fid);
           this.wellspringSurfaced.push(fid);
         }
@@ -957,6 +995,28 @@ function resolveMoveFeet(
 ): { x: number; y: number } {
   const r = resolveMove(solid, x, y - FOOT, dx, dy, HW, HH);
   return { x: r.x, y: r.y + FOOT };
+}
+
+let warnedWellspringDrawFailure = false;
+
+/**
+ * Wave-1 draw service readiness gate for doWellspring() — mirrors encounters/register.ts's
+ * resolveCrossPack() discipline exactly: await ONLY services.draw.indexReady() (never the
+ * fuller ready(), which can reject early on an unrelated srs/amendments failure while the
+ * index itself is still mid-build), catch, warn once, and let the caller fall back to the
+ * legacy per-province drill rather than throw or hang.
+ */
+async function wellspringDrawReady(): Promise<boolean> {
+  try {
+    await services.draw.indexReady();
+    return true;
+  } catch {
+    if (!warnedWellspringDrawFailure) {
+      warnedWellspringDrawFailure = true;
+      console.warn('[wellspring] services.draw index failed to load — falling back to the legacy per-province drill');
+    }
+    return false;
+  }
 }
 
 /** supersession-reteach.md §4 — the suspension filter, tolerant of a stub/offline service
