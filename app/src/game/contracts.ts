@@ -98,7 +98,11 @@ export interface DungeonRoom {
   id: string;
   name: string;
   blurb?: string;
-  /** fact ids shown as discovered documents on room entry (teach-and-test) */
+  /** Historically: the fact ids shown as discovered documents on room entry (teach-and-test).
+   *  Since wave 1 (design §5) teaching draws globally instead — services.draw.fresh() picks
+   *  the next new material from any installed pack — so these ids are parsed and
+   *  schema-tolerated but never read for content; only .length still tunes how many facts
+   *  the room introduces (DungeonScene.teachingFacts()). */
   teaching?: string[];
   enemies: EnemySpec[];
   /** free_recall (or other) gate on the door out of this room */

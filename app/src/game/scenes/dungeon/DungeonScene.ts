@@ -79,6 +79,14 @@ export class DungeonScene extends Phaser.Scene {
   private facts = new Map<string, FactLite>();
   private pack: Pack | null = null;
   private progress: DungeonProgress = { roomIndex: 0, cleared: [] };
+  /** wave 1 — whether THIS crawl's fact lookup + teaching draws go through the global draw
+   *  index (every installed pack) or the pre-wave-1 single-pack chain. Decided once, in
+   *  loadSpecAndFacts(); see dungeonDrawReady() for the two ways it lands false. */
+  private drawGlobal = false;
+  /** Test-support only: fact ids resolved by the most recent teachingFacts() call
+   *  (e2e-interleave's teaching-mix.spec.ts reads this via dungeonTeachingDebug() to prove
+   *  which pack(s) a teaching room actually introduced from). Replaced on every call. */
+  private teachingSurfaced: string[] = [];
 
   private view!: VaultView;
   private handlers!: NodeHandlers;
@@ -114,6 +122,7 @@ export class DungeonScene extends Phaser.Scene {
     this.didReady = false;
     this.facts = new Map();
     this.pack = null;
+    this.drawGlobal = false;
   }
 
   create(): void {
@@ -194,7 +203,21 @@ export class DungeonScene extends Phaser.Scene {
     this.registry.set(PACKID_KEY, this.packId);
     const pack = entry.pack as Pack;
     this.pack = pack;
-    this.facts = toFactMap((pack.facts ?? []).map(toFactLite));
+
+    // Wave-1 draw service (design §5) — teaching may introduce material from ANY installed
+    // pack, so the fact lookup spans the global draw index rather than just this crawl's own
+    // launch pack. dungeonDrawReady() mirrors combatDrawReady()/wellspringDrawReady(): only an
+    // index-load failure falls back to the legacy single-pack lookup below.
+    this.drawGlobal = await dungeonDrawReady();
+    this.facts = this.drawGlobal
+      ? toFactMap(
+          services.draw
+            .allFactIds()
+            .map((id) => services.draw.factOf(id))
+            .filter((f): f is Fact => !!f)
+            .map(toFactLite),
+        )
+      : toFactMap((pack.facts ?? []).map(toFactLite));
 
     const files = candidateDungeonFiles(pack);
     let spec: DungeonSpec | null = null;
@@ -254,13 +277,34 @@ export class DungeonScene extends Phaser.Scene {
     this.view.setStatus(sd.hp, PARTY_MAX_HP, sd.streak);
   }
 
-  private teachingFacts(room: DungeonRoom): FactLite[] {
-    // supersession-reteach.md §4 — an outdated truth must never be re-taught as current, and
-    // the new truth waits for the Clerk's ceremony; both are suspended facts. Tolerant of a
-    // stub amendments service (then nothing is suspended and the room teaches as before).
-    let ids = room.teaching ?? [];
-    try { ids = services.amendments.eligible(ids); } catch { /* stub/offline */ }
-    return ids.map((id) => this.facts.get(id)).filter((f): f is FactLite => !!f);
+  private teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[] {
+    let ids: string[];
+    if (this.drawGlobal) {
+      // Wave-1 draw service (design §5) — room.teaching's literal fact ids are schema-tolerated
+      // but IGNORED here: a teaching room introduces the next new material from ANY installed
+      // pack (services.draw.fresh) instead of a fixed author-picked list. Its LENGTH still tunes
+      // how many facts this room introduces (defaults to 2 when the room has no teaching field
+      // at all). Amendment-suspension is handled inside fresh() itself (draw/register.ts's
+      // `eligible` dep), so no separate services.amendments.eligible() pass is needed here.
+      //
+      // Seed varies per ROOM, not a scene-constant — a frozen seed would let drawNew's
+      // rotation-start pack monopolize every teaching room's introductions for the whole crawl
+      // (T8's seed-trap discovery: a fixed seed still returns an interleaved array, but the
+      // SAME pack leads every single draw for the scene's lifetime).
+      const count = room.teaching?.length ?? 2;
+      const seed = (this.seed + roomIndex * 7919 + 3) >>> 0;
+      ids = services.draw.fresh({ count, seed, now: Date.now() });
+    } else {
+      // Draw-index-down fallback: the pre-wave-1 literal-ids chain, verbatim.
+      // supersession-reteach.md §4 — an outdated truth must never be re-taught as current, and
+      // the new truth waits for the Clerk's ceremony; both are suspended facts. Tolerant of a
+      // stub amendments service (then nothing is suspended and the room teaches as before).
+      ids = room.teaching ?? [];
+      try { ids = services.amendments.eligible(ids); } catch { /* stub/offline */ }
+    }
+    const facts = ids.map((id) => this.facts.get(id)).filter((f): f is FactLite => !!f);
+    this.teachingSurfaced = facts.map((f) => f.id);
+    return facts;
   }
 
   // ---- node interaction -----------------------------------------------------
@@ -275,7 +319,7 @@ export class DungeonScene extends Phaser.Scene {
     }
     if (state === 'cleared') {
       const room = this.spec.rooms[index];
-      void this.view.showBlurbCard(room, this.teachingFacts(room), { revisit: true });
+      void this.view.showBlurbCard(room, this.teachingFacts(room, index), { revisit: true });
       return;
     }
     void this.enterRoom(index);
@@ -329,7 +373,7 @@ export class DungeonScene extends Phaser.Scene {
 
     this.busy = true;
     const room = this.spec.rooms[index];
-    const facts = this.teachingFacts(room);
+    const facts = this.teachingFacts(room, index);
 
     // 'card' (dev screenshot): show my entry card and stop — never opens the
     // teaching modal (which awaits a dismiss and would hang a headless capture).
@@ -349,8 +393,13 @@ export class DungeonScene extends Phaser.Scene {
 
     const driving = opts.mode === 'drive';
     await this.view.showBlurbCard(room, facts, { mode: driving ? 'auto' : 'wait' });
-    // discovered documents (encounters agent's modal) — skipped only in auto-drive
-    if (!driving && room.teaching?.length) await services.showTeaching(facts);
+    // discovered documents (encounters agent's modal) — skipped only in auto-drive. Gates on
+    // the RESOLVED facts, not room.teaching (schema-tolerated-ignored post-conversion, design
+    // §5): a room with no authored teaching field can still introduce fresh material
+    // (teachingFacts()'s count defaults to 2), and the blurb card's teaser line above is
+    // already driven by facts.length (VaultView.showBlurbCard's hasTeaser) — this must track
+    // the same value, or the teaser's "the ledger will show them" promise goes unfulfilled.
+    if (!driving && facts.length) await services.showTeaching(facts);
 
     // teeth-but-fair: persist progress BEFORE combat so a wipe never costs story
     await services.save.save({ scene: 'vaults', dungeon: this.progress });
@@ -635,9 +684,10 @@ export class DungeonScene extends Phaser.Scene {
         break;
       case 'teach': {
         // integration capture: the encounters modal fed by our resolved facts
-        const room = rooms[first < rooms.length ? first : 0];
+        const idx = first < rooms.length ? first : 0;
+        const room = rooms[idx];
         this.markReadyOnce();
-        void services.showTeaching(this.teachingFacts(room));
+        void services.showTeaching(this.teachingFacts(room, idx));
         break;
       }
       case 'camp':
@@ -684,9 +734,38 @@ export class DungeonScene extends Phaser.Scene {
   tooltipDebug(): { alpha: number; name: string; blurb: string } | null {
     return this.view.tooltipDebug();
   }
+
+  /** Debug: fact ids resolved by the most recent teachingFacts() call (e2e-only — mirrors
+   *  HamletScene.wellspringDrillDebug()/CombatScene.castSurfacedDebug()'s precedent). */
+  dungeonTeachingDebug(): string[] {
+    return [...this.teachingSurfaced];
+  }
 }
 
 // ---- helpers ----------------------------------------------------------------
+
+let warnedDungeonDrawFailure = false;
+
+/**
+ * Wave-1 draw service readiness gate for the crawl's fact lookup + teaching draws — mirrors
+ * encounters/register.ts's resolveCrossPack(), HamletScene's wellspringDrawReady(), and
+ * CombatScene's combatDrawReady(): await ONLY services.draw.indexReady() (never the fuller
+ * ready(), which can reject early on an unrelated srs/amendments failure while the index is
+ * still mid-build), catch, warn once, and let loadSpecAndFacts() fall back to the legacy
+ * single-pack lookup rather than throw or hang. A crawl must never stall on the picker.
+ */
+async function dungeonDrawReady(): Promise<boolean> {
+  try {
+    await services.draw.indexReady();
+    return true;
+  } catch {
+    if (!warnedDungeonDrawFailure) {
+      warnedDungeonDrawFailure = true;
+      console.warn('[dungeon] services.draw index failed to load — falling back to the legacy single-pack lookup');
+    }
+    return false;
+  }
+}
 
 function toFactLite(f: Fact): FactLite {
   return {
