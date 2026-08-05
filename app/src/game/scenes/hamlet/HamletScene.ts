@@ -865,14 +865,33 @@ export class HamletScene extends Phaser.Scene {
           // Global schedule-first draw (services.draw.due, wave-1 interleaving) — due
           // queue drives selection (Goal 5) across EVERY installed pack, never one
           // province's raw order. Recomputed each pass so the burst advances through
-          // DISTINCT facts (a fact recorded below drops out of "due" next pass). Only
-          // once NOTHING is due anywhere does the round introduce new material instead
+          // DISTINCT facts (a fact recorded below drops out of "due" next pass). Once
+          // NOTHING is due anywhere the round introduces new material instead
           // (services.draw.fresh — unseen, prereq-clear facts, round-robined by source).
-          // Mirror of the legacy branch below — the two are PERMANENT duplicates by
-          // design (draw-index-down fallback), not drift to reconcile. Change both together.
-          const now = Date.now();
-          const due = services.draw.due({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
-          ordered = due.length ? due : services.draw.fresh({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
+          // Three tiers, mirroring CombatScene.globalDraw()'s shape (same tier semantics;
+          // NOT a byte-identical pool — this draws across every installed pack, that one
+          // draws within a battle's own scope) so a burst can never run dry against a
+          // fully exhausted pool: every fact recorded AND none currently due (e.g. right
+          // after a big review session, before any box's interval re-elapses) — due() AND
+          // fresh() both legitimately return [] then. Tier 3 falls back to a shuffle over
+          // EVERY installed fact (services.draw.allFactIds()), visit-constant seed like
+          // this method's own legacy tier-3 below. Never throws: a draw-service fault this
+          // round (due()/fresh() themselves erroring, not just returning empty) also falls
+          // through to the shuffle.
+          let due: string[] = [];
+          let fresh: string[] = [];
+          try {
+            const now = Date.now();
+            due = services.draw.due({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
+            if (!due.length) fresh = services.draw.fresh({ count: WELLSPRING_DRAW_COUNT, seed: roundSeed, now });
+          } catch {
+            /* index down mid-drill — the shuffle below is still honest */
+          }
+          ordered = due.length
+            ? due
+            : fresh.length
+              ? fresh
+              : seededShuffle(eligibleOf(services.draw.allFactIds()), mulberry32(this.seed ^ 0x5eed));
         } else {
           // Draw-index-down fallback: the pre-wave-1 single-province chain, verbatim.
           // Due queue drives selection (Goal 5), never raw pack order. Recompute each
@@ -882,8 +901,9 @@ export class HamletScene extends Phaser.Scene {
           // facts rather than stalling on nothing; if that's ALSO empty (nothing was
           // due/unseen even at the start), seed-shuffle the raw pack order instead of
           // handing it out verbatim (mirrors CombatScene.dueFactIds()'s fallback).
-          // Mirror of the global branch above — the two are PERMANENT duplicates by
-          // design, not drift to reconcile. Change both together.
+          // Same tier SHAPE as the global branch above (schedule → introduce → shuffle-
+          // as-last-resort) — not a byte-identical pool (one province vs. every installed
+          // pack) by design. Change both together when the shape itself changes.
           const live = services.srs.dueQueue(this.packId ?? '', baseFactIds);
           ordered = live.length
             ? live
