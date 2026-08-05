@@ -50,7 +50,7 @@ vi.mock('../VaultView', () => ({
 }));
 
 import { DungeonScene } from '../DungeonScene';
-import { services, type SaveData, type Quality } from '../../../contracts';
+import { services, type SaveData, type Quality, type DungeonRoom, type FactLite } from '../../../contracts';
 
 const tick = (): Promise<void> => new Promise((r) => { setTimeout(r, 0); });
 
@@ -305,5 +305,80 @@ describe('busy lock across the battle-return settlement (crucible-2)', () => {
       () => env.sceneStarts.filter((s) => s.key === 'combat').length === 2,
       'the second battle after the lock releases',
     );
+  });
+});
+
+// ---- teachingFacts() exhausted-pool fallback (wave-1 T9 fix round 1) -------
+
+/** teachingFacts() is a private method; the drawGlobal branch only activates after a real
+ *  loadSpecAndFacts() pack resolution, which this file's zero-packs bridge mocks (getPacks/
+ *  getPackAsset) don't provide. Reaching directly into scene internals isolates the unit under
+ *  test (the exhausted-pool fallback) from that unrelated plumbing. */
+type TeachingFactsInternals = {
+  drawGlobal: boolean;
+  seed: number;
+  facts: Map<string, FactLite>;
+  teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[];
+};
+
+function poke(scene: DungeonScene): TeachingFactsInternals {
+  return scene as unknown as TeachingFactsInternals;
+}
+
+function installDraw(fresh: (opts: { count: number; seed: number; now: number }) => string[]): void {
+  services.draw = {
+    ready: async () => {},
+    indexReady: async () => {},
+    due: () => [],
+    fresh,
+    allFactIds: () => [],
+    sourceOf: () => undefined,
+    factOf: () => undefined,
+    encountersOf: () => [],
+    isEmpty: () => false,
+  };
+}
+
+describe('teachingFacts — exhausted global pool falls back to the room\'s authored scroll (fix round 1)', () => {
+  it('falls back to room.teaching (through eligibility) when services.draw.fresh() finds nothing new', () => {
+    installServices({});
+    services.amendments.eligible = (ids) => ids.filter((id) => id !== 'moss.f2'); // simulate a suspended fact
+    installDraw(() => []); // every installed fact already has an SRS record — nothing unseen remains
+
+    const s = poke(new DungeonScene());
+    s.drawGlobal = true;
+    s.seed = 7;
+    s.facts = new Map([
+      ['moss.f1', { id: 'moss.f1', type: 'definition', statement: 'stmt1' }],
+      ['moss.f2', { id: 'moss.f2', type: 'definition', statement: 'stmt2' }],
+    ]);
+    const room: DungeonRoom = { id: 'r1', name: 'Room', teaching: ['moss.f1', 'moss.f2'], enemies: [] };
+
+    // Pre-fix (RED): fresh()'s empty result short-circuits straight to an empty array — the
+    // room's own authored scroll never surfaces, even though it always did pre-wave-1.
+    // Post-fix (GREEN): falls back to room.teaching, still filtered through eligibility
+    // (moss.f2 excluded), landing on exactly moss.f1.
+    const result = s.teachingFacts(room, 0);
+    expect(result.map((f) => f.id)).toEqual(['moss.f1']);
+  });
+
+  it('does not top up a partial fresh() draw with scripted ids — new-first stands as-is', () => {
+    installServices({});
+    installDraw(() => ['moss.f9']); // exactly one new fact remains unseen anywhere installed
+
+    const s = poke(new DungeonScene());
+    s.drawGlobal = true;
+    s.seed = 7;
+    s.facts = new Map([
+      ['moss.f9', { id: 'moss.f9', type: 'definition', statement: 'stmt9' }],
+      ['moss.f1', { id: 'moss.f1', type: 'definition', statement: 'stmt1' }],
+      ['moss.f2', { id: 'moss.f2', type: 'definition', statement: 'stmt2' }],
+    ]);
+    // a 2-id authored scroll — if the fallback wrongly topped up a PARTIAL draw, moss.f1/f2
+    // would leak into the result alongside moss.f9.
+    const room: DungeonRoom = { id: 'r1', name: 'Room', teaching: ['moss.f1', 'moss.f2'], enemies: [] };
+
+    const result = s.teachingFacts(room, 0);
+    expect(result.map((f) => f.id)).toEqual(['moss.f9']);
   });
 });

@@ -294,17 +294,32 @@ export class DungeonScene extends Phaser.Scene {
       const count = room.teaching?.length ?? 2;
       const seed = (this.seed + roomIndex * 7919 + 3) >>> 0;
       ids = services.draw.fresh({ count, seed, now: Date.now() });
+      // fix round 1 (certification finding) — an EXHAUSTED global pool (every installed fact
+      // already has an SRS record) returns [] here, which used to leave the room dead: no
+      // card, no modal, even though the pre-wave-1 room always had content (its authored
+      // scroll never depended on SRS history). Fall back to that scripted content — a re-read,
+      // not new material — rather than go silent. A PARTIAL draw (>=1 fresh fact) stands as
+      // published, uncombined with the scripted ids: new-first is the design, not a top-up.
+      if (ids.length === 0) ids = this.scriptedTeachingIds(room);
     } else {
       // Draw-index-down fallback: the pre-wave-1 literal-ids chain, verbatim.
-      // supersession-reteach.md §4 — an outdated truth must never be re-taught as current, and
-      // the new truth waits for the Clerk's ceremony; both are suspended facts. Tolerant of a
-      // stub amendments service (then nothing is suspended and the room teaches as before).
-      ids = room.teaching ?? [];
-      try { ids = services.amendments.eligible(ids); } catch { /* stub/offline */ }
+      ids = this.scriptedTeachingIds(room);
     }
     const facts = ids.map((id) => this.facts.get(id)).filter((f): f is FactLite => !!f);
     this.teachingSurfaced = facts.map((f) => f.id);
     return facts;
+  }
+
+  /** The pre-wave-1 authored scroll: room.teaching's literal ids, amendment-filtered. Used as
+   *  teachingFacts()'s legacy (draw-index-down) path AND — fix round 1 — as the drawGlobal
+   *  path's exhausted-pool fallback (services.draw.fresh() found nothing left unseen).
+   *  supersession-reteach.md §4 — an outdated truth must never be re-taught as current, and the
+   *  new truth waits for the Clerk's ceremony; both are suspended facts. Tolerant of a stub
+   *  amendments service (then nothing is suspended and the room teaches as authored). */
+  private scriptedTeachingIds(room: DungeonRoom): string[] {
+    let ids = room.teaching ?? [];
+    try { ids = services.amendments.eligible(ids); } catch { /* stub/offline */ }
+    return ids;
   }
 
   // ---- node interaction -----------------------------------------------------
