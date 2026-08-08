@@ -35,4 +35,11 @@ describe('pickKeepsake', () => {
   it('ignores ids missing from the catalog', () => {
     expect(pickKeepsake({ 'ghost.item': 5 }, defOf, 7)).toBeNull();
   });
+
+  it('varies the pick across seeds when several trinkets are eligible', () => {
+    const stacks = { 't.fox': 1, 't.owl': 1, 't.moth': 1 };
+    const picks = new Set<string>();
+    for (let seed = 0; seed < 20; seed++) picks.add(pickKeepsake(stacks, defOf, seed)!);
+    expect(picks.size).toBeGreaterThanOrEqual(2);
+  });
 });
