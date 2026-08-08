@@ -103,13 +103,27 @@ export function factorConv(): Conversation {
   };
 }
 
-/** Keeper's Cottage — no NPC, the Keeper's own quiet beat. */
-export function cottageConv(): Conversation {
+/** Keeper's Cottage — no NPC, the Keeper's own quiet beat. `alreadyRested` appends the
+ *  Hearth's already-banked line for tonight (canRestTonight() already false). */
+export function cottageConv(alreadyRested?: boolean): Conversation {
   return {
     speaker: "Keeper's Cottage",
     pages: [
       'You bank the hearth and set your pack by the door. The trophies of fallen provinces glint on the shelf.',
       'Your journey is recorded. Rest easy, Keeper — the Ledger is safe here.',
+      ...(alreadyRested ? ["The hearth still glows from tonight's banking. Rest again come tomorrow's dark."] : []),
+    ],
+  };
+}
+
+/** The Hearth's night-rest beat — plays instead of cottageConv() when canRestTonight() is
+ *  true; the party heals in full and Embers refill (rest/embers.ts). Title stays the
+ *  Cottage's own: the hearth lives inside it, not a separate speaker. */
+export function hearthRestConv(): Conversation {
+  return {
+    speaker: "Keeper's Cottage",
+    pages: [
+      'You bank the hearth, and the night keeps its side of the bargain. The party is whole; the embers are banked.',
     ],
   };
 }

@@ -33,12 +33,14 @@ import {
   alderConv,
   alderFarewell,
   cottageConv,
+  hearthRestConv,
   factorConv,
   wellspringEmpty,
   wellspringIntro,
   wellspringOutro,
   type Province,
 } from './content';
+import { canRestTonight, EMBER_MAX } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
@@ -52,6 +54,9 @@ const HH = 5;
 const FOOT = 5; // collision box sits around the feet
 const INTERACT_DIST = 22;
 const LABEL_FONT = 'Georgia, "Times New Roman", serif';
+/** Party HP pool cap — local to this scene on purpose (matches DungeonScene's own
+ *  PARTY_MAX_HP by value, never imported: MAX_HP duplication law). */
+const PARTY_MAX_HP = 16;
 
 /**
  * §recency (parity with CombatScene.dueFactIds() — see game/recency.ts) — facts
@@ -813,6 +818,29 @@ export class HamletScene extends Phaser.Scene {
   }
 
   private async doCottage(): Promise<void> {
+    const now = new Date();
+    let lastHearthAt: string | undefined;
+    try {
+      lastHearthAt = services.save.get().lastHearthAt;
+    } catch {
+      /* no save yet — never rested, canRestTonight(undefined, now) already says so */
+    }
+
+    if (canRestTonight(lastHearthAt, now)) {
+      try {
+        await services.save.save({
+          hp: PARTY_MAX_HP,
+          embers: EMBER_MAX,
+          lastHearthAt: now.toISOString(),
+          lastPlayed: now.toISOString(),
+        });
+      } catch {
+        /* save may be a stub */
+      }
+      await this.dialogue.run(hearthRestConv());
+      return;
+    }
+
     try {
       await services.save.save({
         scene: 'hamlet',
@@ -822,7 +850,7 @@ export class HamletScene extends Phaser.Scene {
     } catch {
       /* save may be a stub */
     }
-    await this.dialogue.run(cottageConv());
+    await this.dialogue.run(cottageConv(true));
   }
 
   private async doWellspring(): Promise<void> {
