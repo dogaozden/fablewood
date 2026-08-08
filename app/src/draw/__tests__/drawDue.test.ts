@@ -139,6 +139,27 @@ describe('drawDue', () => {
     }
   });
 
+  it('buckets an id with no due date alone, so it holds its ranked place', () => {
+    // One unknown among same-day ids: it joins neither neighbouring bucket, and the buckets
+    // on either side of it still spread.
+    const ranking = ['fx.a.one', 'fx.b.one', 'fx.a.two', 'fx.b.two', 'fx.a.three'];
+    const dueOf = (id: string) => (id === 'fx.a.two' ? undefined : 0);
+    for (const seed of SEEDS) {
+      const out = drawDue(idx, deps({ dueOf, dueOrder: ranked(ranking) }), { count: 5, seed, now: 0 });
+      expect(out[2], `the unknown holds rank 3, seed ${seed}`).toBe('fx.a.two');
+      expect(new Set(packsOf(out.slice(0, 2))).size, `the bucket before it still spreads, seed ${seed}`).toBe(2);
+      expect(new Set(packsOf(out.slice(3))).size, `the bucket after it still spreads, seed ${seed}`).toBe(2);
+    }
+
+    // All unknown: an undefined bucket groups with NOTHING, not even another undefined, so a
+    // pack-grouped ranking comes back untouched instead of being spread.
+    const unknown = ['fx.b.three', 'fx.b.four', 'fx.a.four', 'fx.a.one'];
+    for (const seed of SEEDS) {
+      const out = drawDue(idx, deps({ dueOf: () => undefined, dueOrder: ranked(unknown) }), { count: 4, seed, now: 0 });
+      expect(out, `all-unknown is identity, seed ${seed}`).toEqual(unknown);
+    }
+  });
+
   it('draws nothing from an empty index, or at count 0', () => {
     expect(drawDue(buildDrawIndex([]), deps(), { count: 8, seed: 1, now: 0 })).toEqual([]);
     expect(drawDue(idx, deps(), { count: 0, seed: 1, now: 0 })).toEqual([]);
