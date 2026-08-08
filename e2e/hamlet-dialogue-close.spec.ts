@@ -117,6 +117,13 @@ async function answerAnyOverlay(page: Page): Promise<void> {
 
 test.describe('hamlet dialogue close (crucible v0 #1)', () => {
   test('closing the Cottage conversation with E does not silently reopen it', async ({ page }) => {
+    // Wave 3 (Hearth): a same-day lastHearthAt keeps doCottage() on the pre-existing
+    // checkpoint path (not the new night-rest path) — this test's subject is E-close
+    // mechanics, not which Cottage content is showing.
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '', lastHearthAt: new Date().toISOString() },
+    });
+
     await page.goto('/?scene=hamlet&seed=7');
     await waitReady(page, 'hamlet');
     await waitHamletPlayer(page);
@@ -126,7 +133,7 @@ test.describe('hamlet dialogue close (crucible v0 #1)', () => {
 
     await instrumentEnter(page);
 
-    // open — real E tap (page 1/2, typing)
+    // open — real E tap (page 1/3, typing)
     await tapKey(page, 'e');
     await page.waitForTimeout(250);
     expect(await enterCallCount(page), 'the open tap invoked enter() exactly once').toBe(1);
@@ -138,7 +145,13 @@ test.describe('hamlet dialogue close (crucible v0 #1)', () => {
     // advance to page 2 (starts typing)
     await tapKey(page, 'e');
     await page.waitForTimeout(250);
-    // skip page 2's typewriter — now on the last page, fully shown, no choices
+    // skip page 2's typewriter
+    await tapKey(page, 'e');
+    await page.waitForTimeout(200);
+    // advance to page 3 — the already-rested line a same-day lastHearthAt appends (starts typing)
+    await tapKey(page, 'e');
+    await page.waitForTimeout(250);
+    // skip page 3's typewriter — now on the last page, fully shown, no choices
     await tapKey(page, 'e');
     await page.waitForTimeout(200);
     expect((await hamletPlayer(page))?.dialogueOpen, 'still open before the closing tap').toBe(true);
