@@ -41,6 +41,8 @@ import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
+import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
+import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
 import {
@@ -80,6 +82,20 @@ const sessionRecentFactIds = new Set<string>();
  * window), not an exhaustive count.
  */
 const COMBAT_DRAW_COUNT = 20;
+
+/**
+ * Death's Door deals PLAIN gradeable drills only (Concordance Ch. I — "hold the line with
+ * what you know"): one prompt, one answer, one 0/0.5/1 verdict. `match`/`order` are multi-step
+ * surface manipulations and `scenario_branch` is the boss/parley setpiece kind — none of the
+ * three is a recall save. Unlike the Wellspring's deal this is deliberately NOT kind-blind:
+ * services.draw.due() with `kinds` unset can hand back a fact whose only encounter is one of
+ * those, and the door has no cast to fall back to when the question turns out undrillable.
+ */
+const DD_KINDS: EncounterKind[] = ['free_recall', 'mcq'];
+
+/** The door's own name, carried into the drill overlay's eyebrow so the player can see what
+ *  the question is FOR (encounters/overlay.ts's `flair` slot). Task 7 lands the full frame. */
+const DEATHS_DOOR_TITLE = 'The Ledger Holds Your Line';
 
 let warnedCombatDrawFailure = false;
 
@@ -181,6 +197,10 @@ export class CombatScene extends Phaser.Scene {
   private reclaimed = 0;
   private newWelds = 0;
   private graceAvailable = true;
+  /** Death's Door (Concordance Ch. I) — the live recall-save run; null whenever the door is shut. */
+  private dd: DeathsDoorState | null = null;
+  /** Outlives `dd` being cleared: the welded revival is once per BATTLE, not once per door. */
+  private ddRevivedUsed = false;
   private encSeed = 0;
   private destroyed = false;
   private demo = false; // ?demo=1 → autopilot the party (screenshots + e2e)
@@ -302,6 +322,8 @@ export class CombatScene extends Phaser.Scene {
     this.reclaimed = 0;
     this.newWelds = 0;
     this.graceAvailable = true;
+    this.dd = null;
+    this.ddRevivedUsed = false;
     this.debugPrefer = null;
     this.actionLog = [];
     this.refreshSeq = 0;
@@ -728,8 +750,12 @@ export class CombatScene extends Phaser.Scene {
   // ---- turn loop --------------------------------------------------------
 
   private advanceTurn(): void {
-    if (this.destroyed || this.state === 'over') return;
+    // 'deathsdoor' freezes the board exactly the way 'over' does: the door's rounds are
+    // question-beats, not combat turns, so a delayed turn-tick scheduled BEFORE the party fell
+    // (the 360/420/650ms advanceTurn hops below) must never step the fight on mid-door.
+    if (this.destroyed || this.state === 'over' || this.state === 'deathsdoor') return;
     const end = this.checkEnd();
+    if (end === 'retreat') { this.enterDeathsDoor(); return; }
     if (end) { this.resolveBattle(end); return; }
 
     if (this.boss && this.pendingBossPhase && this.boss.alive && this.phaseIndex < (this.launch.room.boss?.phases.length ?? 0)) {
@@ -1780,6 +1806,7 @@ export class CombatScene extends Phaser.Scene {
     const unit = this.unitById(this.activeId);
     if (unit) this.endTurnDecay(unit);
     const end = this.checkEnd();
+    if (end === 'retreat') { this.enterDeathsDoor(); return; }
     if (end) { this.resolveBattle(end); return; }
     this.advanceTurn();
   }
@@ -1970,7 +1997,8 @@ export class CombatScene extends Phaser.Scene {
     this.time.delayedCall(900, () => {
       if (this.destroyed) return;
       const end = this.checkEnd();
-      if (end) this.resolveBattle(end);
+      if (end === 'retreat') this.enterDeathsDoor();
+      else if (end) this.resolveBattle(end);
       else this.advanceTurn();
     });
 
@@ -2629,7 +2657,7 @@ export class CombatScene extends Phaser.Scene {
     return this.units.some((u) => u.team === 'enemy' && u.alive) ? null : 'victory';
   }
 
-  private resolveBattle(outcome: 'victory' | 'retreat'): void {
+  private resolveBattle(outcome: 'victory' | 'retreat' | 'wipe', wipeKeepsakeId: string | null = null): void {
     if (this.state === 'over') return;
     this.state = 'over';
     this.hud.hideActionMenu();
@@ -2649,6 +2677,12 @@ export class CombatScene extends Phaser.Scene {
       // DungeonScene.resolveCombat) so a reload here loses (or keeps) all three — streak,
       // loot, hp — together, never just one.
       this.cameras.main.flash(280, 247, 206, 107);
+    } else if (outcome === 'wipe') {
+      // Death's Door exhausted — heavier than a retreat: the Fade collects, and the run's
+      // progress is still kept (Fable_SPEC.md:31 — a wipe costs the loot roll, never story).
+      this.hud.showToast('The Fade takes its due.', P.duskRose);
+      this.hud.showBanner('You wake at the hamlet camp — the Ledger holds what matters.', P.duskRose);
+      this.cameras.main.flash(280, 90, 40, 60);
     } else {
       this.hud.showToast('The Fade closes in…', P.duskRose);
       this.hud.showBanner('You wake at the hamlet camp — progress kept, loot forfeit.', P.duskRose);
@@ -2659,6 +2693,9 @@ export class CombatScene extends Phaser.Scene {
       outcome, hpLost: this.hpLost, results: this.results,
       reclaimed: this.reclaimed, newWelds: this.newWelds,
     };
+    // Present on a wipe and only on a wipe (`keepsakeId: null` = nothing eligible was carried,
+    // which is a real, reportable outcome — distinct from "this wasn't a wipe").
+    if (outcome === 'wipe') payload.wipeReport = { keepsakeId: wipeKeepsakeId };
     // Fire the event now (listeners registered before launch catch it) AND hand the
     // outcome to the return scene's init data (listeners registered on resume catch it).
     this.game.events.emit('combat:resolved', payload);
@@ -2668,6 +2705,182 @@ export class CombatScene extends Phaser.Scene {
       const back = this.launch.returnScene;
       if (back && this.scene.get(back)) this.scene.start(back, { seed: this.launch.seed, combatOutcome: payload });
     });
+  }
+
+  // ---- death's door (Concordance Ch. I, "The Ledger Holds Your Line") -----
+
+  /**
+   * The party is down. checkEnd()'s 'retreat' no longer resolves the battle outright — the
+   * Fade presses close and the Keeper holds the line with what they know: a run of recall
+   * drills, scored by the pure machine in deathsdoor.ts, decides whether the run STABILIZES
+   * (three held → the old retreat, unchanged), WIPES (three marks → the Fade takes a keepsake),
+   * or REVIVES (one welded fact, box ≥ 4, answered clean → you stand back up at 1 pool hp,
+   * once per battle).
+   *
+   * The board is frozen for the door's whole run: `state` is 'deathsdoor', which every input
+   * handler already refuses on exactly the same "not one of my Phases" convention it uses to
+   * refuse 'over', and advanceTurn() returns early on it. No enemy acts between rounds — the
+   * door's rounds are question-beats, not combat turns.
+   */
+  private enterDeathsDoor(): void {
+    if (this.state === 'deathsdoor' || this.state === 'over') return;
+    this.state = 'deathsdoor';
+    this.hud.hideActionMenu();
+    this.rangeGfx.clear();
+    this.hoverGfx.clear();
+    this.dd = enterDoor(this.ddRevivedUsed);
+    this.hud.showBanner('The Fade presses close. Hold the line with what you know.', P.duskRose);
+    void this.runDeathsDoorRound();
+  }
+
+  /**
+   * One death-save fact. The full three-tier ladder — schedule (due) → introduction (fresh) →
+   * seed-shuffled pool — in one try/catch, exactly like globalDraw(): a count-1 deal must never
+   * dead-end on a veteran save where everything has been answered and nothing has come due yet.
+   *
+   * Deliberately NOT routed through dueFactIds()/drawGlobal. combatDrawReady()'s FIXTURE_PACK_ID
+   * gate exists to keep a fantasy-generic fixture fight from mixing in a real pack's facts; a
+   * death save is not part of that fight's dressing, it asks what the PLAYER actually knows, and
+   * services.draw's index spans every installed pack regardless of the launch's nominal packId.
+   * Gating here would starve the door of every real fact on a dev/e2e launch.
+   *
+   * But that same gate is ALSO the only thing that ever builds the index inside a battle (it
+   * short-circuits on FIXTURE_PACK_ID before awaiting), and the dev crawl never builds it either
+   * — DungeonScene.loadSpecAndFacts() returns on `if (this.dev) return this.useFixture()` before
+   * reaching its own dungeonDrawReady(). So an "unconditional" due() on that launch would read an
+   * EMPTY index, return nothing, and slide silently down to the shuffle tier over the fixture
+   * facts. Build it here first, with the discipline every other scene's gate uses: await ONLY
+   * indexReady() (never the fuller ready(), which can reject on an unrelated srs/amendments fault
+   * while the index is still fine), and never stall — a failure just falls to the ladder below.
+   */
+  private async ddDraw(): Promise<string | null> {
+    try { await services.draw.indexReady(); } catch { /* index down — the ladder below still holds */ }
+    // Read encSeed; the paired runEncounter below consumes this.encSeed++ (one round, one seed).
+    const seed = this.encSeed;
+    const now = Date.now();
+    let due: string[] = [];
+    let fresh: string[] = [];
+    try {
+      due = services.draw.due({ kinds: DD_KINDS, count: 1, seed, now });
+      if (!due.length) fresh = services.draw.fresh({ count: 1, seed, now });
+    } catch { /* service fault falls through to the shuffle tier, like globalDraw */ }
+    const pick = due[0] ?? fresh[0]
+      ?? seededShuffle(this.eligibleFactIds([...this.allFactIds]), mulberry32(layoutSeed('deathsdoor-fallback', seed)))[0];
+    return pick ?? null;
+  }
+
+  /** One round at the door: deal a fact, ask it, score it, route the machine's verdict. */
+  private async runDeathsDoorRound(): Promise<void> {
+    if (this.destroyed || !this.dd) return;
+    const id = await this.ddDraw();
+    if (this.destroyed || !this.dd) return;
+    // No fact exists anywhere (packless/fixture edge). Never trap the player behind a question
+    // that cannot be asked — an unanswerable door stabilizes, which is the old retreat.
+    if (!id) { this.stabilizeAtDoor(); return; }
+    // The revive gate reads the box the fact carried BEFORE the answer is recorded: record()
+    // can promote it, and a fact welded BY this very answer is not what stands you back up.
+    const box = this.boxOfSafe(id);
+    let result: EncounterResult;
+    try {
+      result = await services.runEncounter({
+        context: 'drill', kinds: DD_KINDS, factIds: [id], packId: this.launch.packId,
+        seed: this.encSeed++, flair: DEATHS_DOOR_TITLE,
+      });
+    } catch {
+      result = { encounterId: 'local-deathsdoor', kind: 'free_recall', factIds: [id], quality: 0, detail: 'offline' };
+    }
+    if (this.destroyed) return;
+    // Death saves are real drills — the learning record is sacred here too (same order as every
+    // other encounter site: push the result, then record, before anything reads the outcome).
+    this.results.push(result);
+    await this.record(result);
+    if (this.destroyed || !this.dd) return;
+
+    const { next, event } = recordAnswer(this.dd, { quality: result.quality, box });
+    this.dd = next;
+    this.ddRevivedUsed = next.revivedUsed;
+    switch (event) {
+      case 'revived':
+        await this.reviveAtDoor();
+        return;
+      case 'stabilized':
+        this.stabilizeAtDoor();
+        return;
+      case 'wiped':
+        await this.wipeAtDoor();
+        return;
+      default:
+        // Counters are Task 7's frame; until it lands the beat itself is the whole feedback.
+        this.hud.showBanner(
+          result.quality === 1 ? 'The lantern holds.' : 'A mark of the Fade.',
+          result.quality === 1 ? P.lanternGold : P.duskRose,
+        );
+        this.time.delayedCall(650, () => { if (!this.destroyed) void this.runDeathsDoorRound(); });
+    }
+  }
+
+  /** Three held: the Clerk walks you out. This is the pre-door retreat, byte-for-byte. */
+  private stabilizeAtDoor(): void {
+    this.dd = null;
+    this.hud.showBanner('Steady now. The Ledger holds your line — we walk out with what matters.', P.parchment);
+    // A beat so the Clerk's line is readable before resolveBattle's own retreat banner replaces it.
+    this.time.delayedCall(900, () => { if (!this.destroyed) this.resolveBattle('retreat'); });
+  }
+
+  /** Three marks: the Fade takes its due — one carried trinket, seeded, relics never touched. */
+  private async wipeAtDoor(): Promise<void> {
+    this.dd = null;
+    let keepsakeId: string | null = null;
+    try {
+      keepsakeId = pickKeepsake(
+        services.inventory.snapshot().stacks,
+        (id) => itemById(id),
+        layoutSeed('keepsake', this.launch.seed),
+      );
+      // The strip lands BEFORE resolveBattle so the payload describes post-strip reality. A
+      // failed strip (offline store, or the stack moved underfoot) degrades to "nothing taken"
+      // rather than blocking the resolution — the run has to end either way.
+      if (keepsakeId && !(await services.inventory.removeItem(keepsakeId, 1))) keepsakeId = null;
+    } catch { keepsakeId = null; }
+    if (this.destroyed) return;
+    this.resolveBattle('wipe', keepsakeId);
+  }
+
+  /**
+   * A welded fact answered clean: you stand back up at 1 pool hp. splitPooledHp(1) puts that
+   * single point on the Keeper and leaves the companion down at 0 — intended: the door stands
+   * the KEEPER up, not the party. Once per battle is already enforced by the machine.
+   */
+  private async reviveAtDoor(): Promise<void> {
+    this.dd = null;
+    const keeper = this.unitById('keeper');
+    if (!keeper) { this.stabilizeAtDoor(); return; }
+    const pool = 1;
+    const split = splitPooledHp(pool);
+    keeper.hp = split.keeper;
+    keeper.alive = keeper.hp > 0;
+    keeper.statuses = [];
+    this.reviveView(keeper); // undo fadeDead's death tween, same as a Satchel revival
+    this.drawHpBar(keeper);
+    // The pool moved with no battle event to account for it — the same re-anchor the Satchel
+    // heal performs (crucible #3): save.hp went stale the instant combat damage started, and
+    // hpLost is a running total the dungeon subtracts on return, so without this the damage
+    // this revival just superseded would be charged a second time.
+    try { await services.save.save({ hp: pool }); } catch { /* offline */ }
+    if (this.destroyed) return;
+    this.hpLost = 0;
+    this.refreshParty();
+    this.hud.showBanner('A welded memory flares — you stand again, lantern-lit.', P.lanternGold);
+    this.cameras.main.flash(240, 247, 206, 107);
+    // Back into the normal turn flow at the Keeper's own turn — the same activeId/setActive/
+    // beginPlayerTurn trio advanceTurn() runs for a party unit, without the round-wrap bookkeeping
+    // and turn-start status ticks a genuinely NEW turn fires: the door interrupted this turn, it
+    // did not consume it.
+    const idx = this.order.indexOf(keeper.id);
+    if (idx >= 0) this.orderIndex = idx;
+    this.activeId = keeper.id;
+    this.hud.setActive(keeper.id, this.aliveIds());
+    this.beginPlayerTurn(keeper);
   }
 
   // ---- small helpers ----------------------------------------------------
@@ -2784,6 +2997,16 @@ export class CombatScene extends Phaser.Scene {
    *  a genuinely pack-resolved id (not `local-*`, not the empty-archive `none`). */
   castSurfacedDebug(): Array<{ encounterId: string; factIds: string[] }> {
     return this.results.map((r) => ({ encounterId: r.encounterId, factIds: r.factIds }));
+  }
+
+  /** Debug: the door's live state (e2e-only — same family as combatSnapshot()/bossRevealActive()). */
+  deathsDoorSnapshot(): { active: boolean; successes: number; failures: number; revivedUsed: boolean } {
+    return {
+      active: this.dd !== null,
+      successes: this.dd?.successes ?? 0,
+      failures: this.dd?.failures ?? 0,
+      revivedUsed: this.ddRevivedUsed,
+    };
   }
 
   combatSnapshot(): {
