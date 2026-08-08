@@ -112,7 +112,7 @@ async function combatDrawReady(packId: string): Promise<boolean> {
   }
 }
 
-type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'playerTier' | 'resolving' | 'enemy' | 'over';
+type Phase = 'boot' | 'playerMove' | 'playerTarget' | 'playerTier' | 'resolving' | 'enemy' | 'over' | 'deathsdoor';
 
 /**
  * §6 dev/e2e harness override: `?rank=1|2|3` beside `?demo=1`/`?boss=1`/`?kit=1` — tiers

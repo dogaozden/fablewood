@@ -128,7 +128,9 @@ export interface CombatLaunch {
 }
 
 export interface CombatOutcome {
-  outcome: 'victory' | 'retreat';
+  /** 'wipe' = Death's Door exhausted (Concordance Ch. I). Was a 2-member union; precedent for
+   *  a 3rd member set by `NightLedgerData.outcome`'s `'camp'`. */
+  outcome: 'victory' | 'retreat' | 'wipe';
   hpLost: number;
   results: EncounterResult[];
   /** §3.2 Night's Ledger run tallies — facts reclaimed from the Fade (§3.1) and facts newly
@@ -137,6 +139,9 @@ export interface CombatOutcome {
    *  consumers read `?? 0`. */
   reclaimed?: number;
   newWelds?: number;
+  /** Death's Door wipe detail — absent on victory/retreat. Optional, additive: old consumers
+   *  unaffected, same `?? `-default pattern as `reclaimed?`/`newWelds?`. */
+  wipeReport?: { keepsakeId: string | null };
 }
 
 // ---------------------------------------------------------------- srs & save
@@ -331,7 +336,7 @@ export interface AmendmentsApi {
  * are all zero (streak, a standing counter, does not count toward emptiness).
  */
 export interface NightLedgerData {
-  outcome: 'victory' | 'retreat' | 'camp';
+  outcome: 'victory' | 'retreat' | 'camp' | 'wipe';
   /** facts answered q1 this run — "Held against the Fade" (always shown) */
   held: number;
   /** facts newly welded (crossed into box ≥ 4, the weld-edge mastery level) — "Newly welded" */
@@ -342,6 +347,9 @@ export interface NightLedgerData {
   gold: number;
   /** hearth streak — rendered "N nights" (singular "1 night") */
   streak: number;
+  /** Optional, additive — the card's zero-suppressed "Keepsake taken" row reads it; absent
+   *  for non-wipe outcomes. */
+  keepsakeId?: string | null;
 }
 
 export interface Services {

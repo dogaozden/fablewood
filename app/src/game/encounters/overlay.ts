@@ -322,6 +322,7 @@ const LEDGER_SUBTITLE: Record<NightLedgerData['outcome'], string> = {
   victory: '— the vault stands cleared',
   camp: '— rest, earned',
   retreat: '— a wise withdrawal',
+  wipe: '— the Fade closes in', // Task 5/6 wires this
 };
 
 /**
