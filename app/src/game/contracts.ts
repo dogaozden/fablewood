@@ -178,6 +178,12 @@ export interface SaveData {
   companion?: 'mira' | 'alder';
   /** held Wellspring boon (e.g. 'trimmed-wick'), consumed at battle create(); absent/null = none */
   boon?: string | null;
+  /** Hearth rest currency — Embers. Undefined = full pool (rest/embers.ts EMBER_MAX). NOT
+   *  the combat Art 'kindling'. */
+  embers?: number;
+  /** ISO stamp of the last Hearth night-rest; absence = never rested. W4's Lantern-light
+   *  consumes this. */
+  lastHearthAt?: string;
   lastPlayed: string;
 }
 
