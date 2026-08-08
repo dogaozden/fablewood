@@ -7,6 +7,7 @@
  */
 import Phaser from 'phaser';
 import type { DungeonSpec, DungeonRoom, FactLite } from '../../contracts';
+import { EMBER_MAX } from '../../rest/embers';
 import { nodeState, firstUnclearedIndex, type DungeonProgress } from './roomFlow';
 import { C, hex } from './palette';
 
@@ -36,6 +37,7 @@ export class VaultView {
   private handlers?: NodeHandlers;
   private headerText?: Phaser.GameObjects.Text;
   private statusText?: Phaser.GameObjects.Text;
+  private emberPips?: Phaser.GameObjects.Graphics;
   private tooltipCont?: Phaser.GameObjects.Container;
   private tooltipBg?: Phaser.GameObjects.Graphics;
   private tooltipName?: Phaser.GameObjects.Text;
@@ -87,6 +89,7 @@ export class VaultView {
       })
       .setOrigin(1, 0.5)
       .setDepth(6);
+    this.emberPips = s.add.graphics().setDepth(6);
 
     this.buildTooltip();
   }
@@ -285,8 +288,30 @@ export class VaultView {
     }
   }
 
-  setStatus(hp: number, maxHp: number, streak: number): void {
+  setStatus(hp: number, maxHp: number, streak: number, embers: number): void {
     this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Hearth Streak  ${streak}`);
+    this.drawEmberPips(embers);
+  }
+
+  /** Ember pips beside the status line — modeled on combat hud's glowPips loop
+   *  (hud.ts:301-311): diamonds become small warm dots, filled up to `embers` of
+   *  EMBER_MAX. Wordless (the line is already dense) and re-anchored off the status
+   *  text's live width every call, so it never overlaps as hp/streak digit counts change. */
+  private drawEmberPips(embers: number): void {
+    if (!this.emberPips || !this.statusText) return;
+    const pipR = 4;
+    const pipGap = 3;
+    const gapFromText = 14;
+    const y = this.statusText.y;
+    const totalW = EMBER_MAX * (pipR * 2) + (EMBER_MAX - 1) * pipGap;
+    const rightEdge = this.statusText.x - this.statusText.width - gapFromText;
+    this.emberPips.clear();
+    for (let i = 0; i < EMBER_MAX; i++) {
+      const cx = rightEdge - totalW + pipR + i * (pipR * 2 + pipGap);
+      const filled = i < embers;
+      this.emberPips.fillStyle(filled ? C.ember : C.shadowPlum, 1).fillCircle(cx, y, pipR);
+      this.emberPips.lineStyle(1, C.outline, 1).strokeCircle(cx, y, pipR);
+    }
   }
 
   // ---- the map strip --------------------------------------------------------

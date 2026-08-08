@@ -19,6 +19,7 @@ import {
   type DungeonRoom,
   type FactLite,
 } from '../../contracts';
+import { embersOf } from '../../rest/embers';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
 import { music } from '../../../music/instance';
@@ -274,7 +275,7 @@ export class DungeonScene extends Phaser.Scene {
 
   private refreshStatus(): void {
     const sd = services.save.get();
-    this.view.setStatus(sd.hp, PARTY_MAX_HP, sd.streak);
+    this.view.setStatus(sd.hp, PARTY_MAX_HP, sd.streak, embersOf(sd));
   }
 
   private teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[] {
