@@ -157,6 +157,12 @@ test('two installed packs: combat casts reach BOTH installed packs, not just the
     // Which pack leads any single cast rotates by seed (draw/index.ts's sourceSpread, reseeded
     // per cast off encSeed), so this asserts fx-beta is REACHABLE across the battle rather than
     // that it wins a particular draw — the latter would be a coin-flip on the spread's rotation.
+    //
+    // DETERMINISTIC, NOT ROBUST: whether fx-beta is reached at all still falls out of the
+    // seed-derived lead-pack sequence (base seed 7 → per-cast encSeed). Change sourceSpread's
+    // rotation mechanism, the encSeed derivation, or the autopilot's cast budget and this can
+    // flip with no defect in the code under test — re-derive the sequence before concluding
+    // a regression.
     expect(
       casts.some((c) => resolvedForReal(c) && c.factIds.some((id) => id.startsWith('fx.b.'))),
       `fx-beta was asked via a genuinely resolved encounter, not an offline echo (${where})`,
