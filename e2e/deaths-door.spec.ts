@@ -262,6 +262,21 @@ async function answerDeathSaveCorrect(page: Page): Promise<void> {
   await ta.fill(REVIVE_ANSWER);
   await page.getByRole('button', { name: 'Cast' }).click();
   await page.waitForTimeout(400);
+  // Casting only produces the VERDICT. kinds.ts's free_recall renderer (continueButton,
+  // :230-237) resolves the encounter promise on the verdict's own "Onward ▸" continuation, so
+  // the death save is not scored — and the door cannot close — until this is clicked. Every
+  // sibling spec that answers a GRADED encounter takes the same explicit step
+  // (redemption-bell.spec.ts:132, boss-victory.spec.ts:175, combat.spec.ts:62);
+  // answerDrillsWrong below needs no equivalent only because overlay.ts's ESC policy resolves
+  // on the spot. Tolerant like the rest of this helper: pre-Task-5 no verdict ever appears.
+  const onward = page.getByRole('button', { name: 'Onward ▸' });
+  const graded = await onward
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!graded) return;
+  await onward.click();
+  await page.waitForTimeout(400);
 }
 
 /** Best-effort: answer up to THREE death-save drills WRONG via ESC. overlay.ts:236's ESC
