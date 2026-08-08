@@ -29,6 +29,7 @@ function fakeSrs(seen: string[] = []): SrsApi {
     masteryAvg: () => 0,
     historyQualities: () => [],
     hasRecord: (id) => seen.includes(id),
+    nextDueOf: (id) => (seen.includes(id) ? 0 : undefined), // recorded facts all share one day-bucket
   };
 }
 

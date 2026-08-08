@@ -16,6 +16,10 @@ export interface DrawDeps {
   eligible(factId: string): boolean;
   /** True if the fact has any SRS record (i.e. has been introduced). */
   hasRecord(factId: string): boolean;
+  /** Epoch-ms next-due of a recorded fact; undefined if it has none (adapter over
+   *  services.srs.nextDueOf). Drives the calendar-day tie buckets due-first ordering
+   *  spreads sources within. */
+  dueOf: (factId: string) => number | undefined;
 }
 
 export interface DrawOpts {

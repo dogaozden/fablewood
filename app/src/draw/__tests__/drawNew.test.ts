@@ -4,8 +4,9 @@ import { PACK_ALPHA, PACK_BETA } from '../__fixtures__/packs';
 import type { DrawDeps } from '../types';
 
 const idx = buildDrawIndex([PACK_ALPHA, PACK_BETA]);
+// dueOf is undefined throughout: drawNew surfaces UNSEEN facts, which have no next_due.
 const deps = (seen: string[]): DrawDeps => ({
-  dueOrder: ids => ids, eligible: () => true, hasRecord: id => seen.includes(id),
+  dueOrder: ids => ids, eligible: () => true, hasRecord: id => seen.includes(id), dueOf: () => undefined,
 });
 
 describe('drawNew', () => {
@@ -32,7 +33,7 @@ describe('drawNew', () => {
 
   it('excludes ineligible facts even when unseen and prereq-clear (amendment suspension)', () => {
     const eligDeps: DrawDeps = {
-      dueOrder: ids => ids, eligible: id => id !== 'fx.a.three', hasRecord: () => false,
+      dueOrder: ids => ids, eligible: id => id !== 'fx.a.three', hasRecord: () => false, dueOf: () => undefined,
     };
     const out = drawNew(idx, eligDeps, { count: 8, seed: 1, now: 0 });
     expect(out).not.toContain('fx.a.three');

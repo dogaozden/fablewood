@@ -42,6 +42,7 @@ const deps: DrawDeps = {
   // Same predicate for due() AND fresh() — one adapter, both calls (2026-08 amendment ruling).
   eligible: (factId) => !services.amendments.isSuspended(factId),
   hasRecord: (factId) => services.srs.hasRecord(factId),
+  dueOf: (factId) => services.srs.nextDueOf(factId),
 };
 
 services.draw = {

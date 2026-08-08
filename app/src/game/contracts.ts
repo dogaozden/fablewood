@@ -157,6 +157,8 @@ export interface SrsApi {
   /** True once the fact has any SRS record (boxOf(factId) > 0) — i.e. has been introduced.
    *  draw/register.ts's fresh()/due() adapters read this to gate "unseen" facts. */
   hasRecord(factId: string): boolean;
+  /** epoch-ms next-due of a recorded fact; undefined if no record */
+  nextDueOf(factId: string): number | undefined;
 }
 
 export interface SaveData {

@@ -80,6 +80,9 @@ services.srs = {
   hasRecord(factId) {
     return srsStore.boxOf(factId) > 0;
   },
+  nextDueOf(factId) {
+    return srsStore.nextDueOf(factId);
+  },
   masteryAvg(factIds) {
     return srsStore.masteryAvg(factIds);
   },

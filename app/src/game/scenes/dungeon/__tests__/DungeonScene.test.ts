@@ -139,6 +139,7 @@ function installServices(initial: Partial<SaveData>): Harness {
     record: async () => {},
     boxOf: () => 0,
     hasRecord: () => false,
+    nextDueOf: () => undefined, // nothing recorded, so nothing has a next_due
     masteryAvg: () => 0,
     historyQualities: () => [],
   };

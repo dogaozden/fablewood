@@ -1,24 +1,32 @@
+import type { Fact, Encounter } from '../packs/types';
 import type { DrawIndex, DrawDeps, DrawOpts, InstalledPack } from './types';
 export * from './types';
 
 export function buildDrawIndex(packs: InstalledPack[]): DrawIndex {
-  const factById = new Map(); const packIdByFactId = new Map();
-  const encountersByFactId = new Map(); const packIds: string[] = [];
+  const factById = new Map<string, Fact>();
+  const packIdByFactId = new Map<string, string>();
+  const encountersByFactId = new Map<string, Encounter[]>();
+  const packIds: string[] = [];
   let warned = false;
   for (const { id, pack } of packs) {
     packIds.push(id);
     for (const f of pack.facts) {
       if (factById.has(f.id)) {
-        if (!warned) { console.warn(`[draw] duplicate fact id across packs: ${f.id} — first-installed wins`); warned = true; }
+        if (!warned) {
+          console.warn(`[draw] duplicate fact id across packs: ${f.id} — first-installed wins`);
+          warned = true;
+        }
         continue;
       }
-      factById.set(f.id, f); packIdByFactId.set(f.id, id);
+      factById.set(f.id, f);
+      packIdByFactId.set(f.id, id);
     }
     for (const e of pack.encounters) {
       for (const fid of e.fact_ids ?? []) {
         if (packIdByFactId.get(fid) !== id) continue; // encounters attach only to their own pack's facts
         const arr = encountersByFactId.get(fid) ?? [];
-        arr.push(e); encountersByFactId.set(fid, arr);
+        arr.push(e);
+        encountersByFactId.set(fid, arr);
       }
     }
   }
@@ -50,36 +58,78 @@ export function seededShuffle(items: string[], seed: number): string[] {
   return out;
 }
 
+const DAY_MS = 86_400_000;
+
 /**
- * Source-spread pass. deps.dueOrder returns no numeric score, so the only
- * signal we have that ids are "tied" is a contiguous run of same-pack ids
- * in its output — contract: equal rank == contiguous run returned by
- * dueOrder. When 2+ packs' runs are adjacent like this, interleave them
- * round-robin instead of exhausting one pack's run before the next; which
- * pack goes first is decided by a seededShuffle of the installed pack ids,
- * so the rotation is deterministic per seed but not always install-order.
+ * Emit one tie bucket, cycling packs in `rotation` order and skipping packs that
+ * are absent from (or already exhausted in) this bucket. Each pack's own due order
+ * is preserved; the first rotation entry present in the bucket leads it.
  */
-function sourceSpread(ids: string[], index: DrawIndex, seed: number): string[] {
-  const runs: { packId: string; ids: string[] }[] = [];
-  for (const id of ids) {
+function spreadBucket(bucket: string[], index: DrawIndex, rotation: string[], out: string[]): void {
+  const queues = new Map<string, string[]>();
+  for (const id of bucket) {
     const packId = index.packIdByFactId.get(id)!;
-    const last = runs[runs.length - 1];
-    if (last?.packId === packId) last.ids.push(id);
-    else runs.push({ packId, ids: [id] });
+    const queue = queues.get(packId);
+    if (queue) queue.push(id);
+    else queues.set(packId, [id]);
   }
-  if (runs.length <= 1) return ids;
-  const priority = seededShuffle(index.packIds, seed);
-  const ordered = runs.slice().sort((a, b) => priority.indexOf(a.packId) - priority.indexOf(b.packId));
+  if (queues.size <= 1) {
+    out.push(...bucket);
+    return;
+  }
+  const order = [...queues.keys()].sort((a, b) => rotation.indexOf(a) - rotation.indexOf(b));
+  const cursor = new Map<string, number>(order.map(packId => [packId, 0]));
+  let emitted = 0;
+  while (emitted < bucket.length) {
+    for (const packId of order) {
+      const queue = queues.get(packId)!;
+      const at = cursor.get(packId)!;
+      if (at >= queue.length) continue;
+      out.push(queue[at]);
+      cursor.set(packId, at + 1);
+      emitted++;
+    }
+  }
+}
+
+/**
+ * Source-spread pass — DUE-FIRST, with the round-robin as a TIEBREAK only
+ * (interleaving design D4). Leitner schedules in whole days, so sub-day deltas
+ * between two next_due stamps are scheduling noise: facts due the same UTC day
+ * are ties, and only within one such day-bucket may sources be spread. Nothing
+ * ever overtakes a fact that is genuinely due earlier.
+ *
+ * dueOrder's ranking is authoritative (dues ascending, so equal buckets arrive
+ * consecutive); we group consecutive equal buckets and spread inside each, which
+ * makes cross-bucket order inviolable by construction. Which pack leads a bucket
+ * comes from a seededShuffle of the installed pack ids — deterministic per seed,
+ * not always install order.
+ *
+ * An id whose due date is unknown (dueOf undefined — a mangled record; dueQueue
+ * ranks those most-overdue) buckets alone and so keeps its ranked place. One
+ * installed pack is exact passthrough.
+ */
+function sourceSpread(ids: string[], index: DrawIndex, deps: DrawDeps, seed: number): string[] {
+  if (index.packIds.length <= 1) return ids;
+  const days = ids.map(id => {
+    const due = deps.dueOf(id);
+    return due === undefined ? undefined : Math.floor(due / DAY_MS);
+  });
+  const rotation = seededShuffle(index.packIds, seed);
   const out: string[] = [];
-  for (let col = 0; out.length < ids.length; col++) {
-    for (const run of ordered) if (col < run.ids.length) out.push(run.ids[col]);
+  for (let start = 0; start < ids.length; ) {
+    let end = start + 1;
+    // `undefined` groups with nothing, not even another undefined.
+    if (days[start] !== undefined) while (end < ids.length && days[end] === days[start]) end++;
+    spreadBucket(ids.slice(start, end), index, rotation, out);
+    start = end;
   }
   return out;
 }
 
 /**
  * Global schedule-first draw: eligibility- and kind-filtered, most-due-first,
- * with same-pack ties spread across sources, truncated to opts.count.
+ * with same-DAY ties spread across sources, truncated to opts.count.
  */
 export function drawDue(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): string[] {
   let ids = Array.from(index.factById.keys());
@@ -90,7 +140,7 @@ export function drawDue(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): strin
     ids = ids.filter(id => (index.encountersByFactId.get(id) ?? []).some(e => kinds.includes(e.kind)));
   }
   ids = deps.dueOrder(ids, opts.now);
-  ids = sourceSpread(ids, index, opts.seed);
+  ids = sourceSpread(ids, index, deps, opts.seed);
   return ids.slice(0, opts.count);
 }
 

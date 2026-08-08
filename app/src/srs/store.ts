@@ -90,6 +90,14 @@ export class SrsStore {
     return leitnerBoxOf(this.cache, factId);
   }
 
+  /** Epoch ms this fact is next due, or undefined if it has no record. A non-finite
+   *  next_due (mangled state file) also reads as undefined — same defensive posture as
+   *  boxOf, and it matches the entry dueQueue treats as most-overdue rather than due-at-0. */
+  nextDueOf(factId: string): number | undefined {
+    const due = this.cache.facts[factId]?.next_due;
+    return typeof due === 'number' && Number.isFinite(due) ? due : undefined;
+  }
+
   masteryAvg(factIds: string[]): number {
     if (factIds.length === 0) return 0;
     let sum = 0;

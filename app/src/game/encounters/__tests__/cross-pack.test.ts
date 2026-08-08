@@ -25,6 +25,7 @@ function fakeSrs(): SrsApi {
     masteryAvg: () => 0,
     historyQualities: () => [],
     hasRecord: () => true,
+    nextDueOf: () => 0, // every fact recorded and due the same day
   };
 }
 
