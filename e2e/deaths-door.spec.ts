@@ -330,6 +330,14 @@ test.describe("death's door — the Ledger Holds Your Line (RED pins, pre-mechan
         await currentScene(page),
         'still in combat — the door has not let the scene move on',
       ).toBe('combat');
+
+      // Task 7 fix-round-1 (review Important #1): doorCard above matches the per-round DRILL's
+      // own .fw-overlay (Task 5's flair eyebrow), never Task 7's persistent .fw-holdline card —
+      // so this pin alone gave no regression coverage of the card itself. Additive, direct check.
+      await expect(
+        page.locator('.fw-holdline'),
+        'the hold-the-line status card is visible at door-open, alongside the drill',
+      ).toBeVisible({ timeout: 8_000 });
     } finally {
       await restoreState(page, beforeSave, beforeInv);
     }
@@ -360,6 +368,13 @@ test.describe("death's door — the Ledger Holds Your Line (RED pins, pre-mechan
       // a red signal, but confirms the rig reached a real terminal state before the state
       // assertions below.
       await expect.poll(() => currentScene(page), { timeout: 15_000 }).toBe('hamlet');
+
+      // Task 7 fix-round-1 (review Important #1): the wipe must close the hold-the-line card,
+      // not just the door's logical state — a leaked card would not otherwise be caught here.
+      await expect(
+        page.locator('.fw-holdline'),
+        'the hold-the-line card is gone after the wipe completes',
+      ).toHaveCount(0);
 
       const invAfter = await readState<Inventory>(page, 'inventory.json');
       expect(
@@ -421,6 +436,14 @@ test.describe("death's door — the Ledger Holds Your Line (RED pins, pre-mechan
       const s = await snap(page);
       expect(s?.state, 'the fight resumed under manual control').toBe('playerMove');
       expect(s?.partyHp, 'the pool stands at exactly 1 after the welded revive').toBe(1);
+
+      // Task 7 fix-round-1 (review Important #1): dd.active above reads the machine's state,
+      // never the DOM — a leaked .fw-holdline card would still pass that check. Assert the card
+      // itself is gone now that the battle has resumed under manual control.
+      await expect(
+        page.locator('.fw-holdline'),
+        'the hold-the-line card is gone after the revive resumes the battle',
+      ).toHaveCount(0);
     } finally {
       await restoreState(page, beforeSave, beforeInv);
     }
