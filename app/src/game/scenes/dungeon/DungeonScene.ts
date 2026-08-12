@@ -348,7 +348,7 @@ export class DungeonScene extends Phaser.Scene {
     // reads as a soft-lock. Reject visibly instead (onRoom's own locked-node pattern below); the
     // player can just click the hearth again once the lock clears.
     if (this.busy) {
-      this.view.toast('The hearth is still settling — try again in a moment.', 'warn');
+      this.view.toast('The hearth is still settling — give it a breath.', 'warn');
       return;
     }
     this.busy = true;
