@@ -881,7 +881,7 @@ export class CombatScene extends Phaser.Scene {
   /** Dev autopilot (?demo=1): act if a target is in range, else close in, else wait.
    *  A pilot preference (set via setPilotPreference, e2e-only) forces one action kind. */
   private autoStep(unit: UnitState): void {
-    if (this.destroyed || this.state === 'over' || unit.id !== this.activeId) return;
+    if (this.destroyed || this.state === 'over' || this.state === 'deathsdoor' || unit.id !== this.activeId) return;
     const order: ActionKind[] = this.debugPrefer
       ? [this.debugPrefer]
       : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
@@ -2754,9 +2754,9 @@ export class CombatScene extends Phaser.Scene {
    * while the index is still fine), and never stall — a failure just falls to the ladder below.
    */
   private async ddDraw(): Promise<string | null> {
-    try { await services.draw.indexReady(); } catch { /* index down — the ladder below still holds */ }
     // Read encSeed; the paired runEncounter below consumes this.encSeed++ (one round, one seed).
     const seed = this.encSeed;
+    try { await services.draw.indexReady(); } catch { /* index down — the ladder below still holds */ }
     const now = Date.now();
     let due: string[] = [];
     let fresh: string[] = [];
@@ -2777,9 +2777,6 @@ export class CombatScene extends Phaser.Scene {
     // No fact exists anywhere (packless/fixture edge). Never trap the player behind a question
     // that cannot be asked — an unanswerable door stabilizes, which is the old retreat.
     if (!id) { this.stabilizeAtDoor(); return; }
-    // The revive gate reads the box the fact carried BEFORE the answer is recorded: record()
-    // can promote it, and a fact welded BY this very answer is not what stands you back up.
-    const box = this.boxOfSafe(id);
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
@@ -2790,6 +2787,9 @@ export class CombatScene extends Phaser.Scene {
       result = { encounterId: 'local-deathsdoor', kind: 'free_recall', factIds: [id], quality: 0, detail: 'offline' };
     }
     if (this.destroyed) return;
+    // The revive gate reads the box the fact carried BEFORE the answer is recorded: record()
+    // can promote it, and a fact welded BY this very answer is not what stands you back up.
+    const box = Math.max(0, ...result.factIds.map((fid) => this.boxOfSafe(fid)));
     // Death saves are real drills — the learning record is sacred here too (same order as every
     // other encounter site: push the result, then record, before anything reads the outcome).
     this.results.push(result);
