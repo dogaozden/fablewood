@@ -309,6 +309,46 @@ describe('busy lock across the battle-return settlement (crucible-2)', () => {
   });
 });
 
+describe('onCamp busy-lock does not silently drop a click (W2 T8)', () => {
+  it('rejects a camp click visibly while busy is held, instead of silently swallowing the heal', async () => {
+    // The camp hearth is its OWN map node (VaultView.campNode → handlers.onCamp directly), NOT
+    // routed through onRoom's busy guard. resolveCombat (066ca1f) holds `busy` across its whole
+    // async settlement, and drawMap() runs partway through that window — so the hearth can be
+    // visible and clickable while `busy` is still true. A 0-HP party's ONLY way to heal is this
+    // node (or enterRoom's own hp<=0 redirect, which calls onCamp with busy already false —
+    // never vulnerable); if onCamp silently no-ops here, the heal vanishes with no trace at all.
+    setSearch('?dev=1');
+    const h = installServices({ hp: 0 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    // Arrange the held lock exactly as resolveCombat's settlement window holds it.
+    (scene as unknown as { busy: boolean }).busy = true;
+    vv.handlers!.onCamp();
+    await tick();
+    await tick();
+
+    // Pre-fix (RED): onCamp's own `if (this.busy) return;` drops the click with zero trace —
+    // hp stays 0 and vv.log stays empty, indistinguishable from a broken hearth.
+    expect(h.save().hp).toBe(0);
+    expect(vv.log.some((m) => m.startsWith('toast:'))).toBe(true);
+
+    // The rejection is a "try again", never a dead end — once the lock clears, the same click
+    // (re-issued, matching every other busy-gated node in this file) must still land.
+    (scene as unknown as { busy: boolean }).busy = false;
+    vv.log.length = 0;
+    vv.handlers!.onCamp();
+    await waitFor(() => vv.log.includes('camp'), 'the camp card once the lock clears');
+    expect(h.save().hp).toBe(16);
+  });
+});
+
 // ---- teachingFacts() exhausted-pool fallback (wave-1 T9 fix round 1) -------
 
 /** teachingFacts() is a private method; the drawGlobal branch only activates after a real

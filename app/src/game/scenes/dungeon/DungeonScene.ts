@@ -341,7 +341,16 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private async onCamp(opts: { persist?: boolean } = {}): Promise<void> {
-    if (this.busy) return;
+    // The hearth is its own map node (VaultView.campNode → handlers.onCamp), not routed through
+    // onRoom's busy guard — so a held lock (066ca1f: resolveCombat holds `busy` across its whole
+    // settlement, and the map is drawn partway through that window) used to drop this click with
+    // zero trace. For a 0-HP party the hearth is the only way to heal, so a silent no-op here
+    // reads as a soft-lock. Reject visibly instead (onRoom's own locked-node pattern below); the
+    // player can just click the hearth again once the lock clears.
+    if (this.busy) {
+      this.view.toast('The hearth is still settling — try again in a moment.', 'warn');
+      return;
+    }
     this.busy = true;
     const before = services.save.get().hp;
     await services.save.save({ hp: PARTY_MAX_HP, scene: 'vaults', dungeon: this.progress });
