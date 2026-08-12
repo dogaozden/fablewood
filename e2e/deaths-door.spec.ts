@@ -320,8 +320,8 @@ test.describe("death's door — the Ledger Holds Your Line (RED pins, pre-mechan
       const doorCard = page.locator('.fw-overlay', { hasText: /Ledger Holds Your Line/ });
       await expect(
         doorCard,
-        'EXPECTED NOW: fails — today 0 HP resolves an instant retreat (toast + a 1600ms ' +
-          'delayedCall scene.start), so the hold-the-line card never renders',
+        'the door opens: the per-round drill presents its own .fw-overlay with the door ' +
+          'title in the flair eyebrow (Task 5), so this card is visible the instant 0 HP is crossed',
       ).toBeVisible({ timeout: 8_000 });
 
       // Reinforcing (unreached today, since the assertion above already throws): once the
