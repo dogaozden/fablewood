@@ -487,6 +487,24 @@ export class DungeonScene extends Phaser.Scene {
       return { transitioned: true };
     }
 
+    if (outcome.outcome === 'wipe') {
+      // Death's Door exhausted (Concordance Ch. I) — heavier than a retreat, but the same
+      // shape: persist scene:'hamlet' BEFORE starting the scene (same reload-safety as the
+      // retreat branch above), and this branch must preempt the room-credit fall-through
+      // below entirely — a wipe never credits the room, never bumps the streak, never
+      // grants room loot, never writes SRS/story state (Fable_SPEC.md:31 — wipes cost only
+      // the loot roll). The keepsake itself was already stripped in CombatScene; this
+      // branch only reports it to the Ledger.
+      await services.save.save({ scene: 'hamlet' });
+      this.view.toast('The Fade closes in — something is lost to it.', 'warn');
+      await this.wait(1000);
+      // §3.2 the Night's Ledger — fold this last battle in (no gold on a wipe, streak unchanged).
+      this.accrueHarvest(outcome, 0);
+      await this.runNightLedger('wipe', services.save.get().streak, outcome.wipeReport?.keepsakeId ?? null);
+      this.scene.start('hamlet', { seed: this.seed });
+      return { transitioned: true };
+    }
+
     // crucible V1-12 — credit the combat win (mark + persist) immediately, before any
     // gate runs, so a gate wipe (HP exhausted mid-drill, below) can never re-litigate a
     // fight already won (Fable_SPEC.md:31 — wipes cost the loot roll, never story
@@ -577,13 +595,25 @@ export class DungeonScene extends Phaser.Scene {
    * WHOLE crawl accumulated in the registry (not just the last battle). Fires only at run end —
    * boss victory and retreat. Best-effort: a missing overlay service must never strand the walk home.
    */
-  private async runNightLedger(kind: 'victory' | 'retreat', streak: number): Promise<void> {
+  private async runNightLedger(
+    kind: 'victory' | 'retreat' | 'wipe',
+    streak: number,
+    keepsakeId?: string | null,
+  ): Promise<void> {
     const h = (this.registry.get(RUN_HARVEST_KEY) as RunHarvest | undefined) ?? {
       held: [], reclaimed: 0, newWelds: 0, gold: 0,
     };
     try {
       await services.showNightLedger(
-        { outcome: kind, held: h.held.length, welds: h.newWelds, reclaimed: h.reclaimed, gold: h.gold, streak },
+        {
+          outcome: kind,
+          held: h.held.length,
+          welds: h.newWelds,
+          reclaimed: h.reclaimed,
+          gold: h.gold,
+          streak,
+          keepsakeId,
+        },
         { auto: !!this.auto },
       );
     } catch {

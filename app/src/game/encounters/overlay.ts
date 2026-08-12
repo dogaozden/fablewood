@@ -15,6 +15,7 @@ import type {
   NightLedgerData,
 } from '../contracts';
 import type { Encounter, EncounterDifficulty } from '../../packs/types';
+import { itemById } from '../../inventory/catalog';
 import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
@@ -345,12 +346,21 @@ export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean
     if (data.reclaimed > 0) rows.push({ label: 'Reclaimed from the Fade', value: String(data.reclaimed), accent: true });
     if (data.gold > 0) rows.push({ label: 'Gold', value: `+${data.gold}` });
     if (data.streak > 0) rows.push({ label: 'Streak', value: data.streak === 1 ? '1 night' : `${data.streak} nights` });
+    // Death's Door wipe (Task 6) — zero-suppressed like every row above: absent when nothing
+    // was eligible to take (keepsakeId null is a real, reportable "nothing carried" outcome,
+    // not "this wasn't a wipe" — see CombatScene's wipeAtDoor).
+    if (data.keepsakeId) {
+      rows.push({ label: 'Keepsake taken', value: itemById(data.keepsakeId)?.name ?? data.keepsakeId });
+    }
 
     // empty harvest = nothing gained this run (streak is a standing counter, not a gain).
     const empty = data.held === 0 && data.welds === 0 && data.reclaimed === 0 && data.gold === 0;
-    const signoff = empty
-      ? 'A thin page is still a page. The Ledger keeps it.'
-      : 'So entered. What you keep, the Ledger keeps.';
+    const signoff =
+      data.outcome === 'wipe'
+        ? 'The Fade took its due. The Ledger holds what matters.'
+        : empty
+          ? 'A thin page is still a page. The Ledger keeps it.'
+          : 'So entered. What you keep, the Ledger keeps.';
 
     o.body.replaceChildren(
       el('div', { class: 'fw-ledger-head' }, [
