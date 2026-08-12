@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, currentScene, waitForState } from './helpers';
+import { waitReady, currentScene, waitForState, readState } from './helpers';
 
 // "The Night's Ledger" (fun-review.md §3.2) — the run-harvest overlay DungeonScene shows when a
 // run ENDS (boss victory / retreat), NOT after a mid-crawl room clear. Proves: run-end-only firing,
@@ -52,104 +52,61 @@ async function combatState(page: Page): Promise<string | null> {
   });
 }
 
-type DoorSnap = { active: boolean; successes: number; failures: number; revivedUsed: boolean } | null;
+type SrsEntry = {
+  box: number;
+  next_due: number;
+  history: Array<{ ts: string; quality: 0 | 0.5 | 1; encounter_id: string }>;
+};
 
-/** Death's door's live state (deaths-door.spec.ts's ddSnap, verbatim) — paces the stabilize
- *  loop below: waits for a round to actually resolve before driving the next one. */
-async function ddSnap(page: Page): Promise<DoorSnap> {
-  return page.evaluate(() => {
-    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-    const s = g?.scene?.getScene?.('combat') as { deathsDoorSnapshot?(): unknown } | undefined;
-    return (s?.deathsDoorSnapshot?.() ?? null) as DoorSnap;
+/** Exactly three known vc-law facts, each with a genuinely correct, terse free_recall answer —
+ *  deaths-door.spec.ts's REVIVE_FACT/REVIVE_ANSWER idiom, extended to three. Each answer was
+ *  verified (not guessed) against its encounter's actual rubric in packs/vc-law/pack.json by
+ *  replicating judge/stub.ts's exact scoring algorithm: every one scores overlap 1.0 / pass —
+ *  genuinely on-topic and terse, the same legitimate shape as combat.spec.ts's own canonical
+ *  "Economics and control." (stub.ts's own doc: terse-but-correct answers are BY DESIGN able to
+ *  reach pass without repeating the rubric's prose — this is the judge working as intended, not
+ *  gamed). All three are free_recall-ONLY facts in the pack (no competing mcq encounter shares
+ *  their fact_id), so DD_KINDS's ['free_recall', 'mcq'] filter (CombatScene.ts:99) can only ever
+ *  land on the free_recall renderer for them — no kind ambiguity to resolve at runtime. */
+const STABILIZE_FACTS: ReadonlyArray<{ factId: string; answer: string }> = [
+  { factId: 'vc.econ.liqpref.preference-plus-participation', answer: 'Preference and participation.' },
+  { factId: 'vc.econ.paytoplay.ubiquitous-after-dotcom', answer: "It converts to common stock, losing its preferred rights." },
+  { factId: 'vc.econ.antidilution.purpose', answer: 'A down round: the company issuing new equity at a lower price.' },
+];
+
+/** Seed exactly the three facts above at box 1 (safely below REVIVE_BOX=4 — deathsdoor.ts:6)
+ *  with strictly decreasing next_due (most overdue first), so the door's due-first ddDraw
+ *  (CombatScene.ts:2770-2784, services.draw.due()) deals them in this EXACT order, one fact per
+ *  stabilize round. After each correct answer, leitner.ts's record() promotes the fact's box and
+ *  pushes next_due 3 days out (BOX_INTERVALS[2]), dropping it out of due() range for the rest of
+ *  the run — so the next round deterministically deals the NEXT entry, never a repeat. Every
+ *  other installed fact is left untouched (absent from srs.json): "fresh," but never reached,
+ *  since due() never empties before all three seeded entries are spent. The drive-to-zero phase
+ *  above answers nothing (Wait-grind only, no Cast), so nothing can consume these before the
+ *  door itself opens. */
+async function seedStabilizeFacts(page: Page): Promise<void> {
+  const now = Date.now();
+  const facts: Record<string, SrsEntry> = {};
+  STABILIZE_FACTS.forEach(({ factId }, i) => {
+    facts[factId] = { box: 1, next_due: now - (500_000 - i * 100_000), history: [] };
   });
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded the three known stabilize facts').toBe(true);
 }
 
-type DoorEncounter = { kind: string; options?: string[]; answer?: string; rubric?: string };
-
-/** Every installed encounter (deaths-door.spec.ts's installedFactIds idiom, widened from fact
- *  ids to full encounters). Needed because, unlike deaths-door.spec.ts's Pin C, this test seeds
- *  no srs.json: every fact starts at box 0 (no history), so a correctly-answered fact is
- *  promoted (leitner.ts's BOX_INTERVALS[2] = 3 days) out of due()/fresh() range for the rest of
- *  the run — each of the three stabilize rounds below can land on a DIFFERENT, a priori unknown
- *  fact. No single hardcoded fact/answer pair (à la deaths-door.spec.ts's REVIVE_FACT/
- *  REVIVE_ANSWER) covers all three, so this reads the whole pack once instead. */
-async function installedEncounters(page: Page): Promise<DoorEncounter[]> {
-  const res = await page.request.get('/api/packs');
-  expect(res.ok(), 'read installed packs').toBe(true);
-  const { packs } = (await res.json()) as { packs: Array<{ pack?: { encounters?: DoorEncounter[] } }> };
-  const out: DoorEncounter[] = [];
-  for (const entry of packs) for (const e of entry.pack?.encounters ?? []) out.push(e);
-  return out;
-}
-
-/** A free_recall answer that clears the stub judge (judge/stub.ts) for ANY of the pack's
- *  free_recall rubrics, not just one it was written against: the judge's overlap denominator is
- *  max(2, min(|rubric keys|, |answer words|)), so an answer that's a strict superset of a
- *  rubric's own keywords always scores hit=|keys|, denom=|keys| → overlap 1.0 → pass, no matter
- *  which rubric is being graded (verified against every free_recall rubric in packs/vc-law/
- *  pack.json before writing this — none carry {{template_vars}}, so the literal rubric text
- *  always matches verbatim, unlike prompts). */
-function freeRecallAnswerBlob(encounters: DoorEncounter[]): string {
-  return encounters
-    .filter((e) => e.kind === 'free_recall' && typeof e.rubric === 'string')
-    .map((e) => e.rubric)
-    .join(' ');
-}
-
-function sameOptionSet(packOptions: string[] | undefined, rendered: string[]): boolean {
-  if (!packOptions || packOptions.length !== rendered.length) return false;
-  const a = [...packOptions].sort();
-  const b = [...rendered].sort();
-  return a.every((v, i) => v === b[i]);
-}
-
-/** One death-save round, answered correctly regardless of which fact/kind Death's Door drew
- *  (DD_KINDS is ['free_recall', 'mcq'] — CombatScene.ts:99): free_recall gets the blanket
- *  rubric-superset answer above; mcq gets whichever rendered `.fw-optlabel` matches the pack
- *  encounter (identified by its option SET, since option text carries no template vars either)
- *  own authored `answer` — boss-victory.spec.ts's "match by option TEXT, never position" idiom.
- *  Every installed fact sits at box 0 here (REVIVE_BOX is 4), so a correct answer always lands
- *  recordAnswer's `successes` branch, never the revive preempt. Polls deathsDoorSnapshot()
- *  afterward rather than sleeping a fixed beat: a correct mcq pick auto-advances with NO Onward
- *  click (renderMcq's own setTimeout), and its now-disabled .fw-opt cards stay mounted, so the
- *  next round's drill-wait could otherwise resolve instantly against the STALE round. */
-async function answerDoorRoundCorrect(
-  page: Page,
-  encounters: DoorEncounter[],
-  freeRecallBlob: string,
-): Promise<void> {
-  const before = await ddSnap(page);
-  const beforeRounds = (before?.successes ?? 0) + (before?.failures ?? 0);
-
-  const drill = page.locator('.fw-overlay .fw-textarea, .fw-overlay .fw-opt').first();
-  await drill.waitFor({ state: 'visible', timeout: 10_000 });
-  await page.waitForTimeout(450); // overlay.ts's paint-anchored answer guard (shared idiom)
-
+/** Answer one stabilize round with the KNOWN correct text for round `i`'s fact — deaths-door.
+ *  spec.ts's answerDeathSaveCorrect idiom (fill, Cast, wait the verdict, Onward), but not
+ *  tolerant/best-effort like that pre-mechanic original: the door is live now, so a missing
+ *  drill here is a real failure, not an expected no-op. */
+async function answerStabilizeRound(page: Page, i: number): Promise<void> {
   const ta = page.locator('.fw-overlay .fw-textarea');
-  if (await ta.count()) {
-    await ta.fill(freeRecallBlob);
-    await page.getByRole('button', { name: 'Cast' }).click();
-    const onward = page.getByRole('button', { name: 'Onward ▸' });
-    await onward.waitFor({ state: 'visible', timeout: 15_000 });
-    await onward.click();
-  } else {
-    const labels = await page.locator('.fw-optlabel').allTextContents();
-    const enc = encounters.find((e) => e.kind === 'mcq' && sameOptionSet(e.options, labels));
-    if (!enc?.answer) {
-      throw new Error(`answerDoorRoundCorrect: no pack mcq matches rendered options ${JSON.stringify(labels)}`);
-    }
-    const idx = labels.indexOf(enc.answer);
-    expect(idx, `the pack's authored answer is among the rendered options: ${JSON.stringify(labels)}`).toBeGreaterThanOrEqual(0);
-    await page.locator('.fw-opt').nth(idx).click();
-  }
-
-  await expect
-    .poll(async () => {
-      const s = await ddSnap(page);
-      if (!s?.active) return true; // door closed: stabilized (or wiped/revived) — round resolved
-      return s.successes + s.failures > beforeRounds; // still open: moved on to the next round
-    }, { timeout: 5_000 })
-    .toBe(true);
+  await ta.waitFor({ state: 'visible', timeout: 10_000 });
+  await page.waitForTimeout(450); // overlay.ts's paint-anchored answer guard (shared idiom)
+  await ta.fill(STABILIZE_FACTS[i].answer);
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const onward = page.getByRole('button', { name: 'Onward ▸' });
+  await onward.waitFor({ state: 'visible', timeout: 15_000 });
+  await onward.click();
 }
 
 test('no Night\'s Ledger after a mid-run room clear — only at run end', async ({ page }) => {
@@ -198,36 +155,44 @@ test('Night\'s Ledger on retreat: "a wise withdrawal" subtitle after stabilizing
   // resolves through the SAME CombatScene.resolveBattle('retreat') → DungeonScene.resolveCombat
   // retreat branch this test asserted on pre-Wave-2 — deathsdoor.ts's stabilizeAtDoor calls it
   // "the pre-door retreat, byte-for-byte".
-  await page.request.put('/api/state/save.json', { data: { hp: 2 } });
-  await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
-  await waitReady(page, 'combat');
+  // srs.json isn't this test's to permanently rewrite — capture whatever it held before
+  // seeding (deaths-door.spec.ts's tests leave their own seeded facts behind for downstream
+  // specs in the shared, serial suite, so this may well be non-empty) and restore it in
+  // `finally`, mirroring this file's own hp:16 afterEach discipline above.
+  const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 2 } });
+    await seedStabilizeFacts(page);
+    await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
+    await waitReady(page, 'combat');
 
-  // Only ever Wait — the party never fights back, so the wisps close in and the pool wipes.
-  const start = Date.now();
-  while (Date.now() - start < 75_000) {
-    if ((await currentScene(page)) !== 'combat') break;
-    const st = await combatState(page);
-    if (st === null || st === 'over' || st === 'deathsdoor') break;
-    if (st === 'playerMove') await page.keyboard.press('7'); // Wait
-    await page.waitForTimeout(150);
-  }
-
-  // The door opened: drive through it via the stabilize path. Every fact here sits at box 0
-  // (this test seeds no srs.json), safely below REVIVE_BOX=4 (deathsdoor.ts:6), so each correct
-  // answer increments `successes` rather than tripping the revive preempt — three successes is
-  // 'stabilized' (deathsdoor.ts's SUCCESS_NEED).
-  if ((await combatState(page)) === 'deathsdoor') {
-    const encounters = await installedEncounters(page);
-    const freeRecallBlob = freeRecallAnswerBlob(encounters);
-    for (let i = 0; i < 3; i++) {
-      await answerDoorRoundCorrect(page, encounters, freeRecallBlob);
+    // Only ever Wait — the party never fights back, so the wisps close in and the pool wipes.
+    const start = Date.now();
+    while (Date.now() - start < 75_000) {
+      if ((await currentScene(page)) !== 'combat') break;
+      const st = await combatState(page);
+      if (st === null || st === 'over' || st === 'deathsdoor') break;
+      if (st === 'playerMove') await page.keyboard.press('7'); // Wait
+      await page.waitForTimeout(150);
     }
-  }
 
-  const led = await captureLedger(page, `${EV}/e2e-nights-ledger-retreat.png`);
-  expect(led, 'the ledger rendered on retreat').not.toBeNull();
-  expect(led!.title).toBe("The Night's Ledger");
-  expect(led!.sub).toContain('a wise withdrawal');
-  // "Held against the Fade" shows even on a thin retreat page.
-  expect(led!.rows.map((r) => r.label)).toContain('Held against the Fade');
+    // The door opened: drive through it via the stabilize path. The three seeded facts sit at
+    // box 1, safely below REVIVE_BOX=4 (deathsdoor.ts:6), so each correct answer increments
+    // `successes` rather than tripping the revive preempt — three successes is 'stabilized'
+    // (deathsdoor.ts's SUCCESS_NEED), dealt in STABILIZE_FACTS order (see seedStabilizeFacts).
+    if ((await combatState(page)) === 'deathsdoor') {
+      for (let i = 0; i < STABILIZE_FACTS.length; i++) {
+        await answerStabilizeRound(page, i);
+      }
+    }
+
+    const led = await captureLedger(page, `${EV}/e2e-nights-ledger-retreat.png`);
+    expect(led, 'the ledger rendered on retreat').not.toBeNull();
+    expect(led!.title).toBe("The Night's Ledger");
+    expect(led!.sub).toContain('a wise withdrawal');
+    // "Held against the Fade" shows even on a thin retreat page.
+    expect(led!.rows.map((r) => r.label)).toContain('Held against the Fade');
+  } finally {
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
+  }
 });
