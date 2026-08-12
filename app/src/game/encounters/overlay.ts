@@ -487,3 +487,84 @@ export function presentAmendment(
     if (opts.auto) setTimeout(done, 2000);
   });
 }
+
+export interface HoldTheLineHandle {
+  /** Update the two 3-slot counters (successes → lantern-flames held, failures → fade-marks)
+   *  and, on a round that produced reader-facing feedback, the beat line beneath them. `beat`
+   *  is omitted for the revive round — it closes the frame into its own banner instead. */
+  update(counts: { successes: number; failures: number }, beat?: { text: string; good: boolean }): void;
+  /** Fade the card out and remove it. Idempotent — safe to call from more than one exit path. */
+  close(): void;
+}
+
+const HOLD_SLOTS = 3;
+
+/**
+ * "The Ledger Holds Your Line" (Concordance Ch. I, Task 7) — Death's Door's persistent
+ * hold-the-line status card. Deliberately NOT a .fw-overlay: that class is the full-screen
+ * dimming/blurring modal every graded encounter uses (buildOverlay above), and the per-round
+ * drill opens ON TOP of this card via the normal presentEncounter flow while the door is open —
+ * two stacked .fw-overlay instances would double the blur and let the later one visually bury
+ * this one under its own backdrop, and would risk two elements both matching the e2e suite's
+ * single-element `.fw-overlay` + /Ledger Holds Your Line/ locator. Instead this is a small fixed
+ * corner card (styles.ts), z-indexed ABOVE .fw-overlay so it stays legible while a drill is open,
+ * with `pointer-events: none` and no keydown handler of its own — it never takes focus or a click
+ * meant for the drill, so there is no focus/keyboard contention to resolve between the two.
+ */
+export function presentHoldTheLine(): HoldTheLineHandle {
+  ensureStyles();
+
+  const flameSlots = Array.from({ length: HOLD_SLOTS }, () => el('span', { class: 'fw-holdline-slot fw-flame' }));
+  const markSlots = Array.from({ length: HOLD_SLOTS }, () => el('span', { class: 'fw-holdline-slot fw-mark' }));
+  const beatEl = el('p', { class: 'fw-holdline-beat' });
+
+  const root = el('div', { class: 'fw-holdline' }, [
+    el('div', { class: 'fw-holdline-eyebrow' }, [
+      el('span', { class: 'fw-glyph', 'aria-hidden': 'true', text: '✧' }),
+      el('span', { text: "Death's Door" }),
+    ]),
+    el('h3', { class: 'fw-holdline-title', text: 'The Ledger Holds Your Line' }),
+    el('p', { class: 'fw-holdline-entry', text: 'The Fade presses close. Hold the line with what you know.' }),
+    el('div', { class: 'fw-holdline-tracks' }, [
+      el('div', { class: 'fw-holdline-track' }, [
+        el('span', { class: 'fw-holdline-tracklabel', text: 'Held' }),
+        el('div', { class: 'fw-holdline-slots' }, flameSlots),
+      ]),
+      el('div', { class: 'fw-holdline-track' }, [
+        el('span', { class: 'fw-holdline-tracklabel', text: 'Fade' }),
+        el('div', { class: 'fw-holdline-slots' }, markSlots),
+      ]),
+    ]),
+    beatEl,
+  ]);
+  document.body.appendChild(root);
+
+  // Teardown safety (same idiom buildOverlay's openOverlays set uses): a shell tab-away mid-door
+  // would otherwise leave this card floating over the torn-down canvas.
+  let closed = false;
+  const abort = (): void => {
+    if (closed) return;
+    closed = true;
+    root.remove();
+  };
+  openOverlays.add(abort);
+
+  return {
+    update(counts, beat) {
+      flameSlots.forEach((s, i) => s.classList.toggle('is-lit', i < counts.successes));
+      markSlots.forEach((s, i) => s.classList.toggle('is-marked', i < counts.failures));
+      if (beat) {
+        beatEl.textContent = beat.text;
+        beatEl.classList.toggle('is-good', beat.good);
+        beatEl.classList.toggle('is-bad', !beat.good);
+      }
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      openOverlays.delete(abort);
+      root.classList.add('is-closing');
+      setTimeout(() => root.remove(), 180);
+    },
+  };
+}

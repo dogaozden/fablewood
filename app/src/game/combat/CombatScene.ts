@@ -42,6 +42,11 @@ import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
 import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
+// Direct import, not services.* — presentHoldTheLine is brand new to Task 7, both this file and
+// overlay.ts are in this task's own file list, and contracts.ts (the services.* registry's
+// shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
+// the task report as a deviation from the codebase's usual services-locator pattern.
+import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -201,6 +206,8 @@ export class CombatScene extends Phaser.Scene {
   private dd: DeathsDoorState | null = null;
   /** Outlives `dd` being cleared: the welded revival is once per BATTLE, not once per door. */
   private ddRevivedUsed = false;
+  /** The hold-the-line status card (Task 7); open exactly while `dd` is non-null. */
+  private ddFrame: HoldTheLineHandle | null = null;
   private encSeed = 0;
   private destroyed = false;
   private demo = false; // ?demo=1 → autopilot the party (screenshots + e2e)
@@ -324,6 +331,7 @@ export class CombatScene extends Phaser.Scene {
     this.graceAvailable = true;
     this.dd = null;
     this.ddRevivedUsed = false;
+    this.closeDdFrame();
     this.debugPrefer = null;
     this.actionLog = [];
     this.refreshSeq = 0;
@@ -494,12 +502,16 @@ export class CombatScene extends Phaser.Scene {
     }
   }
 
-  /** Undo fadeDead's death tween (used only when a Satchel heal revives a fainted ally). */
+  /** Undo fadeDead's death tween (used when a Satchel heal or the Death's Door revival stands a
+   *  fainted ally back up). Also restores the depth fadeDead permanently lowered it to (`r + 6`,
+   *  see fadeDead below) back to the same `10 + r` every living unit's container uses — without
+   *  this a revived unit stayed sunk beneath a same-row living unit exactly when the game is
+   *  showing off the revival (Task 5 review, finding M-1). */
   private reviveView(u: UnitState): void {
     const v = this.views.get(u.id);
     if (!v) return;
     this.tweens.killTweensOf(v.container);
-    v.container.setAlpha(1).setScale(1).setAngle(0);
+    v.container.setAlpha(1).setScale(1).setAngle(0).setDepth(10 + u.r);
   }
 
   private makeUnitView(u: UnitState): void {
@@ -2729,7 +2741,9 @@ export class CombatScene extends Phaser.Scene {
     this.rangeGfx.clear();
     this.hoverGfx.clear();
     this.dd = enterDoor(this.ddRevivedUsed);
-    this.hud.showBanner('The Fade presses close. Hold the line with what you know.', P.duskRose);
+    // Task 7's frame: the entry line now lives on the persistent card (title + entry + the two
+    // 3-slot counters), not a transient Phaser banner — see presentHoldTheLine.
+    this.ddFrame = presentHoldTheLine();
     void this.runDeathsDoorRound();
   }
 
@@ -2799,22 +2813,26 @@ export class CombatScene extends Phaser.Scene {
     const { next, event } = recordAnswer(this.dd, { quality: result.quality, box });
     this.dd = next;
     this.ddRevivedUsed = next.revivedUsed;
+    // Task 7's frame: the per-round beat (FINAL copy, unchanged from Task 5) now updates the
+    // persistent card instead of firing a standalone Phaser banner. Shown on every non-revive
+    // round, including the terminal one, so the 3rd flame/mark is visible before the card
+    // closes — omitted on 'revived' (recordAnswer never touches successes/failures for it, and
+    // the door closes straight into reviveAtDoor's own bigger celebration banner instead).
+    const beat = { text: result.quality === 1 ? 'The lantern holds.' : 'A mark of the Fade.', good: result.quality === 1 };
     switch (event) {
       case 'revived':
         await this.reviveAtDoor();
         return;
       case 'stabilized':
+        this.ddFrame?.update(next, beat);
         this.stabilizeAtDoor();
         return;
       case 'wiped':
+        this.ddFrame?.update(next, beat);
         await this.wipeAtDoor();
         return;
       default:
-        // Counters are Task 7's frame; until it lands the beat itself is the whole feedback.
-        this.hud.showBanner(
-          result.quality === 1 ? 'The lantern holds.' : 'A mark of the Fade.',
-          result.quality === 1 ? P.lanternGold : P.duskRose,
-        );
+        this.ddFrame?.update(next, beat);
         this.time.delayedCall(650, () => { if (!this.destroyed) void this.runDeathsDoorRound(); });
     }
   }
@@ -2822,6 +2840,7 @@ export class CombatScene extends Phaser.Scene {
   /** Three held: the Clerk walks you out. This is the pre-door retreat, byte-for-byte. */
   private stabilizeAtDoor(): void {
     this.dd = null;
+    this.closeDdFrame();
     this.hud.showBanner('Steady now. The Ledger holds your line — we walk out with what matters.', P.parchment);
     // A beat so the Clerk's line is readable before resolveBattle's own retreat banner replaces it.
     this.time.delayedCall(900, () => { if (!this.destroyed) this.resolveBattle('retreat'); });
@@ -2830,6 +2849,7 @@ export class CombatScene extends Phaser.Scene {
   /** Three marks: the Fade takes its due — one carried trinket, seeded, relics never touched. */
   private async wipeAtDoor(): Promise<void> {
     this.dd = null;
+    this.closeDdFrame();
     let keepsakeId: string | null = null;
     try {
       keepsakeId = pickKeepsake(
@@ -2853,6 +2873,7 @@ export class CombatScene extends Phaser.Scene {
    */
   private async reviveAtDoor(): Promise<void> {
     this.dd = null;
+    this.closeDdFrame();
     const keeper = this.unitById('keeper');
     if (!keeper) { this.stabilizeAtDoor(); return; }
     const pool = 1;
@@ -2881,6 +2902,14 @@ export class CombatScene extends Phaser.Scene {
     this.activeId = keeper.id;
     this.hud.setActive(keeper.id, this.aliveIds());
     this.beginPlayerTurn(keeper);
+  }
+
+  /** Close the hold-the-line frame, if open. Idempotent — every door exit path calls this,
+   *  including the two edge cases that reach stabilizeAtDoor()/reviveAtDoor() directly rather
+   *  than through runDeathsDoorRound's switch, so the card can never outlive the door. */
+  private closeDdFrame(): void {
+    this.ddFrame?.close();
+    this.ddFrame = null;
   }
 
   // ---- small helpers ----------------------------------------------------

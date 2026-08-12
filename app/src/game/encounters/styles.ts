@@ -226,6 +226,61 @@ const CSS = `
 .fw-dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(104,70,40,.32); transition: background .2s, transform .2s; }
 .fw-dot.is-on { background: var(--ember-deep); transform: scale(1.25); }
 
+/* death's door — the hold-the-line frame (Task 7). NOT a .fw-overlay: that class is the
+   full-screen dimming modal every graded encounter uses, and the per-round drill opens on top
+   of THIS card via the normal .fw-overlay flow — two stacked full-screen modals would double
+   the blur and bury this one under the drill's own backdrop. So this is its own small fixed
+   corner card, z-indexed above .fw-overlay (9999) so it stays legible through a drill, and
+   takes no pointer events or keyboard focus — it never contends with the drill for either. */
+.fw-holdline {
+  --parchment:#EBD9B2; --ink:#241A14; --ink-2:#2A1D13; --ink-soft:#684628;
+  --gold:#F7CE6B; --amber:#EEA23F; --ember-deep:#A65420; --dusk-rose:#CE7A8C;
+
+  position: fixed; top: 18px; right: 18px; z-index: 10050;
+  width: 226px; padding: 14px 16px 13px;
+  font-family: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+  color: var(--ink);
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 16px;
+  background:
+    linear-gradient(158deg, rgba(255,241,198,.6), rgba(237,222,186,1) 26%,
+                    rgba(235,217,178,1) 70%, rgba(214,184,140,.6));
+  box-shadow:
+    0 0 0 3px rgba(70,47,26,.26),
+    0 16px 36px -14px rgba(16,11,10,.6),
+    inset 0 1px 0 rgba(255,241,198,.75);
+  animation: fw-rise .26s cubic-bezier(.2,.9,.3,1) both;
+  pointer-events: none; /* status-only: never steals a click meant for the drill beneath it */
+}
+.fw-holdline.is-closing { animation: fw-fade .18s ease reverse both; }
+
+.fw-holdline-eyebrow { display: flex; align-items: center; gap: .4em; font-size: .64rem;
+  letter-spacing: .18em; text-transform: uppercase; font-weight: 700; color: var(--ember-deep); }
+.fw-holdline-eyebrow .fw-glyph { color: var(--gold); text-shadow: 0 0 8px rgba(247,206,107,.6); }
+.fw-holdline-title { margin: .3em 0 0; font-size: 1.02rem; line-height: 1.24; color: var(--ink-2); }
+.fw-holdline-entry { margin: .4em 0 0; font-size: .8rem; font-style: italic; line-height: 1.4; color: var(--ink-soft); }
+
+.fw-holdline-tracks { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 0; }
+.fw-holdline-track { display: flex; align-items: center; gap: 8px; }
+.fw-holdline-tracklabel { flex: none; width: 3.2em; font-size: .6rem; letter-spacing: .1em;
+  text-transform: uppercase; font-weight: 700; color: var(--ink-soft); }
+.fw-holdline-slots { display: flex; gap: 7px; }
+.fw-holdline-slot { width: 15px; height: 15px; border-radius: 999px; border: 1.5px solid rgba(104,70,40,.4);
+  background: rgba(235,217,178,.4);
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease, filter .18s ease; }
+/* held — a lit lantern-flame: warm, crisp, glowing. */
+.fw-holdline-slot.fw-flame.is-lit { background: radial-gradient(circle at 35% 30%, var(--gold), var(--amber) 72%);
+  border-color: var(--ember-deep); box-shadow: 0 0 9px rgba(247,206,107,.75); transform: scale(1.16); }
+/* fade — a soft smudge, never a skull or an X: cool-toned, irregular, genuinely soft-edged (a
+   real blur, not just an asymmetric radius) so it reads as a mark left behind, not a token. */
+.fw-holdline-slot.fw-mark.is-marked { border: none; border-radius: 40% 60% 55% 45% / 58% 40% 60% 42%;
+  background: radial-gradient(circle at 40% 36%, rgba(158,94,150,.9), rgba(52,38,90,.55) 70%, rgba(52,38,90,0) 100%);
+  filter: blur(.6px); box-shadow: 0 0 7px rgba(52,38,90,.4); transform: scale(1.3); }
+
+.fw-holdline-beat { min-height: 1.1em; margin: 10px 0 0; font-size: .84rem; font-style: italic; line-height: 1.3; }
+.fw-holdline-beat.is-good { color: var(--ember-deep); }
+.fw-holdline-beat.is-bad { color: var(--dusk-rose); }
+
 @keyframes fw-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fw-rise { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes fw-shake { 10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)} 30%,50%,70%{transform:translateX(-4px)} 40%,60%{transform:translateX(4px)} }
@@ -242,8 +297,8 @@ const CSS = `
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fw-overlay, .fw-panel, .fw-verdict, .fw-teach, .fw-reclaim { animation: none !important; }
-  .fw-opt, .fw-chip, .fw-step, .fw-order-drop, .fw-btn { transition: none !important; }
+  .fw-overlay, .fw-panel, .fw-verdict, .fw-teach, .fw-reclaim, .fw-holdline { animation: none !important; }
+  .fw-opt, .fw-chip, .fw-step, .fw-order-drop, .fw-btn, .fw-holdline-slot { transition: none !important; }
   .fw-deliberate .fw-nib, .fw-dots span, .fw-reclaim .fw-reclaim-flare { animation: none !important; }
 }
 `;
