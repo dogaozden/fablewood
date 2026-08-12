@@ -184,6 +184,12 @@ export interface SaveData {
   /** ISO stamp of the last Hearth night-rest; absence = never rested. W4's Lantern-light
    *  consumes this. */
   lastHearthAt?: string;
+  /** Cumulative XP (Concordance Ch. III). Absent = 0 — legacy saves start the spine at L1
+   *  with no catch-up grant (W4 controller ruling). progression/xp.ts owns every number. */
+  xp?: number;
+  /** Current level 1-10, always derivable as levelForXp(xp) — persisted so save readers
+   *  (HUD, hamlet status) never import the table. Absent = 1. */
+  level?: number;
   lastPlayed: string;
 }
 
