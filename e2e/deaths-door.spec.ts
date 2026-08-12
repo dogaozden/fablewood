@@ -299,7 +299,7 @@ async function answerDrillsWrong(page: Page, count: number): Promise<void> {
   }
 }
 
-test.describe("death's door — the Ledger Holds Your Line (RED pins, pre-mechanic)", () => {
+test.describe("death's door — the Ledger Holds Your Line (regression pins, mechanic live)", () => {
   test('Pin A — the door opens: the hold-the-line card shows, combat does not resolve instantly', async ({
     page,
   }) => {
