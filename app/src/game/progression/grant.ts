@@ -34,13 +34,21 @@ export const XP_AMOUNTS: Record<XpSource, number> = {
  * Grants XP from `source` and returns the levels gained (empty = no level-up ceremony).
  * Writes exactly one save patch: { xp, level, hp? }. hp is included only when a level was
  * gained AND opts.applyHp !== false, clamped to maxHpForLevel(newLevel) — the applyHp:false
- * escape is for mid-battle callers (CombatScene's renewal choke point), where the live HP
- * pool is authoritative and would otherwise clobber this patch on its own next sync
- * (CombatScene.ts:1902 precedent); those callers apply +2/level to the live pool themselves.
- * Embers get no patch on level-up: an absent embers field reads as "full," so an untouched
- * pool grows with its new max for free, and a spent pool keeps its count under the bigger
- * cap — that's the intended cozy behavior, not an oversight.
- * Never throws: a services.save failure is logged once and the grant is dropped ([]).
+ * escape is for mid-battle callers, where a scene-side live HP pool is authoritative and this
+ * patch's hp would otherwise be clobbered by the scene's own next sync. CombatScene has two
+ * such sync sites today (grep for "save.save({ hp" rather than trusting a line number — lines
+ * shift): the satchel-heal sync (patches `{ hp: livePool }`) and the death's-door revival sync
+ * (patches `{ hp: pool }`), both wrapped in a try/catch that silently swallows offline
+ * failures. Those callers apply +2/level to their own live pool themselves (Task 6 owns that
+ * seam). Embers get no patch on level-up: an absent embers field reads as "full," so an
+ * untouched pool grows with its new max for free, and a spent pool keeps its count under the
+ * bigger cap — that's the intended cozy behavior, not an oversight.
+ * Never throws synchronously: a services.save.get() failure (or any synchronous throw while
+ * computing the patch) is caught, logged once, and the grant is dropped ([]). A
+ * services.save.save() failure happens after levelsGained has already been computed and
+ * returned to the caller — the synchronous try/catch can't reach it — so it's logged once via
+ * a .catch() on the fire-and-forget call instead; the caller still gets the (optimistic)
+ * levelsGained even though the patch silently failed to persist.
  */
 export function grantXp(source: XpSource, opts?: { amount?: number; applyHp?: boolean }): number[] {
   try {
@@ -56,7 +64,9 @@ export function grantXp(source: XpSource, opts?: { amount?: number; applyHp?: bo
       patch.hp = Math.min(save.hp + 2 * levelsGained.length, maxHpForLevel(level));
     }
 
-    void services.save.save(patch);
+    void services.save.save(patch).catch((err) => {
+      console.warn('[progression] grantXp failed — dropping this XP grant', err);
+    });
     return levelsGained;
   } catch (err) {
     console.warn('[progression] grantXp failed — dropping this XP grant', err);

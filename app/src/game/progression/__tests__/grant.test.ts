@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { services } from '../../contracts';
 import { grantXp, XP_AMOUNTS } from '../grant';
 
@@ -82,13 +82,29 @@ describe('grantXp', () => {
     expect(patches).toEqual([{ xp: 35, level: 1 }]);
   });
 
-  it('never throws on a save failure — logs and returns []', () => {
+  it('never throws on a get() failure — logs and returns [] (the get-leg)', () => {
     services.save = {
       ready: async () => {},
       get: () => { throw new Error('boom'); },
       save: async () => {},
     };
     expect(grantXp('renewal')).toEqual([]);
+  });
+
+  it('a save() failure still returns the already-computed levelsGained, but warns once (the save-leg counterpart to the get() failure above)', async () => {
+    // Unlike the get() leg, a save() rejection happens AFTER grantXp has already returned
+    // levelsGained synchronously (the fire-and-forget call isn't awaited), so the synchronous
+    // try/catch can't reach it — this pins the .catch() on the save() call instead.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    services.save = {
+      ready: async () => {},
+      get: () => makeSave({ xp: 95 }),
+      save: async () => { throw new Error('offline'); },
+    };
+    expect(grantXp('renewal')).toEqual([2]); // 95+5=100, level 2 — returned before save() rejects
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let the fire-and-forget .catch() settle
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 
   it('applyHp:false suppresses the hp patch but still persists xp+level (mid-battle callers)', () => {
