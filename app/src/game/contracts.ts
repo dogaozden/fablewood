@@ -142,6 +142,12 @@ export interface CombatOutcome {
   /** Death's Door wipe detail — absent on victory/retreat. Optional, additive: old consumers
    *  unaffected, same `?? `-default pattern as `reclaimed?`/`newWelds?`. */
   wipeReport?: { keepsakeId: string | null };
+  /** Wave 4 — levels gained MID-BATTLE (renewal grants at CombatScene's record() choke point),
+   *  carried out so the post-battle beat folds them into its ONE ceremony card rather than
+   *  firing a second one from inside combat (leveling.spec.ts's beat law). Present on every
+   *  outcome, wipe included: XP is never lost (Constraint 5). Optional, additive, same
+   *  `?? []`-default pattern as `wipeReport?` above. */
+  levelsGained?: number[];
 }
 
 // ---------------------------------------------------------------- srs & save

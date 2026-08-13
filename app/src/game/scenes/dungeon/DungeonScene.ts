@@ -492,8 +492,12 @@ export class DungeonScene extends Phaser.Scene {
     }
     // Wave 4 Task 5 — accumulated across this room's gate drill (if any) + its own room-clear
     // grant; ONE ceremony card presents inside this post-combat/boss beat sequence
-    // (leveling.spec.ts's beat law), never per-source.
-    const pending: number[] = [];
+    // (leveling.spec.ts's beat law), never per-source. Task 6 seeds it with the battle's own
+    // mid-fight renewals, FIRST: they were earned before anything below, so the card lists
+    // them in the order they happened. The boss path inherits this same array (bossVictory's
+    // `pending` argument, its only call site), so the battle levels reach the boss card too
+    // without a second prepend that would list every one of them twice.
+    const pending: number[] = [...(outcome.levelsGained ?? [])];
 
     await this.applyHp(-outcome.hpLost);
 
@@ -509,6 +513,11 @@ export class DungeonScene extends Phaser.Scene {
       // crawl's harvest before the walk home (no loot on a retreat, streak unchanged).
       this.accrueHarvest(outcome, 0);
       await this.runNightLedger('retreat', services.save.get().streak);
+      // Wave 4 — a wise withdrawal that banked a level still deserves its lantern: the same
+      // beat the wipe branch below gets, after the retreat's own ledger closes (Constraint 10
+      // forbids only a mid-ledger card). The GATE's HP-out retreat keeps its own recorded
+      // skip — that path is Task 5's, and its toast + Ledger already own that beat.
+      await this.presentPendingLevelUp(pending);
       this.scene.start('hamlet', { seed: this.seed });
       return { transitioned: true };
     }
@@ -527,6 +536,10 @@ export class DungeonScene extends Phaser.Scene {
       // §3.2 the Night's Ledger — fold this last battle in (no gold on a wipe, streak unchanged).
       this.accrueHarvest(outcome, 0);
       await this.runNightLedger('wipe', services.save.get().streak, outcome.wipeReport?.keepsakeId ?? null);
+      // Wave 4 — the road remembers you even in defeat: a level crossed on a death save is
+      // still a level. AFTER the wipe ledger closes, never during it (Constraint 10 forbids
+      // only a mid-ledger card), and last thing before the walk home.
+      await this.presentPendingLevelUp(pending);
       this.scene.start('hamlet', { seed: this.seed });
       return { transitioned: true };
     }

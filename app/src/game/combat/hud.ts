@@ -118,11 +118,14 @@ export class CombatHud {
 
   // ---- rank line (§12.3) -------------------------------------------------
 
-  /** `welded4` (facts at box≥4) feeds the pre-rank-3 carrot; ignored once rank 3 is reached. */
-  setRankLine(rank: 1 | 2 | 3, welded4: number): void {
+  /** `welded4` (facts at box≥4) feeds the pre-rank-3 carrot; ignored once rank 3 is reached.
+   *  `rank` is the COMPOSED tier gate (Wave 4) — what the Keeper can actually cast at, mastery
+   *  and level together — and `level` prefixes it, this line being the HUD's one progression
+   *  readout. The rank half's format is unchanged. */
+  setRankLine(rank: 1 | 2 | 3, welded4: number, level: number): void {
     const roman = rank === 1 ? 'I' : rank === 2 ? 'II' : 'III';
     const carrot = rank < 3 ? ` — ${welded4}/8 welded toward Rank III` : '';
-    this.rankText.setText(`Keeper's Rank ${roman}${carrot}`);
+    this.rankText.setText(`Lv ${level} · Keeper's Rank ${roman}${carrot}`);
   }
 
   // ---- turn strip -------------------------------------------------------

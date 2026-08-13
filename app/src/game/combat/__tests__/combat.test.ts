@@ -168,6 +168,19 @@ describe('damage table', () => {
     expect(resolveAction('smite', 0, { miraBonus: 1 }).hits).toBe(0); // no bonus on a whiff
   });
 
+  it('the level Strike bonus binds to steel, not the Arts (Wave 4 — strikeBonusForLevel)', () => {
+    expect(resolveAction('strike', 1, { strikeBonus: 0 }).hits).toBe(1); // today's base
+    expect(resolveAction('strike', 1, { strikeBonus: 1 }).hits).toBe(2); // L5
+    expect(resolveAction('strike', 1, { strikeBonus: 2 }).hits).toBe(3); // L9
+    expect(resolveAction('strike', 1).hits).toBe(1); // absent = 0
+    expect(resolveAction('strike', 1, { miraBonus: 1, strikeBonus: 2 }).hits).toBe(4); // stacks
+    for (const a of ['smite', 'weave', 'sequence', 'cast'] as const) {
+      expect(resolveAction(a, 1, { strikeBonus: 2 }).hits, `${a} unchanged`).toBe(
+        resolveAction(a, 1).hits,
+      );
+    }
+  });
+
   it('Weave hits the whole cross only at full quality (2 dmg per tile)', () => {
     expect(resolveAction('weave', 1)).toMatchObject({ aoe: 'cross', hits: 2, aoeHit: 2 });
     expect(resolveAction('weave', 0.5)).toMatchObject({ hits: 2, aoeHit: 0 }); // primary only

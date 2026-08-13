@@ -50,6 +50,10 @@ const EMPTY: ActionOutcome = {
 export interface ResolveOpts {
   /** +1 when Mira acts and province mastery ≥ gate */
   miraBonus?: number;
+  /** Wave 4 — the Keeper's level Strike bonus (progression/xp.ts strikeBonusForLevel: +1 at
+   *  L5, +2 at L9). Steel only: the Arts are gated by the tier ladder instead, so this rides
+   *  the strike arm alone and every other action ignores it. */
+  strikeBonus?: number;
   /** targeting the boss (Cast can strip a shield on a pass) */
   vsBoss?: boolean;
   /** difficulty-rewards.md §4 rider, already gated by the caller */
@@ -119,7 +123,7 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
     case 'strike': {
       // Free basic attack — no encounter, cannot miss. Fixed, modest, always lands
       // (quality is irrelevant; the scene always resolves a Strike at full).
-      return { ...EMPTY, hits: 1 + mira, banner: 'A quick strike.' };
+      return { ...EMPTY, hits: 1 + mira + (opts.strikeBonus ?? 0), banner: 'A quick strike.' };
     }
     case 'smite':
       return outcomeFromSpell(SPELLBOOK.smite, quality, opts);

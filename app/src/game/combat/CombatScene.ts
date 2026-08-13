@@ -58,6 +58,8 @@ import {
   graceAppliesTo, isBossPhaseCast,
   type ArtRanks, type GlowState,
 } from './arts';
+import { grantXp } from '../progression/grant';
+import { maxHpForLevel, strikeBonusForLevel, tierForLevel } from '../progression/xp';
 import { reclaimedFactIds } from '../../srs/redemption';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
@@ -244,6 +246,21 @@ export class CombatScene extends Phaser.Scene {
   /** cached ONCE per battle (loadContent, after allFactIds is built) — never recomputed mid-battle. */
   private rank: 1 | 2 | 3 = 1;
   private rankInfo: ArtRanks = { rank: 1, welded3: 0, welded4: 0 };
+
+  // Wave 4 leveling (Concordance Ch. III). All three reads are cached ONCE per battle beside
+  // the rank, under the same trap-1 law: a level gained mid-fight pays its +2 HP immediately,
+  // but its tier floor and Strike bonus arm the NEXT battle, never this one.
+  /** the Keeper's level at battle create (`save.level ?? 1`). */
+  private level = 1;
+  /** tierForLevel(level) — the LEVEL half of the hybrid tier gate, kept separately from the
+   *  composed `rank` so progressionSnapshot() can report the two apart. */
+  private tierFloor: 1 | 2 | 3 = 1;
+  /** strikeBonusForLevel(level) — free-lane steel only (the Strike and party opportunity
+   *  strikes); the Arts are gated by the tier ladder instead. */
+  private strikeBonus = 0;
+  /** levels gained mid-battle, carried out on CombatOutcome so DungeonScene folds them into
+   *  the post-battle beat's ONE ceremony card (leveling.spec.ts's beat law). */
+  private pendingLevelUps: number[] = [];
   /** cached ONCE per battle (loadContent, where pack.meta is in scope) — never recomputed
    *  mid-battle; reset in create() (Trap-1, reused scene instance — see rankInfo above). */
   private packDifficultyClassified = false;
@@ -353,6 +370,10 @@ export class CombatScene extends Phaser.Scene {
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
+    this.level = 1;
+    this.tierFloor = 1;
+    this.strikeBonus = 0;
+    this.pendingLevelUps = [];
     this.packDifficultyClassified = false;
     this.glow = { pips: 0 };
     this.pendingSpell = null;
@@ -400,7 +421,7 @@ export class CombatScene extends Phaser.Scene {
       if (this.destroyed) return;
       this.applyPoolHp(); // split the saved pooled HP onto Keeper/Mira (save is ready now)
       this.refreshParty();
-      this.hud.setRankLine(this.rank, this.rankInfo.welded4);
+      this.hud.setRankLine(this.rank, this.rankInfo.welded4, this.level);
       this.time.delayedCall(320, () => this.advanceTurn());
     });
   }
@@ -721,7 +742,18 @@ export class CombatScene extends Phaser.Scene {
     // this.rank/this.rankInfo — trap 1, never recomputed mid-battle) over the battle's full
     // fact pool. ?rank= overrides the computed value so e2e/dev never needs a seeded SRS.
     this.rankInfo = computeRank((id) => this.boxOfSafe(id), [...this.allFactIds]);
-    this.rank = this.rankOverride ?? this.rankInfo.rank;
+
+    // Wave 4 — the hybrid tier gate (Concordance Ch. III): SRS mastery and the Keeper's level
+    // each open tiers on their own, so the live gate is the HIGHER of the two. Composed HERE
+    // and only here — all six existing `this.rank` read-sites inherit it untouched, which is
+    // the whole point of a single seam. ?rank= stays absolute above both halves: a dev tool
+    // beats the level floor. Same read-the-save-once, tolerate-offline shape as applyPoolHp().
+    let level = 1;
+    try { level = services.save.get()?.level ?? 1; } catch { /* offline → L1 */ }
+    this.level = level;
+    this.tierFloor = tierForLevel(level);
+    this.strikeBonus = strikeBonusForLevel(level);
+    this.rank = this.rankOverride ?? (Math.max(this.rankInfo.rank, this.tierFloor) as 1 | 2 | 3);
   }
 
   /** `services.srs.boxOf`, tolerant of an offline/stub SRS (0 = unseen, the honest default). */
@@ -1267,8 +1299,13 @@ export class CombatScene extends Phaser.Scene {
         // this method, so `mover` here reads as already-arrived; passing `vacated` instead
         // restores "flank geometry evaluated relative to the tile being left" (§4.1/§4.2).
         const flank = isFlanked(striker, vacated, striker.team, this.units);
+        // Wave 4 — an opportunity strike is free-lane steel (§9.3 above), so the Keeper's level
+        // Strike bonus rides it too. The team guard is explicit for the same reason the Strike's
+        // own Glow gain guards: this method resolves BOTH directions (enemies strike a party
+        // mover as readily as the reverse), and the Fade never swings with the Keeper's level.
         const result = computeHit({
-          base: 1, attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
+          base: 1 + (striker.team === 'party' ? this.strikeBonus : 0),
+          attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
         });
         mover.statuses = result.targetStatuses;
@@ -1306,7 +1343,9 @@ export class CombatScene extends Phaser.Scene {
     // no overlay and no dead frame. Deals fixed, modest damage; no SRS record (no question).
     if (action === 'strike') {
       const miraBonus = unit.id === 'mira' && this.miraBonusActive() ? 1 : 0;
-      const outcome = resolveAction('strike', 1, { miraBonus, vsBoss: !!target?.isBoss });
+      const outcome = resolveAction('strike', 1, {
+        miraBonus, vsBoss: !!target?.isBoss, strikeBonus: this.strikeBonus,
+      });
       const before = this.enemyHpSum();
       this.attackerTell(unit, tile, ACTIONS.strike.tint);
       // §9.3 — if the Warden Objected to this swing, HIS banner is the outcome; the Strike's
@@ -2658,7 +2697,51 @@ export class CombatScene extends Phaser.Scene {
       if (beforeBoxes[i] < 4 && this.boxOfSafe(id) >= 4) this.newWelds++;
     });
     this.reclaimed += reclaimedIds.length;
+    // Wave 4 — the mid-fight renewal (Concordance Ch. III). EVERY quality-1 pass through this
+    // choke point pays +5: a cast and a death's-door save alike, since a correct answer under
+    // pressure is still a correct renewal. Once per GRADED ENCOUNTER, not per fact — record()
+    // runs once per answered prompt, so a multi-fact cast pays +5 once, matching the
+    // Wellspring's one-fact-one-round economy.
+    if (result.quality === 1) await this.payRenewal();
     return { reclaimedId };
+  }
+
+  /**
+   * The renewal grant and its live-pool consequence.
+   *
+   * grantXp writes xp/level itself but skips the hp patch (`applyHp: false`) — mid-battle the
+   * SCENE's pool is authoritative and grant.ts's hp would be clobbered by the scene's own next
+   * `{hp: …}` sync (grant.ts names both sync sites). So the +2/level lands here instead, on the
+   * same re-anchor the Satchel heal performs (crucible #3): write the raised pool, then zero
+   * hpLost — a running total DungeonScene subtracts on return, which would otherwise charge the
+   * pre-bump damage a second time against a base that already reflects it — then re-split
+   * through applyPoolHp(), which stands a fainted ally back up with the pool exactly as a
+   * Satchel heal does.
+   *
+   * The cap reads the LAST level gained, not `services.save.get().level`: the save store only
+   * updates its cache after the write settles (srs/store.ts, ObjectStore.save), so a get() here
+   * would still see the PRE-grant level and clamp the bump away. levelsGained is OPTIMISTIC by
+   * grant.ts's design — a failed persist still returns levels — and this bump and the ceremony
+   * card inherit that consequence deliberately.
+   *
+   * The one place the pool is not the scene's to raise is the door: enterDeathsDoor only runs
+   * with the whole party down, so applyPoolHp() would stand them back up mid-door, outside the
+   * machine that decides whether they rise — and reviveAtDoor writes `{hp: 1}` over it anyway.
+   * The XP, the level and the ceremony card are all still paid there; only the live-pool bump
+   * waits, and the level's bigger maximum is already persisted for the next heal.
+   */
+  private async payRenewal(): Promise<void> {
+    const gained = grantXp('renewal', { applyHp: false });
+    if (!gained.length) return;
+    this.pendingLevelUps.push(...gained);
+    if (this.dd) return;
+    const pool = (this.unitById('keeper')?.hp ?? 0) + (this.unitById('mira')?.hp ?? 0);
+    const raised = Math.min(pool + 2 * gained.length, maxHpForLevel(gained[gained.length - 1]));
+    try { await services.save.save({ hp: raised }); } catch { /* offline */ }
+    if (this.destroyed) return;
+    this.hpLost = 0;
+    this.applyPoolHp();
+    this.refreshParty();
   }
 
   // ---- outcome ----------------------------------------------------------
@@ -2708,6 +2791,11 @@ export class CombatScene extends Phaser.Scene {
     // Present on a wipe and only on a wipe (`keepsakeId: null` = nothing eligible was carried,
     // which is a real, reportable outcome — distinct from "this wasn't a wipe").
     if (outcome === 'wipe') payload.wipeReport = { keepsakeId: wipeKeepsakeId };
+    // Wave 4 — mid-fight renewals ride home on EVERY outcome, victory to wipe: the XP is
+    // already banked (grantXp persists on the spot), and this is only its ceremony card
+    // asking to be shown at the return scene's next safe beat. Copied, not aliased — the
+    // consumer merges it into its own accumulator.
+    if (this.pendingLevelUps.length) payload.levelsGained = [...this.pendingLevelUps];
     // Fire the event now (listeners registered before launch catch it) AND hand the
     // outcome to the return scene's init data (listeners registered on resume catch it).
     this.game.events.emit('combat:resolved', payload);
@@ -3053,13 +3141,29 @@ export class CombatScene extends Phaser.Scene {
       enemyHp: this.enemyHpSum(),
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
-      rank: this.rank,
+      // Wave 4 — this field reports the MASTERY rank (the SRS welds, with ?rank= still absolute
+      // over it, exactly the value it carried before levels existed). `this.rank` is now the
+      // COMPOSED gate; progressionSnapshot().composedTier reports that half. leveling.spec.ts's
+      // Pin C pins precisely this split: level 6 with an empty srs.json reads rank 1 here and
+      // composedTier 3 there.
+      rank: this.rankOverride ?? this.rankInfo.rank,
       welded3: this.rankInfo.welded3,
       welded4: this.rankInfo.welded4,
       glow: this.glow.pips,
       reclaimed: this.reclaimed,
       newWelds: this.newWelds,
     };
+  }
+
+  /** Debug: the Wave 4 progression state (e2e-only — same family as combatSnapshot()/
+   *  deathsDoorSnapshot()). `tierFloor` is the level half of the hybrid gate alone;
+   *  `composedTier` is the live gate every rank read-site actually uses, so a test can prove
+   *  a level opened a tier the SRS rank never reached. `xp` reads the save (the scene caches
+   *  a level, never a running xp total), tolerant of an offline store like its siblings. */
+  progressionSnapshot(): { xp: number; level: number; tierFloor: 1 | 2 | 3; composedTier: 1 | 2 | 3 } {
+    let xp = 0;
+    try { xp = services.save.get()?.xp ?? 0; } catch { /* offline → 0 */ }
+    return { xp, level: this.level, tierFloor: this.tierFloor, composedTier: this.rank };
   }
 
   /** Debug: full per-unit snapshot (position, hp, attack, statuses) — e2e-only. Lets Phase 1's
