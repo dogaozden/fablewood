@@ -57,6 +57,21 @@ describe('grantXp', () => {
     expect(patches).toEqual([{ xp: 240, level: 2, hp: 18 }]); // 19+2=21 clamped to maxHpForLevel(2)=18
   });
 
+  it('multi-level grant applies +2 per level crossed, clamped to the new max', () => {
+    // The seam's genuine multi-level path: no table source can double-cross from below L2 (the
+    // largest, boss, is 150 — even 99+150=249 stays under the L3 threshold of 300), so this pins
+    // the behavior via 'quest' + an explicit amount, reusing xp.test.ts's own awardXp(90,250)
+    // precedent (xp:340, levelsGained:[2,3]) — the original brief's intended numbers, reached by
+    // a delta that actually produces them.
+    services.save = {
+      ready: async () => {},
+      get: () => makeSave({ xp: 90, hp: 19 }),
+      save: async (p) => { patches.push(p); },
+    };
+    expect(grantXp('quest', { amount: 250 })).toEqual([2, 3]);   // 90 + 250 = 340
+    expect(patches).toEqual([{ xp: 340, level: 3, hp: 20 }]); // 19+4=23 clamped to maxHpForLevel(3)=20
+  });
+
   it('quest grants use the explicit pack-authored amount', () => {
     services.save = {
       ready: async () => {},
