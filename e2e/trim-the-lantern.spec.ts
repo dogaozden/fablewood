@@ -123,6 +123,18 @@ test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
       await page.goto('/?scene=vaults&dev=1&seed=7');
       await waitReady(page, 'vaults');
 
+      // Task 5 review (Minor 1): final-state equality alone can't tell "spent then refunded"
+      // from "the click did nothing" — both read embers net-2. Passively collecting every PUT
+      // the click causes disambiguates with no timing dependency (unlike polling for the
+      // mid-flight value, which an empirical timing probe showed is a genuine sub-100ms race):
+      // an inert click writes zero saves; the real spend-then-refund path writes exactly two.
+      const saveWrites: Array<string | null> = [];
+      page.on('request', (req) => {
+        if (req.method() === 'PUT' && req.url().includes('/api/state/save.json')) {
+          saveWrites.push(req.postData());
+        }
+      });
+
       await clickTrimButton(page);
       await page.waitForTimeout(300);
 
@@ -131,6 +143,12 @@ test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
       expect(after?.embers, 'spent then refunded — net unchanged').toBe(2);
       expect(after?.hp, 'no fact anywhere to ask — no encounter, no heal').toBe(10);
       expect(await trimDebugRead(page)).toEqual({ lastQuality: null, embersSpent: 0 });
+
+      // disambiguation: two real writes happened, spend then refund — not zero (inert click).
+      expect(saveWrites, 'exactly two save writes: the spend, then the refund').toHaveLength(2);
+      const [spendBody, refundBody] = saveWrites.map((b) => JSON.parse(b ?? '{}') as Save);
+      expect(spendBody.embers, 'write 1 is the spend, embers 2→1').toBe(1);
+      expect(refundBody.embers, 'write 2 is the refund, embers 1→2').toBe(2);
     } finally {
       await restoreSave(page, beforeSave);
     }
