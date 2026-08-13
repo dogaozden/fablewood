@@ -23,6 +23,8 @@ export interface NodeHandlers {
   onCamp: () => void;
   /** Open the Satchel from the camp card (inventory-handoff §9). */
   onSatchel: () => void;
+  /** Trim the Lantern — the between-rooms Ember-spend drill (rest/embers.ts, Concordance Ch. II). */
+  onTrim: () => void;
 }
 
 type Toast = 'info' | 'warn' | 'good';
@@ -565,7 +567,7 @@ export class VaultView {
   showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {
     const s = this.scene;
     const w = 480;
-    const h = 300;
+    const h = 350; // +50 over the pre-Trim height: a second stacked button (showResumeChoice's own 52px rhythm)
     const cont = this.openPanel(w, h);
     const cx = W / 2;
     const top = (H - h) / 2 + 28;
@@ -582,6 +584,7 @@ export class VaultView {
     cont.add(s.add.text(cx, top + 104, healLine, { fontFamily: FONT, fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
     if (this.handlers) {
       cont.add(this.button(cx, top + 150, 'Open Satchel', C.timber, () => this.handlers!.onSatchel()));
+      cont.add(this.button(cx, top + 202, 'Trim the Lantern (1 Ember)', C.ember, () => this.handlers!.onTrim()));
     }
     return this.finishCard(cont, h, mode, 'Onward ▸');
   }

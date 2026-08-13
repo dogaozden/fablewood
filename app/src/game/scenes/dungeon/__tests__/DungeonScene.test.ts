@@ -12,7 +12,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const vv = vi.hoisted(() => ({
   log: [] as string[],
-  handlers: null as null | { onRoom: (i: number) => void; onCamp: () => void; onSatchel: () => void },
+  handlers: null as null | {
+    onRoom: (i: number) => void;
+    onCamp: () => void;
+    onSatchel: () => void;
+    onTrim: () => void;
+  },
 }));
 
 vi.mock('phaser', () => ({ default: { Scene: class {} } }));
@@ -31,7 +36,12 @@ vi.mock('../VaultView', () => ({
     renderMap(
       _spec: unknown,
       _progress: unknown,
-      handlers: { onRoom: (i: number) => void; onCamp: () => void; onSatchel: () => void },
+      handlers: {
+        onRoom: (i: number) => void;
+        onCamp: () => void;
+        onSatchel: () => void;
+        onTrim: () => void;
+      },
     ): void {
       vv.handlers = handlers;
     }
@@ -346,6 +356,171 @@ describe('onCamp busy-lock does not silently drop a click (W2 T8)', () => {
     vv.handlers!.onCamp();
     await waitFor(() => vv.log.includes('camp'), 'the camp card once the lock clears');
     expect(h.save().hp).toBe(16);
+  });
+});
+
+// ---- onTrim() — Trim the Lantern, the between-rooms Ember-spend drill (W3 T5) ----
+
+/** Installs services.draw + services.runEncounter for the trim ladder (due → fresh →
+ *  seededShuffle(eligible(allFactIds))). Spies expose call evidence so a refused Trim
+ *  (zero Embers / full HP) can PROVE the draw never fired, not just infer it. */
+function installTrimDraw(
+  opts: { due?: string[]; fresh?: string[]; allFactIds?: string[]; quality?: Quality } = {},
+): { due: ReturnType<typeof vi.fn>; fresh: ReturnType<typeof vi.fn>; allFactIds: ReturnType<typeof vi.fn> } {
+  const due = vi.fn(() => opts.due ?? []);
+  const fresh = vi.fn(() => opts.fresh ?? []);
+  const allFactIds = vi.fn(() => opts.allFactIds ?? []);
+  services.draw = {
+    ready: async () => {},
+    indexReady: async () => {},
+    due,
+    fresh,
+    allFactIds,
+    sourceOf: () => undefined,
+    factOf: () => undefined,
+    encountersOf: () => [],
+    isEmpty: () => false,
+  };
+  services.runEncounter = async (req) => ({
+    encounterId: req.encounterId ?? 'trim-fact',
+    kind: 'free_recall',
+    factIds: req.factIds ?? [],
+    quality: opts.quality ?? 1,
+  });
+  return { due, fresh, allFactIds };
+}
+
+/** Click Trim and wait for its toast — every outcome (refuse / refund / correct / miss)
+ *  ends in exactly one toast, so this is a branch-agnostic sync point. */
+async function fireTrim(): Promise<void> {
+  vv.handlers!.onTrim();
+  await waitFor(() => vv.log.some((m) => m.startsWith('toast:')), 'a trim toast');
+}
+
+type TrimDebugScene = { trimDebug(): { lastQuality: number | null; embersSpent: number } };
+
+describe('onTrim — Trim the Lantern (W3 T5)', () => {
+  it('(a) spends one Ember and heals +4 on a correct answer', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 10, embers: 2 });
+    const srsRecord = vi.fn(async () => {});
+    services.srs.record = srsRecord;
+    installTrimDraw({ due: ['moss.f1'], quality: 1 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    expect(h.save().embers).toBe(1);
+    expect(h.save().hp).toBe(14);
+    expect(vv.log).toContain('toast:The flame answers. The party mends (+4).');
+    expect(srsRecord).toHaveBeenCalledWith('moss.f1', 1, 'trim-fact', 'concept');
+    expect((scene as unknown as TrimDebugScene).trimDebug()).toEqual({ lastQuality: 1, embersSpent: 1 });
+  });
+
+  it('(b) spends one Ember and heals +1 on a miss', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 10, embers: 2 });
+    installTrimDraw({ due: ['moss.f1'], quality: 0 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    expect(h.save().embers).toBe(1);
+    expect(h.save().hp).toBe(11);
+    expect(vv.log).toContain('toast:A guttering flicker — the rest still soothes (+1).');
+  });
+
+  it('(c) partial credit (0.5) heals as a MISS, +1 — RT-1', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 10, embers: 2 });
+    installTrimDraw({ due: ['moss.f1'], quality: 0.5 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    expect(h.save().embers).toBe(1);
+    expect(h.save().hp).toBe(11);
+    expect(vv.log).toContain('toast:A guttering flicker — the rest still soothes (+1).');
+  });
+
+  it('(d) zero Embers refuses: no draw, no spend', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 10, embers: 0 });
+    const draw = installTrimDraw({ due: ['moss.f1'], quality: 1 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    expect(h.save().embers).toBe(0);
+    expect(h.save().hp).toBe(10);
+    expect(vv.log).toContain('toast:The ember pouch is empty. The hearth refills it come night.');
+    expect(draw.due).not.toHaveBeenCalled();
+    expect(draw.fresh).not.toHaveBeenCalled();
+  });
+
+  it('(e) full HP refuses: no spend', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 16, embers: 2 });
+    const draw = installTrimDraw({ due: ['moss.f1'], quality: 1 });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    expect(h.save().embers).toBe(2);
+    expect(h.save().hp).toBe(16);
+    expect(vv.log).toContain('toast:The lantern burns steady — nothing to trim.');
+    expect(draw.due).not.toHaveBeenCalled();
+  });
+
+  it('(f) an empty draw (packless edge) refunds the Ember and bails clean', async () => {
+    setSearch('?dev=1');
+    const h = installServices({ hp: 10, embers: 2 });
+    installTrimDraw({ due: [], fresh: [], allFactIds: [] });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+    await waitFor(() => vv.handlers !== null, 'the map to render');
+    vv.log.length = 0;
+
+    await fireTrim();
+
+    // net zero: spent then refunded — never left holding one fewer Ember than it started with
+    expect(h.save().embers).toBe(2);
+    expect(h.save().hp).toBe(10);
+    expect(vv.log).toContain('toast:Nothing stirs in the Ledger tonight. The ember is yours again.');
+    expect((scene as unknown as TrimDebugScene).trimDebug().embersSpent).toBe(0);
   });
 });
 

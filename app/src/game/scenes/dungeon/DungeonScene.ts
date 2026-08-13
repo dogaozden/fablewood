@@ -19,7 +19,8 @@ import {
   type DungeonRoom,
   type FactLite,
 } from '../../contracts';
-import { embersOf } from '../../rest/embers';
+import { embersOf, TRIM_HEAL_CORRECT, TRIM_HEAL_MISS } from '../../rest/embers';
+import { seededShuffle } from '../../recency';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
 import { music } from '../../../music/instance';
@@ -94,6 +95,14 @@ export class DungeonScene extends Phaser.Scene {
   private busy = false;
   private didReady = false;
   private satchelBusy = false;
+  /** Trim the Lantern's own lock — never `busy`/`satchelBusy` (the camp card that hosts this
+   *  button holds neither for its lifetime; see onSatchel's own precedent). */
+  private trimBusy = false;
+  /** Debug only: the most recently resolved Trim encounter's quality, and the net count of
+   *  Embers Trim has actually spent this scene lifetime (a spend immediately undone by a
+   *  packless-edge refund does not count). See trimDebug(). */
+  private trimLastQuality: number | null = null;
+  private trimEmbersSpent = 0;
 
   constructor() {
     super('vaults');
@@ -140,6 +149,7 @@ export class DungeonScene extends Phaser.Scene {
       onRoom: (i) => this.onRoom(i),
       onCamp: () => void this.onCamp(),
       onSatchel: () => void this.onSatchel(),
+      onTrim: () => void this.onTrim(),
     };
     this.view.renderChrome();
     // hard safety net: a screenshot/e2e must never hang waiting on __FABLEWOOD_READY
@@ -718,6 +728,93 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Trim the Lantern (Concordance Ch. II) — spend one Ember for one due question between
+   * rooms, at the camp. Guards first (own `trimBusy` lock — never `busy`/`satchelBusy`, so it
+   * can never entangle with onCamp's or onSatchel's locks), then spends FIRST and respects the
+   * result (consume.ts's idiom, transposed to a save-patch): the Ember is gone the instant the
+   * save call resolves, and is refunded only on the one edge that can't ask anything — a
+   * packless/exhausted draw. A full party never wastes an Ember; refusing costs nothing.
+   */
+  private async onTrim(): Promise<void> {
+    if (this.trimBusy) return;
+    this.trimBusy = true;
+
+    const save = services.save.get();
+    if (embersOf(save) === 0) {
+      this.view.toast('The ember pouch is empty. The hearth refills it come night.', 'warn');
+      this.trimBusy = false;
+      return;
+    }
+    if (save.hp >= PARTY_MAX_HP) {
+      this.view.toast('The lantern burns steady — nothing to trim.', 'warn');
+      this.trimBusy = false;
+      return;
+    }
+
+    await services.save.save({ embers: embersOf(save) - 1 });
+    this.trimEmbersSpent += 1;
+
+    const seed = (this.seed + (this.progress?.cleared.length ?? 0) * 8191 + 5) >>> 0;
+    const factId = this.trimDraw(seed);
+    if (!factId) {
+      // packless edge: nothing anywhere to ask. Refund against the FRESHEST save (never the
+      // stale `save` read above) — a night at the hearth or another Trim could have moved it.
+      const cur = services.save.get();
+      await services.save.save({ embers: embersOf(cur) + 1 });
+      this.trimEmbersSpent -= 1;
+      this.view.toast('Nothing stirs in the Ledger tonight. The ember is yours again.', 'warn');
+      this.refreshStatus();
+      this.trimBusy = false;
+      return;
+    }
+
+    const res = await services.runEncounter({
+      context: 'drill',
+      kinds: ['free_recall'],
+      factIds: [factId],
+      packId: this.packId ?? FIXTURE_PACK_ID,
+      seed,
+    });
+    for (const fid of res.factIds) {
+      await services.srs.record(fid, res.quality, res.encounterId, this.facts.get(fid)?.type);
+    }
+    this.trimLastQuality = res.quality;
+
+    // DD-KNOB-1 (knob RT-1): partial credit (0.5) heals as a MISS, not a half-measure.
+    const correct = res.quality >= 1;
+    await this.applyHp(correct ? TRIM_HEAL_CORRECT : TRIM_HEAL_MISS);
+    this.view.toast(
+      correct
+        ? 'The flame answers. The party mends (+4).'
+        : 'A guttering flicker — the rest still soothes (+1).',
+      correct ? 'good' : 'warn',
+    );
+    this.refreshStatus();
+    this.trimBusy = false;
+  }
+
+  /**
+   * The one-question ladder behind Trim — schedule (due) → introduction (fresh, kind-blind) →
+   * seed-shuffled pool, exactly the three-tier shape globalDraw()/ddDraw() use in combat (W1
+   * laws), collapsed into a single try/catch (unlike combat's per-tier tolerance): Trim has a
+   * clean, cheap way to fail — refund and bail — so a fault anywhere in the ladder is treated
+   * the same as a genuinely empty pool rather than degrading tier by tier.
+   */
+  private trimDraw(seed: number): string | null {
+    try {
+      const now = Date.now();
+      const due = services.draw.due({ kinds: ['free_recall'], count: 1, seed, now });
+      if (due[0]) return due[0];
+      const fresh = services.draw.fresh({ count: 1, seed, now });
+      if (fresh[0]) return fresh[0];
+      const pool = services.amendments.eligible(services.draw.allFactIds());
+      return seededShuffle(pool, mulberry32(seed))[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private async applyHp(delta: number): Promise<void> {
     if (!delta) return;
     const cur = services.save.get().hp ?? PARTY_MAX_HP;
@@ -794,6 +891,12 @@ export class DungeonScene extends Phaser.Scene {
    *  HamletScene.wellspringDrillDebug()/CombatScene.castSurfacedDebug()'s precedent). */
   dungeonTeachingDebug(): string[] {
     return [...this.teachingSurfaced];
+  }
+
+  /** Debug: Trim the Lantern's last resolved quality (null = never resolved one) + the net
+   *  count of Embers it has actually spent this scene lifetime (e2e-only — deathsdoor-style). */
+  trimDebug(): { lastQuality: number | null; embersSpent: number } {
+    return { lastQuality: this.trimLastQuality, embersSpent: this.trimEmbersSpent };
   }
 }
 
