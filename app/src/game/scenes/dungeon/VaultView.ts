@@ -106,7 +106,7 @@ export class VaultView {
       w: TRIM_BTN_W,
       h: TRIM_BTN_H,
       fontSize: '11px',
-    }).setDepth(6);
+    }).setDepth(6).setVisible(false); // stays hidden until drawEmberPips() places it for real
 
     this.buildTooltip();
   }
@@ -342,6 +342,7 @@ export class VaultView {
     // beside the pips, growing further left — same right-anchored-cluster layout as the pips
     // themselves relative to statusText.
     this.trimButton?.setPosition(pipsLeftEdge - TRIM_BTN_GAP - TRIM_BTN_W / 2, y);
+    this.trimButton?.setVisible(true); // first real placement — no longer clipped at the origin
   }
 
   // ---- the map strip --------------------------------------------------------
