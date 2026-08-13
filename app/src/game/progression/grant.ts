@@ -35,11 +35,11 @@ export const XP_AMOUNTS: Record<XpSource, number> = {
  * Writes exactly one save patch: { xp, level, hp? }. hp is included only when a level was
  * gained AND opts.applyHp !== false, clamped to maxHpForLevel(newLevel) — the applyHp:false
  * escape is for mid-battle callers, where a scene-side live HP pool is authoritative and this
- * patch's hp would otherwise be clobbered by the scene's own next sync. CombatScene has two
+ * patch's hp would otherwise be clobbered by the scene's own next sync. CombatScene has three
  * such sync sites today (grep for "save.save({ hp" rather than trusting a line number — lines
- * shift): the satchel-heal sync (patches `{ hp: livePool }`) and the death's-door revival sync
- * (patches `{ hp: pool }`), both wrapped in a try/catch that silently swallows offline
- * failures. Those callers apply +2/level to their own live pool themselves (Task 6 owns that
+ * shift): the satchel-heal sync (patches `{ hp: livePool }`), the death's-door revival sync
+ * (patches `{ hp: pool }`), and Task 6's own renewal bump (patches `{ hp: raised }`), all
+ * wrapped in a try/catch that silently swallows offline failures. Those callers apply +2/level to their own live pool themselves (Task 6 owns that
  * seam). Embers get no patch on level-up: an absent embers field reads as "full," so an
  * untouched pool grows with its new max for free, and a spent pool keeps its count under the
  * bigger cap — that's the intended cozy behavior, not an oversight.

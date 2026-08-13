@@ -198,6 +198,13 @@ export class CombatScene extends Phaser.Scene {
 
   private results: EncounterResult[] = [];
   private hpLost = 0;
+  /** Wave 4 — the battle's TRUE damage-taken ledger, and hpLost's opposite number. hpLost is a
+   *  re-anchoring DELTA: the satchel heal, the death's-door revival and a level-up's pool bump
+   *  each legally zero it when they rewrite save.hp mid-battle, so `hpLost === 0` means "nothing
+   *  lost since the last re-anchor", never "never bloodied". This grows at the same point and no
+   *  re-anchor may touch it, so the flawless-clear grant can ask the question it actually means.
+   *  Reset only in create() (trap 1, reused scene instance). */
+  private damageTaken = 0;
   /** §3.2 Night's Ledger per-run tallies (consumed by the harvest card on run end): facts
    *  reclaimed from the Fade (§3.1), and facts newly welded (crossed into box ≥ 4) this run.
    *  Both are counted in record(), the single choke point every SRS-recorded encounter passes. */
@@ -343,6 +350,7 @@ export class CombatScene extends Phaser.Scene {
     this.pendingAction = null;
     this.results = [];
     this.hpLost = 0;
+    this.damageTaken = 0;
     this.reclaimed = 0;
     this.newWelds = 0;
     this.graceAvailable = true;
@@ -2383,7 +2391,10 @@ export class CombatScene extends Phaser.Scene {
     if (this.destroyed || amount <= 0 || !unit.alive) return;
     const before = unit.hp;
     unit.hp = Math.max(0, unit.hp - amount);
-    if (unit.team === 'party') this.hpLost += before - unit.hp; // actual loss = pooled delta
+    if (unit.team === 'party') {
+      this.hpLost += before - unit.hp; // actual loss = pooled delta (re-anchored on every hp sync)
+      this.damageTaken += before - unit.hp; // the run's honest total — never re-anchored
+    }
     // impact feedback: a warm glow-core hit-flash + scale-punch on the struck sprite,
     // and camera shake scaled by the damage (capped) so a big Cast lands bigger.
     const v = this.views.get(unit.id);
@@ -2785,7 +2796,7 @@ export class CombatScene extends Phaser.Scene {
     }
 
     const payload: CombatOutcome = {
-      outcome, hpLost: this.hpLost, results: this.results,
+      outcome, hpLost: this.hpLost, damageTaken: this.damageTaken, results: this.results,
       reclaimed: this.reclaimed, newWelds: this.newWelds,
     };
     // Present on a wipe and only on a wipe (`keepsakeId: null` = nothing eligible was carried,

@@ -131,6 +131,10 @@ export interface CombatOutcome {
   /** 'wipe' = Death's Door exhausted (Concordance Ch. I). Was a 2-member union; precedent for
    *  a 3rd member set by `NightLedgerData.outcome`'s `'camp'`. */
   outcome: 'victory' | 'retreat' | 'wipe';
+  /** The pooled HP delta to subtract on return. A DELTA, not a ledger: the scene re-anchors it
+   *  to 0 whenever it rewrites save.hp mid-battle (satchel heal, death's-door revival, a
+   *  level-up's pool bump), so `hpLost === 0` means "nothing lost since that re-anchor" and must
+   *  NOT be read as "the party was never bloodied" — use `damageTaken` for that. */
   hpLost: number;
   results: EncounterResult[];
   /** §3.2 Night's Ledger run tallies — facts reclaimed from the Fade (§3.1) and facts newly
@@ -148,6 +152,13 @@ export interface CombatOutcome {
    *  outcome, wipe included: XP is never lost (Constraint 5). Optional, additive, same
    *  `?? []`-default pattern as `wipeReport?` above. */
   levelsGained?: number[];
+  /** Wave 4 — total party HP lost across the WHOLE battle, never re-anchored: the honest
+   *  "was the party ever bloodied" ledger `hpLost` cannot be (see above). Read this, not
+   *  hpLost, for the flawless-clear grant. Optional, additive, same `?? `-default family as its
+   *  siblings — absent reads as 0/untouched, which is exactly right for the two synthetic
+   *  outcomes that omit it (the sim victory and the gate-pending resume), neither of which
+   *  fought a battle in which damage could have been taken. */
+  damageTaken?: number;
 }
 
 // ---------------------------------------------------------------- srs & save

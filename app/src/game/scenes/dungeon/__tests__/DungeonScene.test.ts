@@ -599,3 +599,38 @@ describe('teachingFacts — exhausted global pool falls back to the room\'s auth
     expect(result.map((f) => f.id)).toEqual(['moss.f9']);
   });
 });
+
+describe('flawless means untouched, not "no delta" (W4 T6 fix round)', () => {
+  /** Drive one full battle-return settlement of the first (ungated) room and report the XP the
+   *  room-clear grant paid — 40 flawless vs 25 bloodied, the only grant on this path. */
+  async function settledXp(outcome: Record<string, unknown>): Promise<number> {
+    setSearch('?dev=1&sim=0&auto=win'); // sim=0 → the real CombatScene handoff
+    const h = installServices({ hp: 16, xp: 0, level: 1 });
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => env.sceneStarts.some((s) => s.key === 'combat'), 'the battle');
+    env.emit('combat:resolved', outcome); // stashes the outcome for the next create()
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => (h.save().xp ?? 0) > 0, 'the room-clear grant');
+    return h.save().xp ?? 0;
+  }
+
+  it('a bloodied battle that healed mid-fight and finished clean pays room-clear, NOT flawless', async () => {
+    // The exact shape a mid-fight satchel heal / death's-door revival / level-up pool bump
+    // leaves behind: hpLost re-anchored to 0, but the party genuinely took 3.
+    expect(await settledXp({ outcome: 'victory', hpLost: 0, damageTaken: 3, results: [] })).toBe(25);
+  });
+
+  it('a genuinely untouched battle still pays flawless', async () => {
+    expect(await settledXp({ outcome: 'victory', hpLost: 0, damageTaken: 0, results: [] })).toBe(40);
+  });
+
+  it('an outcome that omits damageTaken (the sim victory) still pays flawless', async () => {
+    expect(await settledXp({ outcome: 'victory', hpLost: 0, results: [] })).toBe(40);
+  });
+});

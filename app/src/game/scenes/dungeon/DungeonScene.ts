@@ -588,8 +588,14 @@ export class DungeonScene extends Phaser.Scene {
     // §3.2 — fold this room into the run harvest; the Night's Ledger shows ONLY at run end (boss
     // victory / retreat), never mid-crawl (a per-room card would be five interruptions per vault).
     this.accrueHarvest(outcome, gold);
-    // Wave 4 Task 5, wire 3 — flawless (no HP lost) pays more than a bloodied clear.
-    pending.push(...grantXp(outcome.hpLost === 0 ? 'room-clear-flawless' : 'room-clear'));
+    // Wave 4 Task 5, wire 3 — flawless (never bloodied) pays more than a bloodied clear.
+    // Reads damageTaken, NOT hpLost: hpLost is a delta the scene re-anchors to 0 on every
+    // mid-battle save.hp rewrite (satchel heal, death's-door revival, a level-up's pool bump),
+    // so a battle that was bloodied, healed, then finished clean used to collect the flawless
+    // grant. `?? 0` keeps the two synthetic outcomes that omit the field (the sim victory and
+    // the gate-pending resume) crediting flawless exactly as they do today — neither fought a
+    // battle in which damage could have been taken.
+    pending.push(...grantXp((outcome.damageTaken ?? 0) === 0 ? 'room-clear-flawless' : 'room-clear'));
     await this.presentPendingLevelUp(pending);
     this.busy = false;
     return { transitioned: false };
