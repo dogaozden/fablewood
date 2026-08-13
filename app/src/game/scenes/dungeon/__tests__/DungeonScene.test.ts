@@ -31,7 +31,7 @@ vi.mock('../../../../inventory/ui/inventoryPane', () => ({ openInventoryPane: vi
 vi.mock('../VaultView', () => ({
   VaultView: class {
     constructor(_scene: unknown) {}
-    renderChrome(): void {}
+    renderChrome(_onTrim: () => void): void {}
     setHeader(): void {}
     renderMap(
       _spec: unknown,

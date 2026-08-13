@@ -151,7 +151,7 @@ export class DungeonScene extends Phaser.Scene {
       onSatchel: () => void this.onSatchel(),
       onTrim: () => void this.onTrim(),
     };
-    this.view.renderChrome();
+    this.view.renderChrome(this.handlers.onTrim);
     // hard safety net: a screenshot/e2e must never hang waiting on __FABLEWOOD_READY
     this.time.delayedCall(READY_FALLBACK_MS, () => this.markReadyOnce());
     this.bootFlow().catch((err) => {
@@ -885,6 +885,11 @@ export class DungeonScene extends Phaser.Scene {
    *  fun-review §3.6a; Phaser-drawn, not DOM, so a spec can't read this via a locator). */
   tooltipDebug(): { alpha: number; name: string; blurb: string } | null {
     return this.view.tooltipDebug();
+  }
+
+  /** Debug: the status-line Trim button's live absolute bounds (e2e-only — fix round 1). */
+  trimButtonBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    return this.view.trimButtonBounds();
   }
 
   /** Debug: fact ids resolved by the most recent teachingFacts() call (e2e-only — mirrors

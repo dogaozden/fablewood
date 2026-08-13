@@ -3,13 +3,16 @@ import { waitReady, canvasClick, readState } from './helpers';
 
 const EV = 'screenshots';
 
-// Wave 3 (Rests) Task 5 — Trim the Lantern, the between-rooms Ember-spend drill on the Camp
-// card. onCamp() (V1, 2026-07-19, unrelated to Wave 3) unconditionally heals the party to full
-// BEFORE it ever shows the card that hosts this button — so a real click can only ever land on
-// the full-HP refusal branch (pin 1 below). The spend/heal/refund branches are reached the same
-// way hearth-rest.spec.ts reaches HamletScene's dialogue box: a private-method backdoor through
-// window.__FABLEWOOD_GAME (TS `private` is erased at runtime; neither onTrim() nor a Phaser
-// toast has a DOM locator a spec could otherwise drive). See task-5-report.md's concern note.
+// Wave 3 (Rests) Task 5 — Trim the Lantern, the between-rooms Ember-spend drill. Fix round 1:
+// the ratified spec (Concordance Ch. II, docs/superpowers/specs/2026-08-02-concordance.md:33)
+// places this "between rooms in a crawl (at the room-node map)" — the button now lives on the
+// persistent status line, beside the Ember pips it spends, not on the Camp card (onCamp's own
+// unconditional full heal there, the author's kept-as-is gentler-hybrid pick, made it unreachable).
+// Every ACTION below is a genuine click through VaultView's real, rendered button — no
+// private-method backdoor anywhere the real surface can reach, including the packless-refund
+// case (dev=1 disables the draw index, not clicking). trimDebug()/trimButtonBounds() are
+// read-only OBSERVATION accessors (same class as tooltipDebug()/bannerBounds() elsewhere in
+// this repo's e2e suite), not action-firing — reading them isn't "driving" the scene.
 
 type Save = {
   scene?: string;
@@ -20,6 +23,7 @@ type Save = {
 };
 
 type TrimDebug = { lastQuality: number | null; embersSpent: number };
+type Rect = { top: number; bottom: number; left: number; right: number };
 
 async function restoreSave(page: Page, save: Save | null): Promise<void> {
   const data: Save = save ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
@@ -35,30 +39,69 @@ async function trimDebugRead(page: Page): Promise<TrimDebug | null> {
   });
 }
 
-test.describe('Trim the Lantern (W3 T5)', () => {
-  test('the real button: a genuine click only ever reaches the full-HP refusal', async ({ page }) => {
+/** trimButtonBounds()'s live value (e2e-only — VaultView.ts, mirrors combat hud's
+ *  bannerBounds()/flyoutBounds() precedent). The button's x shifts with statusText's own
+ *  width (hp/streak digit counts), so a spec must read this rather than hardcode a pixel guess. */
+async function trimButtonBoundsRead(page: Page): Promise<Rect | null> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const scene = g?.scene?.getScene?.('vaults') as { trimButtonBounds?(): Rect | null } | undefined;
+    return scene?.trimButtonBounds?.() ?? null;
+  });
+}
+
+/** The one real interaction every test below uses: read the button's live bounds, click its
+ *  center. Bounds are in the game's internal 960x540 space (Scale.FIT — v1fix-arts.spec.ts's
+ *  own documented precedent), the same space canvasClick expects. */
+async function clickTrimButton(page: Page): Promise<void> {
+  const b = await trimButtonBoundsRead(page);
+  expect(b, 'the Trim button is rendered on the status line').not.toBeNull();
+  await canvasClick(page, (b!.left + b!.right) / 2, (b!.top + b!.bottom) / 2);
+}
+
+test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
+  test('zero Embers refuses: a real click spends nothing', async ({ page }) => {
     test.setTimeout(60_000);
     const beforeSave = await readState<Save>(page, 'save.json');
 
     try {
-      // hp:5 on purpose — proves that even an injured party can't reach Trim's spend path via
-      // the real camp card, because onCamp() heals to full before the card (and this button)
-      // ever render. embers:2 isolates this from the OTHER refusal (zero Embers).
       await page.request.put('/api/state/save.json', {
-        data: { scene: 'vaults', hp: 5, embers: 2, streak: 0, lastPlayed: '' },
+        data: { scene: 'vaults', hp: 10, embers: 0, streak: 0, lastPlayed: '' },
       });
 
-      await page.goto('/?scene=vaults&auto=camp&seed=7');
+      await page.goto('/?scene=vaults&seed=7');
       await waitReady(page, 'vaults');
-      await page.waitForTimeout(300); // past showCampCard's 220ms fade-in (openPanel)
 
-      await page.screenshot({ path: `${EV}/e2e-trim-lantern-camp-card.png` });
-      await canvasClick(page, 480, 325); // Trim button center — VaultView.showCampCard (cx, top+202)
+      await clickTrimButton(page);
       await page.waitForTimeout(300);
 
       const after = await readState<Save>(page, 'save.json');
-      expect(after?.embers, 'full HP refuses — no Ember spent').toBe(2);
-      expect(after?.hp, "onCamp's own unconditional heal, already full before the click").toBe(16);
+      expect(after?.embers, 'zero Embers refuses — nothing to spend').toBe(0);
+      expect(after?.hp, 'no draw, no encounter, no heal').toBe(10);
+    } finally {
+      await restoreSave(page, beforeSave);
+    }
+  });
+
+  test('full HP refuses: a real click spends nothing', async ({ page }) => {
+    test.setTimeout(60_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 16, embers: 2, streak: 0, lastPlayed: '' },
+      });
+
+      await page.goto('/?scene=vaults&seed=7');
+      await waitReady(page, 'vaults');
+
+      await page.screenshot({ path: `${EV}/e2e-trim-lantern-status-line.png` });
+      await clickTrimButton(page);
+      await page.waitForTimeout(300);
+
+      const after = await readState<Save>(page, 'save.json');
+      expect(after?.embers, 'a full party needs no trimming — no Ember spent').toBe(2);
+      expect(after?.hp).toBe(16);
     } finally {
       await restoreSave(page, beforeSave);
     }
@@ -73,17 +116,15 @@ test.describe('Trim the Lantern (W3 T5)', () => {
         data: { scene: 'vaults', hp: 10, embers: 2, streak: 0, lastPlayed: '' },
       });
 
+      // dev=1 disables the draw index (loadSpecAndFacts short-circuits to the fixture before
+      // dungeonDrawReady()) — it does NOT disable rendering or clicking. The button is real;
+      // only the ladder behind it is guaranteed empty, exactly the "packless edge" the brief
+      // names. No overlay ever opens on this path, so the click settles on its own.
       await page.goto('/?scene=vaults&dev=1&seed=7');
       await waitReady(page, 'vaults');
 
-      // dev/packless: services.draw's index was never built (loadSpecAndFacts short-circuits to
-      // the fixture before dungeonDrawReady()), so the ladder resolves to null synchronously —
-      // no encounter overlay ever opens, so awaiting onTrim() directly here is safe.
-      await page.evaluate(() => {
-        const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-        const scene = g?.scene?.getScene?.('vaults') as { onTrim?(): Promise<void> } | undefined;
-        return scene?.onTrim?.();
-      });
+      await clickTrimButton(page);
+      await page.waitForTimeout(300);
 
       // pip transition, half 2: spent then refunded — net unchanged, never left one short.
       const after = await readState<Save>(page, 'save.json');
@@ -109,13 +150,7 @@ test.describe('Trim the Lantern (W3 T5)', () => {
       await page.goto('/?scene=vaults&seed=7');
       await waitReady(page, 'vaults');
 
-      // Fire-and-forget: a real drill's onTrim() blocks on a real answer overlay, so the outer
-      // evaluate must NOT await its returned promise — this only STARTS it.
-      await page.evaluate(() => {
-        const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-        const scene = g?.scene?.getScene?.('vaults') as { onTrim?(): Promise<void> } | undefined;
-        void scene?.onTrim?.();
-      });
+      await clickTrimButton(page);
 
       await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
       await page.waitForTimeout(450); // past overlay.ts's 400ms answer guard (shared idiom)

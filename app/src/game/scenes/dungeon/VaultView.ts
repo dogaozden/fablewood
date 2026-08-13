@@ -14,6 +14,12 @@ import { C, hex } from './palette';
 const W = 960;
 const H = 540;
 const STRIP_Y = 300;
+/** Status-line Trim button (fix round 1 — moved off the Camp card per the ratified spec:
+ *  Concordance Ch. II, "between rooms in a crawl, at the room-node map"). Small on purpose —
+ *  this sits beside the Ember pips in the header strip, not a card. */
+const TRIM_BTN_W = 176;
+const TRIM_BTN_H = 24;
+const TRIM_BTN_GAP = 14;
 /** Match the encounters overlay's parchment type (encounters/styles.ts) so the
  * two card families read as one system. */
 const FONT = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
@@ -40,6 +46,7 @@ export class VaultView {
   private headerText?: Phaser.GameObjects.Text;
   private statusText?: Phaser.GameObjects.Text;
   private emberPips?: Phaser.GameObjects.Graphics;
+  private trimButton?: Phaser.GameObjects.Container;
   private tooltipCont?: Phaser.GameObjects.Container;
   private tooltipBg?: Phaser.GameObjects.Graphics;
   private tooltipName?: Phaser.GameObjects.Text;
@@ -49,7 +56,7 @@ export class VaultView {
 
   // ---- chrome (built once) --------------------------------------------------
 
-  renderChrome(): void {
+  renderChrome(onTrim: () => void): void {
     const s = this.scene;
     s.cameras.main.setBackgroundColor(hex(C.shadowPlum));
 
@@ -92,6 +99,14 @@ export class VaultView {
       .setOrigin(1, 0.5)
       .setDepth(6);
     this.emberPips = s.add.graphics().setDepth(6);
+    // Trim the Lantern — beside the Ember pips it spends (fix round 1). Built once, repositioned
+    // in drawEmberPips() alongside the pips it anchors to (same reason the pips themselves
+    // recompute off statusText.width every call: hp/streak digit counts shift the whole line).
+    this.trimButton = this.button(0, 0, 'Trim the Lantern (1 Ember)', C.ember, onTrim, {
+      w: TRIM_BTN_W,
+      h: TRIM_BTN_H,
+      fontSize: '11px',
+    }).setDepth(6);
 
     this.buildTooltip();
   }
@@ -183,6 +198,15 @@ export class VaultView {
   tooltipDebug(): { alpha: number; name: string; blurb: string } | null {
     if (!this.tooltipCont || !this.tooltipName || !this.tooltipBlurb) return null;
     return { alpha: this.tooltipCont.alpha, name: this.tooltipName.text, blurb: this.tooltipBlurb.text };
+  }
+
+  /** Debug: the status-line Trim button's live absolute bounds (e2e-only — mirrors combat
+   *  hud's bannerBounds()/flyoutBounds() precedent: Phaser-drawn, not DOM, and its x shifts
+   *  with statusText's width, so a spec must read this rather than hardcode a pixel guess). */
+  trimButtonBounds(): { top: number; bottom: number; left: number; right: number } | null {
+    if (!this.trimButton) return null;
+    const b = this.trimButton.getBounds();
+    return { top: b.top, bottom: b.bottom, left: b.left, right: b.right };
   }
 
   private lanterns(): void {
@@ -307,13 +331,17 @@ export class VaultView {
     const y = this.statusText.y;
     const totalW = EMBER_MAX * (pipR * 2) + (EMBER_MAX - 1) * pipGap;
     const rightEdge = this.statusText.x - this.statusText.width - gapFromText;
+    const pipsLeftEdge = rightEdge - totalW;
     this.emberPips.clear();
     for (let i = 0; i < EMBER_MAX; i++) {
-      const cx = rightEdge - totalW + pipR + i * (pipR * 2 + pipGap);
+      const cx = pipsLeftEdge + pipR + i * (pipR * 2 + pipGap);
       const filled = i < embers;
       this.emberPips.fillStyle(filled ? C.ember : C.shadowPlum, 1).fillCircle(cx, y, pipR);
       this.emberPips.lineStyle(1, C.outline, 1).strokeCircle(cx, y, pipR);
     }
+    // beside the pips, growing further left — same right-anchored-cluster layout as the pips
+    // themselves relative to statusText.
+    this.trimButton?.setPosition(pipsLeftEdge - TRIM_BTN_GAP - TRIM_BTN_W / 2, y);
   }
 
   // ---- the map strip --------------------------------------------------------
@@ -567,7 +595,7 @@ export class VaultView {
   showCampCard(mode: CardMode = 'wait', heal?: { before: number; after: number }): Promise<void> {
     const s = this.scene;
     const w = 480;
-    const h = 350; // +50 over the pre-Trim height: a second stacked button (showResumeChoice's own 52px rhythm)
+    const h = 300;
     const cont = this.openPanel(w, h);
     const cx = W / 2;
     const top = (H - h) / 2 + 28;
@@ -584,7 +612,6 @@ export class VaultView {
     cont.add(s.add.text(cx, top + 104, healLine, { fontFamily: FONT, fontSize: '16px', color: hex(C.deepEmber), fontStyle: 'bold', align: 'center', wordWrap: { width: w - 60 } }).setOrigin(0.5, 0));
     if (this.handlers) {
       cont.add(this.button(cx, top + 150, 'Open Satchel', C.timber, () => this.handlers!.onSatchel()));
-      cont.add(this.button(cx, top + 202, 'Trim the Lantern (1 Ember)', C.ember, () => this.handlers!.onTrim()));
     }
     return this.finishCard(cont, h, mode, 'Onward ▸');
   }
@@ -635,13 +662,23 @@ export class VaultView {
     });
   }
 
-  private button(x: number, y: number, text: string, color: number, onClick: () => void): Phaser.GameObjects.Container {
+  private button(
+    x: number,
+    y: number,
+    text: string,
+    color: number,
+    onClick: () => void,
+    opts: { w?: number; h?: number; fontSize?: string } = {},
+  ): Phaser.GameObjects.Container {
     const s = this.scene;
+    const w = opts.w ?? 300;
+    const h = opts.h ?? 40;
+    const fontSize = opts.fontSize ?? '15px';
     const b = s.add.container(x, y);
-    const bg = s.add.rectangle(0, 0, 300, 40, color, 1).setStrokeStyle(2, C.darkBark, 1);
-    const t = s.add.text(0, 0, text, { fontFamily: FONT, fontSize: '15px', color: hex(C.parchment) }).setOrigin(0.5);
+    const bg = s.add.rectangle(0, 0, w, h, color, 1).setStrokeStyle(2, C.darkBark, 1);
+    const t = s.add.text(0, 0, text, { fontFamily: FONT, fontSize, color: hex(C.parchment) }).setOrigin(0.5);
     b.add([bg, t]);
-    b.setSize(300, 40).setInteractive({ useHandCursor: true });
+    b.setSize(w, h).setInteractive({ useHandCursor: true });
     b.on('pointerover', () => bg.setScale(1.04));
     b.on('pointerout', () => bg.setScale(1));
     b.on('pointerdown', onClick);
