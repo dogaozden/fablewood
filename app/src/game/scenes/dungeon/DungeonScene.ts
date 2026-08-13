@@ -41,12 +41,11 @@ import devSpecJson from './__fixtures__/dev.dungeon.json';
 import devFactsJson from './__fixtures__/dev.facts.json';
 import { grantXp } from '../../progression/grant';
 import { levelUpRows } from '../../progression/ceremony';
+import { maxHpForLevel } from '../../progression/xp';
 
 const PENDING_KEY = 'vaults:pendingOutcome';
 const PACKID_KEY = 'vaults:packId';
 const RUN_HARVEST_KEY = 'vaults:runHarvest';
-/** Party HP pool = Keeper 10 + Mira 6 (blueprint §3). Shared assumption with combat. */
-const PARTY_MAX_HP = 16;
 const GATE_FAIL_HP = 1;
 const SIM_COMBAT_MS = 700;
 const READY_FALLBACK_MS = 8000;
@@ -287,7 +286,8 @@ export class DungeonScene extends Phaser.Scene {
 
   private refreshStatus(): void {
     const sd = services.save.get();
-    this.view.setStatus(sd.hp, PARTY_MAX_HP, sd.streak, embersOf(sd));
+    const lvl = sd.level ?? 1;
+    this.view.setStatus(sd.hp, maxHpForLevel(lvl), sd.streak, embersOf(sd), lvl);
   }
 
   private teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[] {
@@ -366,9 +366,10 @@ export class DungeonScene extends Phaser.Scene {
     }
     this.busy = true;
     const before = services.save.get().hp;
-    await services.save.save({ hp: PARTY_MAX_HP, scene: 'vaults', dungeon: this.progress });
+    const after = maxHpForLevel(services.save.get().level ?? 1);
+    await services.save.save({ hp: after, scene: 'vaults', dungeon: this.progress });
     this.refreshStatus();
-    await this.view.showCampCard(opts.persist ? 'persist' : 'wait', { before, after: PARTY_MAX_HP });
+    await this.view.showCampCard(opts.persist ? 'persist' : 'wait', { before, after });
     this.busy = false;
   }
 
@@ -820,7 +821,7 @@ export class DungeonScene extends Phaser.Scene {
       this.trimBusy = false;
       return;
     }
-    if (save.hp >= PARTY_MAX_HP) {
+    if (save.hp >= maxHpForLevel(save.level ?? 1)) {
       this.view.toast('The lantern burns steady — nothing to trim.', 'warn');
       this.trimBusy = false;
       return;
@@ -891,8 +892,10 @@ export class DungeonScene extends Phaser.Scene {
 
   private async applyHp(delta: number): Promise<void> {
     if (!delta) return;
-    const cur = services.save.get().hp ?? PARTY_MAX_HP;
-    const hp = Math.max(0, Math.min(PARTY_MAX_HP, cur + delta));
+    const save = services.save.get();
+    const max = maxHpForLevel(save.level ?? 1);
+    const cur = save.hp ?? max;
+    const hp = Math.max(0, Math.min(max, cur + delta));
     await services.save.save({ hp });
   }
 

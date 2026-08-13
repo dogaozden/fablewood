@@ -40,12 +40,13 @@ import {
   wellspringOutro,
   type Province,
 } from './content';
-import { canRestTonight, EMBER_MAX } from '../../rest/embers';
+import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
 import { grantXp } from '../../progression/grant';
 import { levelUpRows } from '../../progression/ceremony';
+import { maxHpForLevel, emberMaxForLevel } from '../../progression/xp';
 
 type Facing = 'up' | 'down' | 'left' | 'right';
 type Key = Phaser.Input.Keyboard.Key;
@@ -56,9 +57,6 @@ const HH = 5;
 const FOOT = 5; // collision box sits around the feet
 const INTERACT_DIST = 22;
 const LABEL_FONT = 'Georgia, "Times New Roman", serif';
-/** Party HP pool cap — local to this scene on purpose (matches DungeonScene's own
- *  PARTY_MAX_HP by value, never imported: MAX_HP duplication law). */
-const PARTY_MAX_HP = 16;
 
 /**
  * §recency (parity with CombatScene.dueFactIds() — see game/recency.ts) — facts
@@ -827,17 +825,22 @@ export class HamletScene extends Phaser.Scene {
   private async doCottage(): Promise<void> {
     const now = new Date();
     let lastHearthAt: string | undefined;
+    let lvl = 1;
     try {
-      lastHearthAt = services.save.get().lastHearthAt;
+      const save = services.save.get();
+      lastHearthAt = save.lastHearthAt;
+      lvl = save.level ?? 1;
     } catch {
       /* no save yet — never rested, canRestTonight(undefined, now) already says so */
     }
 
     if (canRestTonight(lastHearthAt, now)) {
       try {
+        // Wave 4 — the hearth-rest patch goes level-keyed: the old flat HP/Ember caps died,
+        // replaced by the single seam every cap reads (progression/xp.ts).
         await services.save.save({
-          hp: PARTY_MAX_HP,
-          embers: EMBER_MAX,
+          hp: maxHpForLevel(lvl),
+          embers: emberMaxForLevel(lvl),
           lastHearthAt: now.toISOString(),
           lastPlayed: now.toISOString(),
         });

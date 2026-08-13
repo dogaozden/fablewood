@@ -162,16 +162,21 @@ interface UnitView {
 }
 
 /**
- * Split the saved pooled HP (0-16) proportionally onto Keeper (max 10) / Mira (max 6).
- * Keeper's share rounds UP; Mira's is the exact remainder — this guarantees
- * `keeper + mira === pool` for every integer pool in [0,16]. (crucible #9: the previous
- * formula clamped each unit's share to a per-unit `Math.max(1, …)` floor independently,
- * which over-credited +1 total whenever the saved pool was exactly 1 or 2 — both units
- * got bumped to a minimum of 1 even though only one HP existed to share between them.)
+ * Split the saved pooled HP (0-poolMax) proportionally onto Keeper / Mira, preserving the
+ * shipped 10:16 Keeper ratio at every poolMax (Wave 4 — the caps go level-keyed; poolMax is
+ * `maxHpForLevel(level)`, no longer a fixed 16). Keeper's share rounds UP to
+ * `Math.ceil(poolMax * 10 / 16)`; Mira's is the exact remainder — this guarantees
+ * `keeper + mira === min(pool, poolMax)` for every integer pool in [0, poolMax]. (crucible #9:
+ * the previous formula clamped each unit's share to a per-unit `Math.max(1, …)` floor
+ * independently, which over-credited +1 total whenever the saved pool was exactly 1 or 2 —
+ * both units got bumped to a minimum of 1 even though only one HP existed to share between
+ * them.) `splitPooledHp(poolMax, poolMax)` gives each unit's own max HP share — see
+ * applyPoolHp's `unitMax`.
  */
-export function splitPooledHp(pool: number): { keeper: number; mira: number } {
-  const clamped = Math.max(0, Math.min(16, pool));
-  const keeper = Math.min(10, Math.ceil((clamped * 10) / 16));
+export function splitPooledHp(pool: number, poolMax: number): { keeper: number; mira: number } {
+  const clamped = Math.max(0, Math.min(poolMax, pool));
+  const keeperCeiling = Math.ceil((poolMax * 10) / 16);
+  const keeper = Math.min(keeperCeiling, Math.ceil((clamped * 10) / 16));
   return { keeper, mira: clamped - keeper };
 }
 
@@ -499,24 +504,40 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /**
-   * The save holds ONE pooled party HP (max 16 = Keeper 10 + Mira 6). Split it
-   * proportionally onto the units on launch; the camp heals the pool back to 16.
-   * hpLost (the pooled delta) is reported in CombatOutcome for the dungeon/camp.
+   * The save holds ONE pooled party HP (max maxHpForLevel(level) — Wave 4, the caps go
+   * level-keyed). Split it proportionally onto the units on launch; the camp heals the pool
+   * back to the level's own max. hpLost (the pooled delta) is reported in CombatOutcome for
+   * the dungeon/camp.
    *
    * Also re-run mid-battle by the Satchel (inventory-handoff §10) after a heal raises the
-   * pool — the first time HP can rise without the battle ending. Since the split always
-   * gives every living-pool unit ≥1 hp, a unit that had fainted (alive:false) can come back
-   * here; reviveView() undoes fadeDead's tween (alpha/scale/angle) so it doesn't stay
-   * visually "dead" while alive:true and its hp bar reads a real value.
+   * pool, and by payRenewal() after a mid-fight level-up raises the ceiling itself — the
+   * first two places HP can rise without the battle ending. Since the split always gives
+   * every living-pool unit ≥1 hp, a unit that had fainted (alive:false) can come back here;
+   * reviveView() undoes fadeDead's tween (alpha/scale/angle) so it doesn't stay visually
+   * "dead" while alive:true and its hp bar reads a real value.
+   *
+   * poolMax is read fresh from the save on every call (never the battle-start-cached
+   * `this.level`, which stays frozen for the tier/Strike-bonus gate all battle per trap 1) —
+   * a level gained mid-fight pays its bigger HP ceiling immediately, matching payRenewal's
+   * own maxHpForLevel(gained-level) cap. Unit max HP shares (keeper.maxHp/mira.maxHp) derive
+   * from the full pool (`splitPooledHp(poolMax, poolMax)`) so the health-bar denominators
+   * scale with poolMax too — otherwise a higher-level pool would overflow the bars.
    */
   private applyPoolHp(): void {
-    let pool = 16;
-    try { pool = services.save.get()?.hp ?? 16; } catch { /* offline → full */ }
-    const { keeper: keeperShare, mira: miraShare } = splitPooledHp(pool);
+    let poolMax = maxHpForLevel(1);
+    let pool = poolMax;
+    try {
+      const save = services.save.get();
+      poolMax = maxHpForLevel(save?.level ?? 1);
+      pool = save?.hp ?? poolMax;
+    } catch { /* offline → full, L1 cap */ }
+    const unitMax = splitPooledHp(poolMax, poolMax);
+    const { keeper: keeperShare, mira: miraShare } = splitPooledHp(pool, poolMax);
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
     if (keeper) {
       const wasDead = !keeper.alive;
+      keeper.maxHp = unitMax.keeper;
       keeper.hp = keeperShare;
       keeper.alive = keeper.hp > 0;
       if (wasDead && keeper.alive) this.reviveView(keeper);
@@ -524,6 +545,7 @@ export class CombatScene extends Phaser.Scene {
     }
     if (mira) {
       const wasDead = !mira.alive;
+      mira.maxHp = unitMax.mira;
       mira.hp = miraShare;
       mira.alive = mira.hp > 0;
       if (wasDead && mira.alive) this.reviveView(mira);
@@ -1977,8 +1999,12 @@ export class CombatScene extends Phaser.Scene {
     const mira = this.unitById('mira');
     if (!keeper || !mira) { this.returnToActionMenu(unit); return; }
 
+    // Wave 4 — resolveHealUse's maxPool is now a required param (the old fixed-16 default
+    // died): a fresh maxHpForLevel(save.level ?? 1) read, consistent with payRenewal's bump clamp.
+    let maxPool = maxHpForLevel(1);
+    try { maxPool = maxHpForLevel(services.save.get()?.level ?? 1); } catch { /* offline → L1 cap */ }
     const livePool = keeper.hp + mira.hp;
-    const plan = resolveHealUse(item, livePool);
+    const plan = resolveHealUse(item, livePool, maxPool);
     if (!plan.ok) {
       this.hud.showBanner(plan.message, P.stoneGrey);
       this.returnToActionMenu(unit);
@@ -2966,9 +2992,13 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /**
-   * A welded fact answered clean: you stand back up at 1 pool hp. splitPooledHp(1) puts that
-   * single point on the Keeper and leaves the companion down at 0 — intended: the door stands
-   * the KEEPER up, not the party. Once per battle is already enforced by the machine.
+   * A welded fact answered clean: you stand back up at 1 pool hp. splitPooledHp(1, poolMax)
+   * puts that single point on the Keeper and leaves the companion down at 0 — intended: the
+   * door stands the KEEPER up, not the party. Once per battle is already enforced by the
+   * machine. poolMax is read the same way applyPoolHp() does (fresh maxHpForLevel(save.level)
+   * read, offline catch → L1) — at pool=1 it never actually changes which unit gets the
+   * point (Keeper's ratio share is ≥1 at any poolMax ≥1), but a bare 16 here would still be
+   * a stray HP-semantics literal outside the single seam.
    */
   private async reviveAtDoor(): Promise<void> {
     this.dd = null;
@@ -2976,7 +3006,9 @@ export class CombatScene extends Phaser.Scene {
     const keeper = this.unitById('keeper');
     if (!keeper) { this.stabilizeAtDoor(); return; }
     const pool = 1;
-    const split = splitPooledHp(pool);
+    let poolMax = maxHpForLevel(1);
+    try { poolMax = maxHpForLevel(services.save.get()?.level ?? 1); } catch { /* offline → L1 cap */ }
+    const split = splitPooledHp(pool, poolMax);
     keeper.hp = split.keeper;
     keeper.alive = keeper.hp > 0;
     keeper.statuses = [];

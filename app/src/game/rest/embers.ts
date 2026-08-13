@@ -2,17 +2,19 @@
  * Rest-currency pure module (Concordance Ch. II + controller rulings). No Phaser,
  * no services — Tasks 3-5 (Cottage/dungeon wiring) consume these exact names.
  */
+import { emberMaxForLevel } from '../progression/xp';
 
-// becomes level-keyed in W4 — single source, do not inline elsewhere
-export const EMBER_MAX = 2;
 export const TRIM_HEAL_CORRECT = 4;
 export const TRIM_HEAL_MISS = 1;
 
-/** undefined → full pool (legacy save default); corrupt values clamp into 0..EMBER_MAX (integer floor). */
-export function embersOf(save: { embers?: number }): number {
+/** undefined → full pool AT THE SAVE'S LEVEL (Wave 4 — the old flat 2-constant export died;
+ *  the ceiling is now progression/xp.ts's emberMaxForLevel, the single seam every Ember cap
+ *  reads); corrupt values clamp into 0..emberMaxForLevel(level) (integer floor). */
+export function embersOf(save: { embers?: number; level?: number }): number {
+  const max = emberMaxForLevel(save.level ?? 1);
   const n = save.embers;
-  if (n === undefined) return EMBER_MAX;
-  return Math.max(0, Math.min(EMBER_MAX, Math.floor(n)));
+  if (n === undefined) return max;
+  return Math.max(0, Math.min(max, Math.floor(n)));
 }
 
 /**

@@ -4,12 +4,9 @@
  * Trial effects (reveal/retry/shield) are combat-surface work — deferred, §10.
  */
 import { services, type UseResult } from '../game/contracts';
+import { maxHpForLevel } from '../game/progression/xp';
 import { itemById } from './catalog';
 import type { InventoryStore } from './store';
-
-/** Party max HP. Hardcoded 16 to match srs/store.ts DEFAULT_SAVE, DungeonScene
- * PARTY_MAX_HP and CombatScene — there is deliberately no shared const (§6 trap). */
-const MAX_HP = 16;
 
 export async function useItem(store: InventoryStore, id: string): Promise<UseResult> {
   const item = itemById(id);
@@ -18,8 +15,12 @@ export async function useItem(store: InventoryStore, id: string): Promise<UseRes
 
   const effect = item.effect;
   if (effect.kind === 'heal') {
-    const cur = services.save.get().hp ?? MAX_HP;
-    const next = Math.max(0, Math.min(MAX_HP, cur + effect.amount));
+    // Wave 4 — the old hardcoded flat-16 constant (§6 trap: "no shared const") died; the
+    // ceiling is now the single seam every HP cap reads, progression/xp.ts's maxHpForLevel.
+    const save = services.save.get();
+    const max = maxHpForLevel(save.level ?? 1);
+    const cur = save.hp ?? max;
+    const next = Math.max(0, Math.min(max, cur + effect.amount));
     if (next === cur) return { ok: false, message: 'Already at full vigor.' };
     // Remove FIRST and respect the result: store.remove() re-reads the freshest
     // stock before deciding, so it is the true arbiter of "did we actually get

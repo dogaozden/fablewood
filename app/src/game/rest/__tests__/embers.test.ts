@@ -1,23 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import { EMBER_MAX, TRIM_HEAL_CORRECT, TRIM_HEAL_MISS, embersOf, canRestTonight } from '../embers';
+import { TRIM_HEAL_CORRECT, TRIM_HEAL_MISS, embersOf, canRestTonight } from '../embers';
+import { emberMaxForLevel } from '../../progression/xp';
 
 describe('embersOf', () => {
-  it('legacy save (no field) reads as a full pool', () => {
-    expect(embersOf({})).toBe(EMBER_MAX);
-    expect(embersOf({ embers: undefined })).toBe(EMBER_MAX);
+  it('legacy save (no field) reads as a full pool at the save\'s level (L1 default)', () => {
+    expect(embersOf({})).toBe(emberMaxForLevel(1));
+    expect(embersOf({ embers: undefined })).toBe(emberMaxForLevel(1));
   });
   it('stored values pass through', () => {
     expect(embersOf({ embers: 0 })).toBe(0);
     expect(embersOf({ embers: 1 })).toBe(1);
   });
-  it('corrupt values clamp into range', () => {
+  it('corrupt values clamp into range at L1', () => {
     expect(embersOf({ embers: -3 })).toBe(0);
-    expect(embersOf({ embers: 99 })).toBe(EMBER_MAX);
+    expect(embersOf({ embers: 99 })).toBe(emberMaxForLevel(1));
     expect(embersOf({ embers: 1.7 })).toBe(1);
+  });
+
+  // Wave 4 Task 7 — the old flat 2-constant export died; the ceiling now comes from
+  // progression/xp.ts's emberMaxForLevel (2 base, +1 at levels 3/5/7/9, cap 6 at L9+).
+  it('the pool ceiling rises with level, at the grant thresholds (3/5/7/9)', () => {
+    expect(embersOf({ level: 1 })).toBe(2);
+    expect(embersOf({ level: 2 })).toBe(2);
+    expect(embersOf({ level: 3 })).toBe(3);
+    expect(embersOf({ level: 5 })).toBe(4);
+    expect(embersOf({ level: 7 })).toBe(5);
+    expect(embersOf({ level: 9 })).toBe(6);
+    expect(embersOf({ level: 10 })).toBe(6); // LEVEL_CAP — no grant past 9
+  });
+  it('undefined embers reads as full at the HIGHER level, not the flat old default of 2', () => {
+    expect(embersOf({ level: 5 })).toBe(4);
+  });
+  it('a stored count clamps to the LEVEL-keyed ceiling, not a flat 2', () => {
+    expect(embersOf({ embers: 99, level: 5 })).toBe(4);
   });
 });
 
 describe('canRestTonight', () => {
+  // unchanged by Wave 4 Task 7 — canRestTonight never referenced the Ember cap (it's pure
+  // calendar-date logic), so there is nothing here to migrate.
   const at = (iso: string) => new Date(iso);
   it('never rested → true', () => {
     expect(canRestTonight(undefined, at('2026-08-06T20:00:00'))).toBe(true);

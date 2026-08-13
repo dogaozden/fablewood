@@ -22,9 +22,6 @@
 import { CATALOG, type ItemDef } from '../../inventory/catalog';
 import type { InventorySnapshot } from '../contracts';
 
-/** Matches store.ts/consume.ts/DungeonScene's hardcoded party-pool ceiling (§6 trap: no shared const — deliberately not inventing one here either). */
-export const POOL_MAX_HP = 16;
-
 export interface UsableSatchelItem {
   item: ItemDef;
   qty: number;
@@ -53,8 +50,13 @@ export interface HealResolution {
  * calls this FIRST (pure, synchronous) to decide whether to spend the turn at all, then — only
  * when ok — syncs services.save to `livePool` and calls the real services.inventory.useItem
  * (the same choke point camp-rest/the hamlet Satchel use), so the outcome always matches.
+ *
+ * `maxPool` is REQUIRED (Wave 4 — the caps go level-keyed; the old fixed-16 default died):
+ * the caller passes a fresh maxHpForLevel(save.level ?? 1) read, same as every other HP-cap
+ * seam in the game. No default here on purpose — a stale silent 16 is exactly the bug class
+ * this task retires.
  */
-export function resolveHealUse(item: ItemDef, livePool: number, maxPool = POOL_MAX_HP): HealResolution {
+export function resolveHealUse(item: ItemDef, livePool: number, maxPool: number): HealResolution {
   if (item.effect.kind !== 'heal') {
     return { ok: false, nextPool: livePool, gained: 0, message: 'That cannot be used here.' };
   }

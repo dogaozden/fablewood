@@ -383,6 +383,29 @@ describe('SaveStore — hp coercion (crucible V1-2)', () => {
       expect(Number.isFinite(s.get().hp), `hp for input ${JSON.stringify(bad)}`).toBe(true);
     }
   });
+
+  // Wave 4 Task 7 — coerceHp used to flat-clamp to DEFAULT_SAVE.hp (16) regardless of level,
+  // silently undoing a level-keyed HP bump the instant it landed. Live probe (Task 6): a full
+  // pool's L2 bump computed 18, was written, came back 16. Fixed: the ceiling is now
+  // maxHpForLevel(save.level ?? 1), so higher-level saves keep their own bigger pool.
+  it("an L3 save's hp survives sanitize at 20, not clamped down to the flat L1 default of 16", async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: 16, level: 3 });
+    const s = new SaveStore(b);
+    await s.ready();
+    await s.save({ hp: 20 }); // a level-3 pool bump to its own ceiling, maxHpForLevel(3)
+    expect(s.get().hp).toBe(20);
+    const disk = b.raw('save.json') as any;
+    expect(disk.hp).toBe(20); // self-heals the on-disk value the same way, not just the cache
+  });
+
+  it('still clamps an out-of-range hp to the LEVEL-keyed ceiling, not a flat 16', async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: 999, level: 3 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().hp).toBe(20); // maxHpForLevel(3), not the old flat 16
+  });
 });
 
 describe('SettingsStore', () => {

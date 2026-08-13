@@ -26,28 +26,56 @@ vi.mock('tone', () => ({
 const { splitPooledHp } = await import('../CombatScene');
 
 describe('splitPooledHp (crucible #9 — pooled-HP split invariant)', () => {
-  it('conserves the pool exactly for every integer 0-16', () => {
-    for (let pool = 0; pool <= 16; pool++) {
-      const { keeper, mira } = splitPooledHp(pool);
-      expect(keeper + mira, `pool=${pool} → keeper=${keeper} mira=${mira}`).toBe(pool);
+  // Wave 4 Task 7 — poolMax is now a required second param (the caps go level-keyed):
+  // 16 (L1, maxHpForLevel(1)), 20 (L3), 34 (L10/LEVEL_CAP, maxHpForLevel(10)). The 10:16
+  // Keeper ratio is the preserved constant carried across every poolMax, not the caps
+  // themselves.
+  const POOL_MAXES = [16, 20, 34];
+
+  it('conserves the pool exactly for every integer pool, at every poolMax', () => {
+    for (const poolMax of POOL_MAXES) {
+      for (let pool = 0; pool <= poolMax; pool++) {
+        const { keeper, mira } = splitPooledHp(pool, poolMax);
+        expect(keeper + mira, `poolMax=${poolMax} pool=${pool} → keeper=${keeper} mira=${mira}`).toBe(
+          Math.min(pool, poolMax),
+        );
+      }
     }
   });
 
-  it('never exceeds either unit max (Keeper 10 / Mira 6) and never goes negative', () => {
-    for (let pool = 0; pool <= 16; pool++) {
-      const { keeper, mira } = splitPooledHp(pool);
-      expect(keeper).toBeLessThanOrEqual(10);
-      expect(mira).toBeLessThanOrEqual(6);
-      expect(keeper).toBeGreaterThanOrEqual(0);
-      expect(mira).toBeGreaterThanOrEqual(0);
+  it('keeper never exceeds the scaled ratio ceiling (Math.ceil(poolMax * 10 / 16)); neither share goes negative', () => {
+    for (const poolMax of POOL_MAXES) {
+      const keeperCeiling = Math.ceil((poolMax * 10) / 16);
+      for (let pool = 0; pool <= poolMax; pool++) {
+        const { keeper, mira } = splitPooledHp(pool, poolMax);
+        expect(keeper).toBeLessThanOrEqual(keeperCeiling);
+        expect(keeper).toBeGreaterThanOrEqual(0);
+        expect(mira).toBeGreaterThanOrEqual(0);
+      }
     }
   });
 
-  it('pool=0 leaves both fainted', () => {
-    expect(splitPooledHp(0)).toEqual({ keeper: 0, mira: 0 });
+  it('pool=0 leaves both fainted, at every poolMax', () => {
+    for (const poolMax of POOL_MAXES) {
+      expect(splitPooledHp(0, poolMax)).toEqual({ keeper: 0, mira: 0 });
+    }
   });
 
-  it('pool=16 (full) matches the shipped 10/6 split', () => {
-    expect(splitPooledHp(16)).toEqual({ keeper: 10, mira: 6 });
+  it('pool=poolMax (full) matches the scaled keeper:mira ratio exactly, incl. the shipped L1 pin', () => {
+    for (const poolMax of POOL_MAXES) {
+      const keeperCeiling = Math.ceil((poolMax * 10) / 16);
+      expect(splitPooledHp(poolMax, poolMax)).toEqual({ keeper: keeperCeiling, mira: poolMax - keeperCeiling });
+    }
+    // concrete pin at the shipped L1 cap, byte-identical to the pre-Wave-4 split
+    expect(splitPooledHp(16, 16)).toEqual({ keeper: 10, mira: 6 });
+  });
+
+  it('backcompat — splitPooledHp(p, 16) equals the pre-Wave-4 shipped split for every p in [0,16]', () => {
+    for (let pool = 0; pool <= 16; pool++) {
+      const clamped = Math.max(0, Math.min(16, pool));
+      const legacyKeeper = Math.min(10, Math.ceil((clamped * 10) / 16));
+      const legacyMira = clamped - legacyKeeper;
+      expect(splitPooledHp(pool, 16)).toEqual({ keeper: legacyKeeper, mira: legacyMira });
+    }
   });
 });

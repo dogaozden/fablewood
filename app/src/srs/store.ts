@@ -14,6 +14,7 @@
 import type { Quality, SaveData } from '../game/contracts';
 import { getState as realGetState, putState as realPutState } from '../bridge/client';
 import { boxOf as leitnerBoxOf, record as leitnerRecord, type SrsState } from './leitner';
+import { maxHpForLevel } from '../game/progression/xp';
 
 /** The two bridge calls the stores depend on — injectable for tests. */
 export interface Bridge {
@@ -236,20 +237,29 @@ export class SaveStore extends ObjectStore<SaveData & Record<string, unknown>> {
    *  never fired, and CombatScene's splitPooledHp produced NaN unit hp that resolved
    *  every fight as an instant retreat, forever (the corrupt value was never touched).
    *  Coerce/clamp hp here — the ONE place every consumer's get() funnels through —
-   *  instead of hardening each call site individually. */
+   *  instead of hardening each call site individually.
+   *
+   *  Wave 4 Task 7 fix round — this used to clamp against the flat DEFAULT_SAVE.hp (16)
+   *  regardless of level, which silently undid a level-keyed HP bump the instant it landed
+   *  (live probe: a full pool's L2 bump computed 18, was written, came back 16, since this
+   *  same sanitize() runs on save()'s merge path too, not just load()). The ceiling now
+   *  reads the save's OWN level, so higher-level saves keep their own bigger pool. */
   protected sanitize(
     value: SaveData & Record<string, unknown>,
   ): SaveData & Record<string, unknown> {
-    return { ...value, hp: coerceHp(value.hp) };
+    return { ...value, hp: coerceHp(value.hp, value.level) };
   }
 }
 
-/** Finite number, clamped to the party pool range; anything else (NaN, non-numeric
- *  strings, objects…) falls back to the full-health default rather than sailing into
- *  live state. */
-function coerceHp(hp: unknown): number {
+/** Finite number, clamped to the party pool range for the save's OWN level; anything else
+ *  (NaN, non-numeric strings, objects…) falls back to that level's full-health default
+ *  rather than sailing into live state. `level` is read raw (unknown) — maxHpForLevel's own
+ *  clampLevel already treats a non-finite/missing level as L1, so a corrupt or absent level
+ *  here still yields a sane ceiling without duplicating that defense. */
+function coerceHp(hp: unknown, level: unknown): number {
+  const max = maxHpForLevel(Number(level));
   const n = Number(hp);
-  return Number.isFinite(n) ? Math.max(0, Math.min(DEFAULT_SAVE.hp, n)) : DEFAULT_SAVE.hp;
+  return Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : max;
 }
 
 export class SettingsStore extends ObjectStore<{ muted: boolean; volume: number } & Record<string, unknown>> {

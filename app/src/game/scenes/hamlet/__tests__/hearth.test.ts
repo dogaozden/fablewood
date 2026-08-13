@@ -20,7 +20,7 @@ vi.mock('../../../../inventory/ui/shopPane', () => ({ openShopPane: vi.fn(async 
 
 import { HamletScene } from '../HamletScene';
 import { services, type SaveData } from '../../../contracts';
-import { EMBER_MAX } from '../../../rest/embers';
+import { maxHpForLevel, emberMaxForLevel } from '../../../progression/xp';
 import type { Conversation } from '../../../dialogue';
 
 /** Only doCottage() is under test, and it is private — this is the narrowest honest way
@@ -65,8 +65,8 @@ describe('the Cottage banks the hearth (night rest)', () => {
     // patch per grant, never merged into the caller's). Two save() calls total, not one.
     expect(saveMock).toHaveBeenCalledTimes(2);
     const patch = saveMock.mock.calls[0][0] as Partial<SaveData>;
-    expect(patch.hp).toBe(16);
-    expect(patch.embers).toBe(EMBER_MAX);
+    expect(patch.hp).toBe(16); // maxHpForLevel(1) — no level seeded, so L1
+    expect(patch.embers).toBe(emberMaxForLevel(1));
     expect(patch).not.toHaveProperty('streak');
     const stamp = new Date(patch.lastHearthAt as string).getTime();
     expect(stamp).toBeGreaterThanOrEqual(before);
@@ -83,6 +83,20 @@ describe('the Cottage banks the hearth (night rest)', () => {
     expect(conv.pages).toEqual([
       'You bank the hearth, and the night keeps its side of the bargain. The party is whole; the embers are banked.',
     ]);
+  });
+
+  // Wave 4 Task 7 — the hearth-rest patch goes level-keyed: a higher-level save heals/
+  // refills to ITS OWN ceiling (maxHpForLevel/emberMaxForLevel), not the flat L1 default.
+  it('never-rested at a higher level: the rest patch heals/refills to that level\'s own ceiling', async () => {
+    const { saveMock } = installSave({ lastHearthAt: undefined, hp: 3, embers: 0, level: 5, xp: 2500 });
+    const dialogueRun = vi.fn(async (_conv: Conversation): Promise<string | undefined> => undefined);
+    const scene = makeScene(dialogueRun);
+
+    await (scene as unknown as SceneTestView).doCottage();
+
+    const patch = saveMock.mock.calls[0][0] as Partial<SaveData>;
+    expect(patch.hp).toBe(maxHpForLevel(5)); // 24, not the flat L1 16
+    expect(patch.embers).toBe(emberMaxForLevel(5)); // 4, not the flat L1 2
   });
 
   it('already rested today: no rest patch, only the checkpoint write; already-rested line appended', async () => {

@@ -7,7 +7,7 @@
  */
 import Phaser from 'phaser';
 import type { DungeonSpec, DungeonRoom, FactLite } from '../../contracts';
-import { EMBER_MAX } from '../../rest/embers';
+import { emberMaxForLevel } from '../../progression/xp';
 import { nodeState, firstUnclearedIndex, type DungeonProgress } from './roomFlow';
 import { C, hex } from './palette';
 
@@ -314,26 +314,32 @@ export class VaultView {
     }
   }
 
-  setStatus(hp: number, maxHp: number, streak: number, embers: number): void {
-    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Hearth Streak  ${streak}`);
-    this.drawEmberPips(embers);
+  /** Wave 4 — `level` gains the status line its own `Lv {N}` readout (the recon ruling's
+   *  second level display, mapped onto this existing status affordance — no new hamlet UI
+   *  this wave). Also drives the Ember pip TOTAL (see drawEmberPips): the cap itself is
+   *  level-keyed now, so the pip count must scale with it or a higher-level pool overflows
+   *  the drawn pips. */
+  setStatus(hp: number, maxHp: number, streak: number, embers: number, level: number): void {
+    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Lv ${level}     Hearth Streak  ${streak}`);
+    this.drawEmberPips(embers, emberMaxForLevel(level));
   }
 
   /** Ember pips beside the status line — modeled on combat hud's glowPips loop
    *  (hud.ts:301-311): diamonds become small warm dots, filled up to `embers` of
-   *  EMBER_MAX. Wordless (the line is already dense) and re-anchored off the status
-   *  text's live width every call, so it never overlaps as hp/streak digit counts change. */
-  private drawEmberPips(embers: number): void {
+   *  `emberMax` (Wave 4 — the caller's emberMaxForLevel(level) read, no longer a flat
+   *  constant). Wordless (the line is already dense) and re-anchored off the status text's
+   *  live width every call, so it never overlaps as hp/level/streak digit counts change. */
+  private drawEmberPips(embers: number, emberMax: number): void {
     if (!this.emberPips || !this.statusText) return;
     const pipR = 4;
     const pipGap = 3;
     const gapFromText = 14;
     const y = this.statusText.y;
-    const totalW = EMBER_MAX * (pipR * 2) + (EMBER_MAX - 1) * pipGap;
+    const totalW = emberMax * (pipR * 2) + (emberMax - 1) * pipGap;
     const rightEdge = this.statusText.x - this.statusText.width - gapFromText;
     const pipsLeftEdge = rightEdge - totalW;
     this.emberPips.clear();
-    for (let i = 0; i < EMBER_MAX; i++) {
+    for (let i = 0; i < emberMax; i++) {
       const cx = pipsLeftEdge + pipR + i * (pipR * 2 + pipGap);
       const filled = i < embers;
       this.emberPips.fillStyle(filled ? C.ember : C.shadowPlum, 1).fillCircle(cx, y, pipR);

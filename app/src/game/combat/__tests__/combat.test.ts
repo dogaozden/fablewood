@@ -706,22 +706,33 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
     expect(usableSatchelItems({ gold: 0, stacks: { 'scriveners-hint': 5, 'ward-of-focus': 1 } })).toEqual([]);
   });
 
-  it('resolveHealUse restores the item amount, clamped to the pool ceiling', () => {
-    expect(resolveHealUse(draught, 6)).toMatchObject({ ok: true, nextPool: 12, gained: 6 });
-    expect(resolveHealUse(draught, 12)).toMatchObject({ ok: true, nextPool: 16, gained: 4 }); // clamps at 16
+  it('resolveHealUse restores the item amount, clamped to the caller-supplied maxPool', () => {
+    expect(resolveHealUse(draught, 6, 16)).toMatchObject({ ok: true, nextPool: 12, gained: 6 });
+    expect(resolveHealUse(draught, 12, 16)).toMatchObject({ ok: true, nextPool: 16, gained: 4 }); // clamps at 16
   });
 
-  it('a 999 ("full") heal always clamps to the pool ceiling', () => {
-    expect(resolveHealUse(fullRestore, 1)).toMatchObject({ ok: true, nextPool: 16, gained: 15 });
+  it('a 999 ("full") heal always clamps to the caller-supplied maxPool', () => {
+    expect(resolveHealUse(fullRestore, 1, 16)).toMatchObject({ ok: true, nextPool: 16, gained: 15 });
   });
 
   it('rejects (no consumption, no turn spent) when already at full vigor — the action-spend gate', () => {
-    expect(resolveHealUse(draught, 16)).toMatchObject({ ok: false, nextPool: 16, gained: 0 });
-    expect(resolveHealUse(draught, 16).message).toBe('Already at full vigor.');
+    expect(resolveHealUse(draught, 16, 16)).toMatchObject({ ok: false, nextPool: 16, gained: 0 });
+    expect(resolveHealUse(draught, 16, 16).message).toBe('Already at full vigor.');
   });
 
   it('rejects a non-heal item outright (tools/trinkets have no combat-resolvable effect yet)', () => {
-    expect(resolveHealUse(trinket, 6)).toMatchObject({ ok: false, gained: 0 });
+    expect(resolveHealUse(trinket, 6, 16)).toMatchObject({ ok: false, gained: 0 });
+  });
+
+  // Wave 4 Task 7 — maxPool is now a REQUIRED param (the old fixed-16 default died): the
+  // caller passes a fresh maxHpForLevel(save.level ?? 1) read, so the ceiling itself is
+  // level-keyed, not just the pool value being clamped against it.
+  it('the pool ceiling is whatever maxPool the caller supplies, not a hardcoded 16', () => {
+    // L3 ceiling (maxHpForLevel(3) = 20): a heal that would have clamped at 16 pre-Wave-4
+    // now clamps higher, and "already full" now means full at 20, not 16.
+    expect(resolveHealUse(draught, 15, 20)).toMatchObject({ ok: true, nextPool: 20, gained: 5 });
+    expect(resolveHealUse(draught, 20, 20)).toMatchObject({ ok: false, nextPool: 20, gained: 0 });
+    expect(resolveHealUse(draught, 20, 20).message).toBe('Already at full vigor.');
   });
 });
 

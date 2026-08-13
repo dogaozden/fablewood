@@ -42,15 +42,16 @@ class DelayedBridge implements Bridge {
 /** Mimics srs/store.ts's ObjectStore.save() shape closely enough: get() is a
  * synchronous cache read, save() performs a real async round trip (like the
  * fetch-based bridge does) before the cache is updated — same "cache lags the
- * in-flight write" property the real SaveStore has. Loosely typed (only `hp`
- * matters here) and installed via cast, same as srs/register.ts's real
- * services.save assignment does for the full SaveApi. */
-function makeFakeSave(hp: number, delayMs: number) {
-  let cache: { hp: number } = { hp };
+ * in-flight write" property the real SaveStore has. Loosely typed (only `hp`/
+ * `level` matter here) and installed via cast, same as srs/register.ts's real
+ * services.save assignment does for the full SaveApi. `level` is optional so
+ * every existing call site (implicitly L1) is untouched. */
+function makeFakeSave(hp: number, delayMs: number, level?: number) {
+  let cache: { hp: number; level?: number } = { hp, level };
   return {
     async ready() {},
     get: () => cache,
-    async save(patch: Partial<{ hp: number }>) {
+    async save(patch: Partial<{ hp: number; level?: number }>) {
       await new Promise((r) => setTimeout(r, delayMs));
       cache = { ...cache, ...patch };
     },
@@ -106,4 +107,37 @@ describe('consume.ts useItem — cross-store race on the last stack of an item',
     // ...and HP moved exactly once (4 -> 10), never twice (4 -> 10 -> 16).
     expect(finalHp).toBe(10);
   }, 5000);
+});
+
+// Wave 4 Task 7 — the old hardcoded flat-16 heal cap died; the heal clamp now reads
+// maxHpForLevel(save.level ?? 1). Seeded near the L3 ceiling (20), not near 16, so a
+// leftover flat-16 clamp would fail this test rather than pass it by coincidence.
+describe('consume.ts useItem — level-keyed heal cap (Wave 4)', () => {
+  it('clamps a heal to maxHpForLevel(save.level), not a flat 16', async () => {
+    const bridge = new DelayedBridge();
+    bridge.seed('inventory.json', { version: 1, gold: 0, stacks: { 'embermend-draught': 1 } });
+    const store = new InventoryStore(bridge);
+    await store.ready();
+
+    (services as unknown as { save: ReturnType<typeof makeFakeSave> }).save = makeFakeSave(18, 0, 3);
+
+    const res = await useItem(store, 'embermend-draught'); // effect.amount = 6; 18+6=24 overshoots
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Restored 2 vigor.'); // 18 -> 20 (maxHpForLevel(3)), not clamped at 16
+    expect((services as unknown as { save: ReturnType<typeof makeFakeSave> }).save.get().hp).toBe(20);
+  });
+
+  it('a legacy save with no level field still clamps at 16 (level defaults to 1)', async () => {
+    const bridge = new DelayedBridge();
+    bridge.seed('inventory.json', { version: 1, gold: 0, stacks: { 'embermend-draught': 1 } });
+    const store = new InventoryStore(bridge);
+    await store.ready();
+
+    (services as unknown as { save: ReturnType<typeof makeFakeSave> }).save = makeFakeSave(12, 0);
+
+    const res = await useItem(store, 'embermend-draught'); // 12+6=18, clamps at maxHpForLevel(1)=16
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe('Restored 4 vigor.');
+    expect((services as unknown as { save: ReturnType<typeof makeFakeSave> }).save.get().hp).toBe(16);
+  });
 });
