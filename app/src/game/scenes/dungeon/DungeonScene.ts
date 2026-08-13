@@ -770,11 +770,14 @@ export class DungeonScene extends Phaser.Scene {
     const questXp = rewardXp(quest);
     if (questXp) pending.push(...grantXp('quest', { amount: questXp }));
     // §3.2 — fold the boss battle + bounty into the run harvest; the finale plays its full staged
-    // reveal FIRST, then the level-up ceremony (if any), then the accumulated Night's Ledger, then home.
+    // reveal FIRST, then the accumulated Night's Ledger, then the level-up ceremony (if any) —
+    // matching the retreat/wipe branches above (Constraint 10: the card never upstages a
+    // ledger; fix round 1, 2026-08-13 — grantXp('boss')'s flat +150 crosses L1→L2 on any fresh
+    // save, so this order was reachable on the very first boss kill, not an edge case).
     this.accrueHarvest(outcome, loot.gold);
     await this.view.vaultOpensBeat(reward + lootLine, streak);
-    await this.presentPendingLevelUp(pending);
     await this.runNightLedger('victory', streak);
+    await this.presentPendingLevelUp(pending);
     this.scene.start('hamlet', { seed: this.seed });
   }
 
