@@ -169,5 +169,9 @@ test('two installed packs: combat casts reach BOTH installed packs, not just the
     ).toBe(true);
   } finally {
     if (priorSave) await page.request.put('/api/state/save.json', { data: priorSave });
+    // No prior save (virgin scratch dir → the bridge 404s → readState returns null): restore the
+    // app's own fresh-save default rather than leaving this crawl parked at scene:'vaults', which
+    // BootScene would then resume into for a later spec (teaching-mix's idiom, same reason).
+    else await page.request.put('/api/state/save.json', { data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });
   }
 });

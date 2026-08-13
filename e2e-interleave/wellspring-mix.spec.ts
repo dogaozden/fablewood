@@ -74,6 +74,15 @@ test('two installed packs: a Wellspring drill surfaces facts from BOTH installed
   expect(Object.keys(facts).length, 'both packs contributed facts to seed').toBeGreaterThan(60);
   await seedSrs(page, facts);
 
+  // This rig's STATE_DIR is a scratch dir SHARED across its three specs, and BootScene's
+  // title-screen gesture resumes the SAVED scene (`save.scene === 'vaults' ? 'vaults' : 'hamlet'`
+  // — BootScene.ts). combat-mix's crawl parks the save at scene:'vaults', so without pinning the
+  // save here the Enter below enters the VAULTS and the `hamlet` wait can never resolve. Both
+  // sibling specs already seed their own save.json before navigating; this one must too.
+  await page.request.put('/api/state/save.json', {
+    data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+  });
+
   await page.goto('/?seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
