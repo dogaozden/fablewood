@@ -1,5 +1,13 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, tapKey, waitHamletPlayer, waitProvincesLoaded, warpHamletTo, readState } from './helpers';
+import {
+  waitReady,
+  tapKey,
+  waitHamletPlayer,
+  waitProvincesLoaded,
+  warpHamletTo,
+  readState,
+  hamletPlayer,
+} from './helpers';
 
 // Wave 4 leveling — RED e2e pins (task-4-brief.md), written BEFORE the wiring exists. Tasks
 // 1-3 landed the pure XP module (progression/xp.ts), the SaveData xp/level fields
@@ -67,6 +75,18 @@ const RENEWAL_FACT = 'vc.econ.overview.economics-vs-control';
 // Proven stub-judge PASS for enc.fr.economics-vs-control's rubric (combat.spec.ts's
 // answerCast, redemption-bell.spec.ts's combat test — both reused verbatim).
 const RENEWAL_ANSWER = 'Economics and control.';
+// The two OTHER facts enc.match.foundational-terms also teaches (its fact_ids array,
+// verified against packs/vc-law/pack.json — no OTHER encounter in the pack references
+// RENEWAL_FACT at all, confirmed by grepping every encounter's fact_ids). Sharing that
+// encounter with RENEWAL_FACT matters because leitner.ts's record() applies ONE quality to
+// every fact_id an encounter covers — so if either of these siblings is still "due" for
+// round 2/3, the due-queue can draw IT instead, resolve to the SAME shared match encounter,
+// and a flee (quality 0) on it demotes RENEWAL_FACT's box right back to 1 as a side effect,
+// even though round 1 already answered RENEWAL_FACT correctly. Confirmed empirically: without
+// excluding these two, round 2 drew enc.match.foundational-terms via one of them and
+// RENEWAL_FACT's box read 1, not 2+, at the end (srs.json history showed the quality-0 entry
+// against enc.match.foundational-terms right after the quality-1 free_recall one).
+const RENEWAL_SIBLING_FACTS = ['vc.econ.overview.preferred-vs-common', 'vc.econ.liqpref.conversion-ratio'];
 
 async function seedSave(page: Page, patch: Partial<Save> = {}): Promise<void> {
   // DEFAULT_SAVE-shaped (srs/store.ts) plus only what each pin overrides — Pin A calls this
@@ -104,6 +124,8 @@ async function seedSrsForRenewal(page: Page): Promise<void> {
   const facts: Record<string, SrsEntry> = {};
   for (const id of ids) facts[id] = { box: 1, next_due: now - 5_000, history: [] };
   facts[RENEWAL_FACT] = { box: 1, next_due: now - 500_000, history: [] };
+  // Not due, deliberately — see RENEWAL_SIBLING_FACTS's own doc for why.
+  for (const id of RENEWAL_SIBLING_FACTS) facts[id] = { box: 8, next_due: now + 30 * 86_400_000, history: [] };
   const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
   expect(res.ok(), 'seeded state/srs.json through the dev bridge').toBe(true);
 }
@@ -180,6 +202,63 @@ async function answerWellspringRenewalCorrectly(page: Page): Promise<void> {
   await page.waitForTimeout(600); // let srs.record + (eventually) grantXp's save patch settle
 }
 
+/** Flee the CURRENTLY OPEN drill round via Escape. Verified directly against overlay.ts's ESC
+ *  policy (:236): it checks `ctx.context === 'drill'` only, never `encounter.kind`, so this
+ *  works regardless of which kind rounds 2-3 draw, and always grades quality 0 — meaning it
+ *  can never trigger an unplanned `grantXp('renewal')` once Task 5 wires the `quality === 1`
+ *  gate (task-5-brief.md Step 4.1). */
+async function fleeWellspringRound(page: Page): Promise<void> {
+  await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8_000 });
+  await page.waitForTimeout(600); // past overlay.ts's paint-anchored arm guard (shared idiom)
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+}
+
+/** Close wellspringOutro (HamletScene.ts:966, `this.dialogue.run(wellspringOutro(...))`) — a
+ *  single-page Conversation with NO `choices` array (content.ts:152-159). Verified directly
+ *  against DialogueBox.advance(): on a no-choice conversation's last page, the FIRST advance
+ *  only finishes that page's typewriter (`onPageComplete`); only the SECOND advance actually
+ *  closes it (`this.close(undefined)`, since `choices.length` is 0) — i.e. two 'e' presses
+ *  from a cold open, not one. Rather than hardcode that count, this polls the live
+ *  `dialogueOpen` flag (helpers.ts's `hamletPlayer`) so it's robust to timing either way, and
+ *  throws loudly (not a silent no-op) if the outro never opens or never closes — the same
+ *  "fail loud, not wrong" discipline as answerWellspringRenewalCorrectly's unrecognized-kind
+ *  branch. */
+async function closeWellspringOutro(page: Page): Promise<void> {
+  let opened = false;
+  for (let k = 0; k < 30; k++) {
+    if ((await hamletPlayer(page))?.dialogueOpen) {
+      opened = true;
+      break;
+    }
+    await page.waitForTimeout(150);
+  }
+  if (!opened) throw new Error("wellspringOutro never opened after the drill's three rounds");
+  for (let k = 0; k < 10; k++) {
+    if (!(await hamletPlayer(page))?.dialogueOpen) return;
+    await tapKey(page, 'e');
+    await page.waitForTimeout(250);
+  }
+  throw new Error('wellspringOutro did not close after 10 taps');
+}
+
+/** Drive ALL THREE Wellspring rounds (doWellspring()'s own `for (i=0;i<3;i++)` loop,
+ *  HamletScene.ts:889) — round 1 the one deterministic correct renewal
+ *  (answerWellspringRenewalCorrectly), rounds 2-3 fled via Escape (quality 0, no additional
+ *  grant) — then closes the outro. Required for Pin B, not Pin A: Task 5's wire-1
+ *  (task-5-brief.md Step 4.1) batches pending level-ups across the WHOLE drill and presents
+ *  ONE ceremony card only after "the drill's own overlay closes", which — given
+ *  doWellspring()'s real structure (3-round loop -> streak bump -> wellspringOutro) — means
+ *  the whole visit, not round 1's transient encounter card alone. Pin A's grantXp fires
+ *  synchronously per-round (before rounds 2-3 even run), so it reads state before this
+ *  matters; Pin B's ceremony-card wait does not resolve without it. */
+async function driveWellspringRenewal(page: Page): Promise<void> {
+  await answerWellspringRenewalCorrectly(page); // round 1 -> the one correct renewal
+  await fleeWellspringRound(page); // round 2 -> quality 0, no grant
+  await fleeWellspringRound(page); // round 3 -> quality 0, no grant
+  await closeWellspringOutro(page);
+}
+
 type CombatSnap = { rank: number } | null;
 async function combatSnap(page: Page): Promise<CombatSnap> {
   return page.evaluate(() => {
@@ -249,7 +328,12 @@ test.describe('leveling — RED pins (written before the wiring exists)', () => 
       await seedSrsForRenewal(page);
 
       await openWellspringDrill(page);
-      await answerWellspringRenewalCorrectly(page); // +5 -> exactly 100 -> Level 2
+      // All 3 rounds, not just round 1 — see driveWellspringRenewal's doc: Task 5 batches
+      // pending level-ups across the WHOLE drill and presents ONE card only after the drill
+      // (all 3 rounds + wellspringOutro) closes, not after round 1's own encounter card.
+      // Round 1 is the one correct renewal (+5 -> exactly 100 -> Level 2); rounds 2-3 flee
+      // (quality 0, no additional grant).
+      await driveWellspringRenewal(page);
 
       // rig sanity (passes today): the renewal that should trigger the level-up genuinely
       // happened, correct, before we look for its ceremony.
@@ -270,10 +354,11 @@ test.describe('leveling — RED pins (written before the wiring exists)', () => 
       await expect(card, 'the card lists the level reached').toContainText(/Level 2/);
       await page.screenshot({ path: `${EV}/e2e-leveling-pin-b-ceremony.png` });
 
-      // Best-effort close, matching the "Onward ▸" convention every other ceremony/beat
-      // card in this game uses (presentNightLedger/presentAmendment, overlay.ts) — Task 5's
-      // own call if its card differs; unreached today since the assertion above throws
-      // first.
+      // Best-effort close, matching the "Onward ▸" convention presentNightLedger
+      // (overlay.ts:391-394, verified) and VaultView's finishCard (VaultView.ts:617,
+      // verified) both already use for a beat/ceremony card — Task 5's plan text directs
+      // presentLevelUp to mirror presentNightLedger's idiom specifically. Task 5's own call
+      // if its card differs; unreached today since the assertion above throws first.
       await page.getByRole('button', { name: 'Onward ▸' }).click();
       await page.waitForTimeout(400);
 
@@ -296,7 +381,13 @@ test.describe('leveling — RED pins (written before the wiring exists)', () => 
     const beforeSave = await readState<Save>(page, 'save.json');
 
     try {
-      await seedSave(page, { xp: 2_500, dungeon: { roomIndex: 0, cleared: [] } }); // -> Level 6, tierFloor 3
+      // level:6 seeded explicitly alongside xp — Task 6 (plan:438) reads `save.level ?? 1`
+      // directly at battle-create, never deriving it from xp via levelForXp, and grantXp
+      // (grant.ts:60-62) always writes the two fields in lockstep. Seeding xp without level
+      // would read as a save that's *impossible* under grantXp's own writer, and would red
+      // this pin on a value mismatch (level 1, tierFloor 1) forever after Task 6 lands
+      // exactly as specified, instead of flipping green.
+      await seedSave(page, { xp: 2_500, level: 6, dungeon: { roomIndex: 0, cleared: [] } }); // -> tierFloor 3
       await seedSrsEmpty(page); // zero welded facts -> computeRank floors the SRS rank at 1
 
       await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
