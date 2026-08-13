@@ -44,6 +44,8 @@ import { canRestTonight, EMBER_MAX } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
+import { grantXp } from '../../progression/grant';
+import { levelUpRows } from '../../progression/ceremony';
 
 type Facing = 'up' | 'down' | 'left' | 'right';
 type Key = Phaser.Input.Keyboard.Key;
@@ -788,11 +790,16 @@ export class HamletScene extends Phaser.Scene {
     const batch = this.amendedPending.slice(0, AMENDMENT_BATCH_CAP);
     if (batch.length === 0) return;
     this.input.keyboard!.enabled = false;
+    // Wave 4 Task 5, wire 2 — multiple grants per visit are correct (the batch cap already
+    // bounds it); accumulated and presented as ONE card once the whole batch closes.
+    const pending: number[] = [];
     try {
       for (let i = 0; i < batch.length; i++) {
         await services.showAmendment(batch[i], { last: i === batch.length - 1 });
         await services.amendments.witness(batch[i].old.id);
+        pending.push(...grantXp('amendment'));
       }
+      await this.presentPendingLevelUp(pending);
     } catch {
       /* amendments/encounters may be stubs; never block the Clerk's own conversation */
     } finally {
@@ -837,7 +844,12 @@ export class HamletScene extends Phaser.Scene {
       } catch {
         /* save may be a stub */
       }
+      // Wave 4 Task 5, wire 6 (RULING CORRECTED 2026-08-13) — the +30 fires here and ONLY
+      // here, one grant per banked hearth night, immediately after the rest patch carrying
+      // lastHearthAt lands. This wire touches save.streak in NO direction.
+      const pending = grantXp('hearth-streak');
       await this.dialogue.run(hearthRestConv());
+      await this.presentPendingLevelUp(pending);
       return;
     }
 
@@ -851,6 +863,20 @@ export class HamletScene extends Phaser.Scene {
       /* save may be a stub */
     }
     await this.dialogue.run(cottageConv(true));
+  }
+
+  /** Wave 4 Task 5 — presents the level-up ceremony for any levels accumulated this beat
+   *  (Constraint 6: ONE card, every level gained). Best-effort, matching runNightLedger's own
+   *  tolerance (DungeonScene.ts): a missing/stub overlay service must never strand the
+   *  surrounding hamlet flow. No-op when nothing was gained (levelUpRows returns null). */
+  private async presentPendingLevelUp(levels: number[]): Promise<void> {
+    const ceremony = levelUpRows(levels);
+    if (!ceremony) return;
+    try {
+      await services.showLevelUp(ceremony.rows);
+    } catch {
+      /* best-effort: never block the surrounding beat */
+    }
   }
 
   private async doWellspring(): Promise<void> {
@@ -871,6 +897,9 @@ export class HamletScene extends Phaser.Scene {
     // doFactor() already do.
     const choice = await this.dialogue.run(wellspringIntro());
     if (!choice || choice === '__cancel__') return;
+    // Wave 4 Task 5 — accumulated across all 3 rounds below; ONE ceremony card presents after
+    // the drill's own overlay (wellspringOutro) closes, not per-round.
+    const pending: number[] = [];
     try {
       // Legacy per-province plumbing — computed only as the fallback path's input when
       // the draw index is down; the global path below never touches pv/baseFactIds.
@@ -957,6 +986,9 @@ export class HamletScene extends Phaser.Scene {
           wellspringRecentFactIds.add(fid);
           this.wellspringSurfaced.push(fid);
         }
+        // Wave 4 Task 5, wire 1 — correct = quality === 1 ONLY (0.5 partials don't pay); one
+        // grant per round, not per fact_id (an encounter can cover several facts at once).
+        if (res.quality === 1) pending.push(...grantXp('renewal', { applyHp: true }));
       }
       const s = services.save.get();
       await services.save.save({ streak: s.streak + 1, lastPlayed: new Date().toISOString() });
@@ -964,6 +996,7 @@ export class HamletScene extends Phaser.Scene {
       /* encounters/srs may be stubs or mid-implementation */
     }
     await this.dialogue.run(wellspringOutro(this.streak()));
+    await this.presentPendingLevelUp(pending);
   }
 
   private async doGate(): Promise<void> {

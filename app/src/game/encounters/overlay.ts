@@ -20,6 +20,7 @@ import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
+import { LEVEL_UP_TITLE, LEVEL_UP_SIGNOFF } from '../progression/ceremony';
 
 export interface EncounterCtx {
   context: EncounterRequest['context'];
@@ -411,6 +412,63 @@ export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean
     // auto-drive / dev flows must never hang on a click that won't come: auto-advance after a
     // readable beat (the dungeon cards' 'auto' CardMode idiom). Real play waits for input. The
     // window is generous so an e2e can capture the card even under fleet CPU load.
+    if (opts.auto) setTimeout(done, 2000);
+  });
+}
+
+/**
+ * "The Lantern Burns Brighter" (Wave 4 Task 5) — the level-up ceremony card. Night-Ledger
+ * family: same parchment scaffolding as presentNightLedger (quiet keyboard, arm guard, teardown
+ * safety, Space/Enter/click "Onward ▸" to dismiss). Presentation-only — every row already
+ * composed by progression/ceremony.ts's levelUpRows(); title/signoff are that same module's
+ * FINAL copy, imported rather than re-authored here.
+ * `opts.auto` mirrors presentNightLedger's own auto-drive escape hatch: DungeonScene's dev
+ * harness (?auto=full/win) can cross a level threshold mid-run, and a card with no click
+ * coming must never hang it.
+ */
+export function presentLevelUp(rows: string[], opts: { auto?: boolean } = {}): Promise<void> {
+  return new Promise((resolve) => {
+    const o = buildOverlay();
+
+    o.body.replaceChildren(
+      el('div', { class: 'fw-ledger-head' }, [el('h2', { class: 'fw-ledger-title', text: LEVEL_UP_TITLE })]),
+      el('hr', { class: 'fw-rule' }),
+      el(
+        'div',
+        { class: 'fw-ledger-rows' },
+        rows.map((r) => el('div', { class: 'fw-ledger-row' }, [el('span', { class: 'fw-ledger-label', text: r })])),
+      ),
+      el('p', { class: 'fw-ledger-signoff', text: LEVEL_UP_SIGNOFF }),
+    );
+
+    let closed = false;
+    const done = (): void => {
+      if (closed) return;
+      closed = true;
+      void o.close().then(resolve);
+    };
+    const cont = el('button', {
+      class: 'fw-btn fw-btn-primary',
+      type: 'button',
+      text: 'Onward ▸',
+      onclick: () => {
+        if (o.isArmed()) done();
+      },
+    });
+    o.footer.replaceChildren(
+      el('span', { class: 'fw-hint', text: 'Space, Enter, or click to close.' }),
+      el('span', { class: 'fw-spacer' }),
+      cont,
+    );
+    o.onKey((e) => {
+      if ((e.key === ' ' || e.key === 'Enter') && o.isArmed()) {
+        e.preventDefault();
+        done();
+      }
+    });
+    requestAnimationFrame(() => cont.focus());
+    // dev/e2e auto-drive must never hang on a click that won't come (presentNightLedger's own
+    // idiom, verbatim).
     if (opts.auto) setTimeout(done, 2000);
   });
 }

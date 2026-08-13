@@ -188,6 +188,7 @@ function installServices(initial: Partial<SaveData>): Harness {
   services.showTeaching = async () => {};
   services.showNightLedger = async () => {};
   services.showAmendment = async () => {};
+  services.showLevelUp = async () => {};
 
   return { save: () => data, gateQuality, addGoldGate };
 }

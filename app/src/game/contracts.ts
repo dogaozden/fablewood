@@ -381,6 +381,11 @@ export interface Services {
   /** "The Ledger Amended" card (supersession-reteach.md §3; encounters agent owns UI); resolves
    *  when the player confirms "Read and witnessed ▸". `last` adds the batch sign-off. */
   showAmendment: (card: Amendment, opts?: { last?: boolean; auto?: boolean }) => Promise<void>;
+  /** "The Lantern Burns Brighter" level-up ceremony (Wave 4 Task 5; Night-Ledger family, same
+   *  UI ownership); resolves when the player confirms "Onward ▸". `rows` is
+   *  progression/ceremony.ts's levelUpRows(...)?.rows — callers skip this call entirely when
+   *  that's null (nothing gained). `opts.auto` mirrors showNightLedger's auto-drive. */
+  showLevelUp: (rows: string[], opts?: { auto?: boolean }) => Promise<void>;
 }
 
 /**

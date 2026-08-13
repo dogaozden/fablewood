@@ -69,6 +69,15 @@ export function rewardText(quest: Quest | undefined): string | null {
   return null;
 }
 
+/** The numeric XP component of a quest reward (Task 5) — same shape-tolerance as rewardText's
+ *  own extraction, kept in sync with it here rather than duplicated at each call site. */
+export function rewardXp(quest: Quest | undefined): number | undefined {
+  const reward = quest?.reward;
+  if (!reward || typeof reward !== 'object') return undefined;
+  const xp = (reward as Record<string, unknown>).xp;
+  return typeof xp === 'number' ? xp : undefined;
+}
+
 function humanize(slug: string): string {
   return slug
     .split(/[-_\s]+/)

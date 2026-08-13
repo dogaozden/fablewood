@@ -58,6 +58,7 @@ async function setup(packs: unknown[] = [PACK_ALPHA, PACK_BETA]) {
     presentTeaching: async () => {},
     presentNightLedger: async () => {},
     presentAmendment: async () => {},
+    presentLevelUp: async () => {},
   }));
 
   const { services } = await import('../../contracts');
@@ -130,6 +131,7 @@ describe('runEncounter — services.draw index-load failure falls back safely', 
       presentTeaching: async () => {},
       presentNightLedger: async () => {},
       presentAmendment: async () => {},
+      presentLevelUp: async () => {},
     }));
 
     const { services } = await import('../../contracts');
@@ -202,6 +204,7 @@ describe('runEncounter — services.draw index-load failure falls back safely', 
       presentTeaching: async () => {},
       presentNightLedger: async () => {},
       presentAmendment: async () => {},
+      presentLevelUp: async () => {},
     }));
 
     const { services } = await import('../../contracts');

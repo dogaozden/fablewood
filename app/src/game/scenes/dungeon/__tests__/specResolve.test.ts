@@ -6,6 +6,7 @@ import {
   candidateDungeonFiles,
   bossQuest,
   rewardText,
+  rewardXp,
   isDungeonSpec,
 } from '../specResolve';
 
@@ -81,6 +82,18 @@ describe('rewardText', () => {
     );
     expect(rewardText(quest('q', 't', 'r'))).toBeNull();
     expect(rewardText(undefined)).toBeNull();
+  });
+});
+
+describe('rewardXp (Task 5 — the numeric half of the same reward rewardText formats)', () => {
+  it('reads the xp component of an {xp,item} reward', () => {
+    expect(rewardXp(bossQuest(vcLaw))).toBe(500);
+  });
+  it('is undefined for a string reward, a missing xp field, or no quest at all', () => {
+    expect(rewardXp(quest('q', 't', 'r', 'a shard of moonlit glass'))).toBeUndefined();
+    expect(rewardXp(quest('q', 't', 'r', { item: 'lens-of-pre-and-post' }))).toBeUndefined();
+    expect(rewardXp(quest('q', 't', 'r'))).toBeUndefined();
+    expect(rewardXp(undefined)).toBeUndefined();
   });
 });
 

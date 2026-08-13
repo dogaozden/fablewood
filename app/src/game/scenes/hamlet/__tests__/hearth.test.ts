@@ -60,7 +60,10 @@ describe('the Cottage banks the hearth (night rest)', () => {
     await (scene as unknown as SceneTestView).doCottage();
     const after = Date.now();
 
-    expect(saveMock).toHaveBeenCalledTimes(1);
+    // Wave 4 Task 5, wire 6 — banking a hearth night also grants the 'hearth-streak' XP source
+    // (+30), via grantXp's own separate atomic save patch (grant.ts's documented contract: ONE
+    // patch per grant, never merged into the caller's). Two save() calls total, not one.
+    expect(saveMock).toHaveBeenCalledTimes(2);
     const patch = saveMock.mock.calls[0][0] as Partial<SaveData>;
     expect(patch.hp).toBe(16);
     expect(patch.embers).toBe(EMBER_MAX);
@@ -68,6 +71,11 @@ describe('the Cottage banks the hearth (night rest)', () => {
     const stamp = new Date(patch.lastHearthAt as string).getTime();
     expect(stamp).toBeGreaterThanOrEqual(before);
     expect(stamp).toBeLessThanOrEqual(after);
+
+    // grantXp('hearth-streak'): +30 xp from an unset (0) baseline never crosses the L2
+    // threshold (100), so this second patch carries no hp/level-up — just xp + the unchanged
+    // level default.
+    expect(saveMock.mock.calls[1][0]).toEqual({ xp: 30, level: 1 });
 
     expect(dialogueRun).toHaveBeenCalledTimes(1);
     const conv = dialogueRun.mock.calls[0][0] as Conversation;

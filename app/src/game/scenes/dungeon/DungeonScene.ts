@@ -34,11 +34,13 @@ import {
   nodeState,
   type DungeonProgress,
 } from './roomFlow';
-import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText } from './specResolve';
+import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText, rewardXp } from './specResolve';
 import { VaultView, type NodeHandlers } from './VaultView';
 import { FIXTURE_PACK_ID } from '../../combat/fixtures';
 import devSpecJson from './__fixtures__/dev.dungeon.json';
 import devFactsJson from './__fixtures__/dev.facts.json';
+import { grantXp } from '../../progression/grant';
+import { levelUpRows } from '../../progression/ceremony';
 
 const PENDING_KEY = 'vaults:pendingOutcome';
 const PACKID_KEY = 'vaults:packId';
@@ -488,6 +490,10 @@ export class DungeonScene extends Phaser.Scene {
       this.busy = false;
       return { transitioned: false };
     }
+    // Wave 4 Task 5 — accumulated across this room's gate drill (if any) + its own room-clear
+    // grant; ONE ceremony card presents inside this post-combat/boss beat sequence
+    // (leveling.spec.ts's beat law), never per-source.
+    const pending: number[] = [];
 
     await this.applyHp(-outcome.hpLost);
 
@@ -546,10 +552,11 @@ export class DungeonScene extends Phaser.Scene {
       if (gate.transitioned) return { transitioned: true };
       this.progress = markRoomCleared(this.progress, room.id, this.spec.rooms);
       await services.save.save({ dungeon: this.progress });
+      pending.push(...gate.pending);
     }
 
     if (room.boss) {
-      await this.bossVictory(outcome);
+      await this.bossVictory(outcome, pending);
       return { transitioned: true };
     }
 
@@ -568,8 +575,27 @@ export class DungeonScene extends Phaser.Scene {
     // §3.2 — fold this room into the run harvest; the Night's Ledger shows ONLY at run end (boss
     // victory / retreat), never mid-crawl (a per-room card would be five interruptions per vault).
     this.accrueHarvest(outcome, gold);
+    // Wave 4 Task 5, wire 3 — flawless (no HP lost) pays more than a bloodied clear.
+    pending.push(...grantXp(outcome.hpLost === 0 ? 'room-clear-flawless' : 'room-clear'));
+    await this.presentPendingLevelUp(pending);
     this.busy = false;
     return { transitioned: false };
+  }
+
+  /** Wave 4 Task 5 — presents the level-up ceremony for any levels accumulated this beat
+   *  (Constraint 6: ONE card, every level gained). Best-effort, matching runNightLedger's own
+   *  tolerance just below: a missing/stub overlay service must never strand the walk home.
+   *  No-op when nothing was gained (levelUpRows returns null). `this.auto` mirrors
+   *  runNightLedger's own auto-drive threading — the dev harness (?auto=full/win) can cross a
+   *  level threshold mid-run and must never hang on a click that won't come. */
+  private async presentPendingLevelUp(levels: number[]): Promise<void> {
+    const ceremony = levelUpRows(levels);
+    if (!ceremony) return;
+    try {
+      await services.showLevelUp(ceremony.rows, { auto: !!this.auto });
+    } catch {
+      /* best-effort: never block the surrounding beat */
+    }
   }
 
   /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). Returns the
@@ -644,8 +670,16 @@ export class DungeonScene extends Phaser.Scene {
   /** free_recall gate: pass (≥0.5) opens; miss costs HP with immediate retry; HP-out = Fade retreat.
    *  `outcome` is the room's already-won combat result (resolveCombat's caller), needed here so an
    *  HP-out mid-gate can fold it into the Night's Ledger harvest, same as any other run-ending retreat. */
-  private async runGate(room: DungeonRoom, outcome: CombatOutcome): Promise<{ transitioned: boolean }> {
+  private async runGate(
+    room: DungeonRoom,
+    outcome: CombatOutcome,
+  ): Promise<{ transitioned: boolean; pending: number[] }> {
     const gate = room.gate!;
+    // Wave 4 Task 5, wire 4 — the gate's own free_recall drill pays the same 'renewal' rule as
+    // the Wellspring (wire 1): quality === 1 ONLY, one grant per attempt. Alongside (not
+    // conflated with) the flat 'gate' grant on the pass branch below — both legitimate,
+    // accumulated together and returned for the caller's ONE combined ceremony card.
+    const pending: number[] = [];
     for (let attempt = 0; attempt < 20; attempt++) {
       const res = await services.runEncounter({
         context: 'drill',
@@ -660,9 +694,11 @@ export class DungeonScene extends Phaser.Scene {
       for (const fid of res.factIds) {
         await services.srs.record(fid, res.quality, res.encounterId, this.facts.get(fid)?.type);
       }
+      if (res.quality === 1) pending.push(...grantXp('renewal', { applyHp: true }));
       if (res.quality >= 0.5) {
         this.view.toast('The ward yields. The door grinds open.', 'good');
-        return { transitioned: false };
+        pending.push(...grantXp('gate'));
+        return { transitioned: false, pending };
       }
       await this.applyHp(-GATE_FAIL_HP);
       this.refreshStatus();
@@ -677,21 +713,30 @@ export class DungeonScene extends Phaser.Scene {
         // §3.2 the Night's Ledger — a gate HP-out is a run-ending retreat too (fun-review follow-up:
         // this path used to skip the ledger entirely). Mirror resolveCombat's own retreat branch:
         // fold this room's already-won combat in with no gold (no loot on a retreat), then show it.
+        // No ceremony on this path (a retreat's own toast + Night's Ledger already own this
+        // beat) — any renewal XP banked above this point is still persisted (grantXp writes
+        // immediately), only its card is skipped.
         this.accrueHarvest(outcome, 0);
         await this.runNightLedger('retreat', services.save.get().streak);
         this.scene.start('hamlet', { seed: this.seed });
-        return { transitioned: true };
+        return { transitioned: true, pending };
       }
     }
-    // safety valve — never hard-lock the crawl
+    // safety valve — never hard-lock the crawl. Not a documented 'gate' pass branch (task-5-
+    // brief.md wire 4 scopes to the toast above), so no additional XP here; any renewal grants
+    // already accumulated above still ride home in `pending`.
     this.view.toast('The ward finally yields.', 'good');
-    return { transitioned: false };
+    return { transitioned: false, pending };
   }
 
-  private async bossVictory(outcome: CombatOutcome): Promise<void> {
+  /** `pending` — levels already accumulated upstream this beat (resolveCombat's own gate-drill
+   *  renewals, if this boss room was also gated; Wave 4 Task 5) — merged with this method's own
+   *  boss/quest grants into ONE ceremony card, never a separate one per source. */
+  private async bossVictory(outcome: CombatOutcome, pending: number[] = []): Promise<void> {
     // already marked + persisted by resolveCombat right after combat victory (crucible V1-12)
     const streak = services.save.get().streak + 1;
-    const reward = (this.pack ? rewardText(bossQuest(this.pack)) : null) ?? DEV_REWARD;
+    const quest = this.pack ? bossQuest(this.pack) : undefined;
+    const reward = (quest ? rewardText(quest) : null) ?? DEV_REWARD;
 
     // Boss bounty: gold + the guaranteed Warden Signet + a boss-weighted trinket (inventory-handoff §4).
     const rng = mulberry32((this.seed + 104729) >>> 0);
@@ -705,10 +750,17 @@ export class DungeonScene extends Phaser.Scene {
       : ` The Warden yields ${loot.gold} coin and their signet.`;
 
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
+    // Wave 4 Task 5, wire 5 — the flat boss grant, then the quest's own pack-authored xp
+    // reward (specResolve.ts's rewardText keeps formatting the reward string; rewardXp reads
+    // the same {xp,item} shape's numeric half, now also GRANTED, not just displayed).
+    pending.push(...grantXp('boss'));
+    const questXp = rewardXp(quest);
+    if (questXp) pending.push(...grantXp('quest', { amount: questXp }));
     // §3.2 — fold the boss battle + bounty into the run harvest; the finale plays its full staged
-    // reveal FIRST, then the accumulated Night's Ledger, then home.
+    // reveal FIRST, then the level-up ceremony (if any), then the accumulated Night's Ledger, then home.
     this.accrueHarvest(outcome, loot.gold);
     await this.view.vaultOpensBeat(reward + lootLine, streak);
+    await this.presentPendingLevelUp(pending);
     await this.runNightLedger('victory', streak);
     this.scene.start('hamlet', { seed: this.seed });
   }
