@@ -180,6 +180,47 @@ async function driveToDeathsDoor(page: Page, timeoutMs = 75_000): Promise<void> 
   }
 }
 
+// Task 7, scenario (e) — the loot-advantage spend at the boss hoard. Cloned drive: the boss
+// XP pin's own sim-harness (leveling-grant-sequence.spec.ts) — `?scene=vaults&sim=1&auto=boss
+// &seed=7`, deliberately WITHOUT dev=1. dev=1 forces DungeonScene.useFixture() (this.pack =
+// null), and the packless fixture's own loot math is identical, but that file's own precedent
+// route (a real installed pack, sim=1 skips the fight, auto=boss clears rooms 1-5 without
+// entering them and drives straight to the boss) is the established, already-proven-safe rig
+// for a deterministic rng-chain assertion here — no reason to diverge. auto=boss means
+// offerLantern's `this.auto` branch always raises (Step 3): the run never waits on a manual
+// click, so this is the only loot beat the run produces (grantRoomLoot never fires along this
+// route — the pre-boss rooms are marked cleared, never entered).
+//
+// Expected outcome verified against the REAL economy.ts (not hand-derived) via a throwaway
+// vitest run during authoring: mulberry32((7 + 104729) >>> 0) — bossVictory's own seed
+// expression — rolls 'mossbound-locket' (uncommon) at edge:'none', but 'clerks-silver-nib'
+// (rare) at edge:'advantage' — a genuinely different, better outcome, so a build that silently
+// stays on a single roll (edge unthreaded) fails this pin on the trinket id, not a coincidence.
+type Inventory = { version: number; gold: number; stacks: Record<string, number> };
+
+/** leveling-grant-sequence.spec.ts's restoreState idiom, verbatim in shape: quiesce the page
+ *  first (a live boss-victory run's own persist writes can otherwise land AFTER a bare PUT and
+ *  poison whatever spec runs next in this shared, serial suite), then PUT-and-verify. Inventory
+ *  too, not just save — unlike scenarios (a)-(d) above, this route grants loot. */
+async function restoreLootState(page: Page, save: Save | null, inv: Inventory | null): Promise<void> {
+  const saveData: Save = save ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
+  const invData: Inventory = inv ?? { version: 1, gold: 20, stacks: {} };
+  await page.goto('about:blank');
+  for (let i = 0; i < 5; i++) {
+    await page.request.put('/api/state/save.json', { data: saveData });
+    await page.request.put('/api/state/inventory.json', { data: invData });
+    await new Promise((r) => setTimeout(r, 150));
+    const nowSave = (await page.request
+      .get('/api/state/save.json')
+      .then((r) => r.json())
+      .catch(() => undefined)) as Save | undefined;
+    if (nowSave?.scene === saveData.scene && (nowSave?.lanternLight ?? false) === (saveData.lanternLight ?? false)) {
+      return;
+    }
+  }
+  throw new Error('restoreLootState: save.json never settled on the restored snapshot');
+}
+
 test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
   test('hearth night-rest banks Lantern-light (Ch. IV grant)', async ({ page }) => {
     test.setTimeout(60_000);
@@ -423,6 +464,45 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
       expect(s?.lanternLight).toBe(false);
     } finally {
       await restoreSave(page, beforeSave);
+    }
+  });
+
+  test('boss hoard: raising the lantern grants advantage on the loot-rarity roll and spends the light', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeInv = await readState<Inventory>(page, 'inventory.json');
+
+    try {
+      // fixture: lanternLight held, a fresh purse, no dungeon progress (auto=boss marks its
+      // own pre-boss progress below) — the boss+quest sim-harness route (see file note above).
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+      await page.request.put('/api/state/inventory.json', {
+        data: { version: 1, gold: 20, stacks: {} },
+      });
+
+      await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+      // assert 1 (persistence law): the light is spent after the boss trove's loot beat.
+      const save = await waitForState<Save>(page, 'save.json', (s) => s?.lanternLight === false, 60_000);
+      expect(save?.lanternLight).toBe(false);
+
+      // assert 2: the deterministic advantaged outcome landed — the exact rare trinket the
+      // real rng chain rolls under edge:'advantage' for this seed (see file note above), never
+      // the un-advantaged uncommon roll.
+      const inv = await waitForState<Inventory>(
+        page,
+        'inventory.json',
+        (i) => (i?.stacks?.['clerks-silver-nib'] ?? 0) >= 1,
+        60_000,
+      );
+      expect(inv?.stacks?.['clerks-silver-nib']).toBe(1);
+      expect(inv?.stacks?.['mossbound-locket'], 'the un-advantaged uncommon roll did NOT land').toBeUndefined();
+    } finally {
+      await restoreLootState(page, beforeSave, beforeInv);
     }
   });
 });

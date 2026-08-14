@@ -671,6 +671,27 @@ export class VaultView {
     });
   }
 
+  /** Ch. IV loot-advantage prompt. Resolves 'raise' | 'keep'. */
+  showLanternChoice(troveName: string): Promise<'raise' | 'keep'> {
+    const s = this.scene;
+    const w = 500;
+    const h = 232;
+    const cont = this.openPanel(w, h);
+    const cx = W / 2;
+    const top = (H - h) / 2 + 28;
+    cont.add(this.eyebrow(cx, top, 'The lantern is lit'));
+    cont.add(s.add.text(cx, top + 22, `Raise the lantern over ${troveName}?`, { fontFamily: FONT, fontSize: '20px', color: hex(C.barkShadow), fontStyle: 'bold' }).setOrigin(0.5, 0));
+    cont.add(this.goldRule(cx, top + 54, 200));
+    return new Promise((resolve) => {
+      const pick = (v: 'raise' | 'keep') => {
+        this.clearOverlay();
+        resolve(v);
+      };
+      cont.add(this.button(cx, top + 84, 'Raise it — advantage on this trove', C.leaf, () => pick('raise')));
+      cont.add(this.button(cx, top + 136, 'Keep the light', C.timber, () => pick('keep')));
+    });
+  }
+
   private finishCard(cont: Phaser.GameObjects.Container, h: number, mode: CardMode, hint: string): Promise<void> {
     const s = this.scene;
     const cy = (H + h) / 2 - 30;
