@@ -48,7 +48,7 @@ import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
 // the task report as a deviation from the codebase's usual services-locator pattern.
 import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
-import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT } from '../lantern';
+import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT, heldLanternLight } from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -1583,9 +1583,9 @@ export class CombatScene extends Phaser.Scene {
 
     if (action === 'cast') this.hud.setDeliberating(true);
     // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
-    // catch below (which would fabricate a graded result for a question never shown).
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // catch below (which would fabricate a graded result for a question never shown). C6 —
+    // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
+    const held = heldLanternLight();
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1745,9 +1745,9 @@ export class CombatScene extends Phaser.Scene {
 
     if (artKind === 'free_recall') this.hud.setDeliberating(true);
     // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
-    // catch below (which would fabricate a graded result for a question never shown).
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // catch below (which would fabricate a graded result for a question never shown). C6 —
+    // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
+    const held = heldLanternLight();
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -3081,7 +3081,7 @@ export class CombatScene extends Phaser.Scene {
 
     if (outcome === 'victory') {
       this.hud.showToast('The foe falls, Keeper.', P.lanternGold);
-      this.hud.showBanner('Loot secured. Hearth streak climbs.', P.moss);
+      this.hud.showBanner('Loot secured. Vigil climbs.', P.moss);
       // crucible #5 — the streak bump used to persist here immediately (fire-and-forget,
       // independent of hp/loot), while hp/loot only ever settle later when the return
       // scene resumes and recovers the pending outcome (game-event + registry PENDING_KEY
@@ -3207,9 +3207,9 @@ export class CombatScene extends Phaser.Scene {
     // No fact exists anywhere (packless/fixture edge). Never trap the player behind a question
     // that cannot be asked — an unanswerable door stabilizes, which is the old retreat.
     if (!id) { this.stabilizeAtDoor(); return; }
-    // Ch. IV — guarded read (T4 review ruling): a save fault degrades to "no lantern".
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // Ch. IV — guarded read (T4 review ruling; C6 — extracted to lantern.ts's
+    // heldLanternLight): a save fault degrades to "no lantern".
+    const held = heldLanternLight();
     let result: EncounterResult;
     // Final-review A3 — hoisted so the catch below can see whichever fact was actually shown:
     // once the redraw branch runs, the player was asked about `alt`, not `id`.
@@ -3228,7 +3228,15 @@ export class CombatScene extends Phaser.Scene {
         // it the salted redraw can spend the light on the identical question.
         alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, [...result.redraw.shownFactIds, id]);
         if (this.destroyed || !this.dd) return;
-        if (alt) await services.save.save({ lanternLight: false });
+        // M4 — the party panel's lantern glyph (updateParty/refreshParty) stays visible
+        // through the whole door (reviveAtDoor already repaints it on the way out); unlike
+        // the two cast sites, nothing else in this round's remaining control flow calls
+        // refreshParty before the door might close, so a spend here would otherwise leave
+        // the glyph showing lit until some unrelated later refresh happened to fire.
+        if (alt) {
+          await services.save.save({ lanternLight: false });
+          this.refreshParty();
+        }
         result = await services.runEncounter({
           context: 'drill', kinds: DD_KINDS, factIds: [alt ?? id], packId: this.launch.packId,
           seed: roundSeed, flair: DEATHS_DOOR_TITLE,

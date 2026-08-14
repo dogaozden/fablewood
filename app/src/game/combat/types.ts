@@ -106,7 +106,7 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
   },
   wait: {
     kind: 'wait', label: 'End Turn', hotkey: '7', encounter: null, range: 0,
-    shape: 'self', tint: 0x8a8078, blurb: 'Hold position, end turn.',
+    shape: 'self', tint: 0x8a8078, blurb: 'Done for now — let the round pass.',
   },
   // Ch. VI action economy — forgoes the turn's action for +moveBudgetFor(u) (stance-aware:
   // halved under Careful Step, same as the turn-start grant). No tile to choose (shape:'self',

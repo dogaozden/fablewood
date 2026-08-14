@@ -6,6 +6,16 @@
  * pool is a single fact, is the one surface that re-draws for real: ddDraw with
  * LANTERN_REDRAW_SALT and an exclusion list.
  */
+import { services } from './contracts';
+
+/** The guarded read shared verbatim by all five spend sites (DungeonScene's loot offer,
+ *  HamletScene's Wellspring round, CombatScene's two cast sites + Death's Door): a
+ *  save-service fault must degrade to "no lantern held," never throw into the caller's own
+ *  encounter/loot flow (T4 review ruling, C6 extraction). */
+export function heldLanternLight(): boolean {
+  try { return services.save.get()?.lanternLight === true; } catch { return false; }
+}
+
 export interface RedrawPlan {
   /** true = an alternative exists; spend the lantern and present factIds.
    *  false = fate holds; lantern NOT consumed; factIds is the original pool. */

@@ -42,7 +42,7 @@ import {
 } from './content';
 import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
-import { planRedraw, FATE_HOLDS_LINE } from '../../lantern';
+import { planRedraw, FATE_HOLDS_LINE, heldLanternLight } from '../../lantern';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
 import { grantXp } from '../../progression/grant';
@@ -981,10 +981,10 @@ export class HamletScene extends Phaser.Scene {
         // a prior Wellspring visit this session) behind fresh alternatives, so a
         // stale snapshot can't just re-ask what an earlier pass already covered.
         const factIds = partitionByRecency(ordered, wellspringRecentFactIds);
-        // Ch. IV — guarded read (T4 review ruling): a save fault means "no lantern",
-        // it must never surface as a thrown round.
-        let held = false;
-        try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+        // Ch. IV — guarded read (T4 review ruling; C6 — extracted to lantern.ts's
+        // heldLanternLight): a save fault means "no lantern", it must never surface as a
+        // thrown round.
+        const held = heldLanternLight();
         let res = await services.runEncounter({
           context: 'drill',
           packId: this.packId ?? '', // @deprecated (EncounterRequest) — resolution is per-fact once drawReady

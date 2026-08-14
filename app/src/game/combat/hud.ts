@@ -213,11 +213,16 @@ export class CombatHud {
 
   showActionMenu(items: ActionItem[], onPick: (a: ActionKind) => void): void {
     this.menu.removeAll(true);
-    const gap = 6;
+    const gap = 4;
     // Fit the row to the canvas: 6 actions keep the 148px button; the 7th (Smite) shrinks
-    // them just enough to stay on-screen (≈129px) rather than overflow the 960px width.
-    const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
+    // them just enough to stay on-screen (≈132px) rather than overflow the 960px width.
+    const bw = Math.min(148, Math.floor((W - 12 - (items.length - 1) * gap) / items.length));
     this.lastMenuButtonWidth = bw;
+    // Task 5 — the row's floor at the full 10-button count (Ch. VI's Press On + Brace):
+    // labels must still render WHOLE (no "End Tu…"), so the label font itself shrinks a
+    // notch once bw can no longer spare 13px's worth of room, same spirit as bw's own
+    // shrink-to-fit above. Hints (below) stay free to ellipsize — that's still acceptable.
+    const labelSize = bw >= 130 ? 13 : bw >= 100 ? 12 : 11;
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {
@@ -232,17 +237,20 @@ export class CombatHud {
           .strokeRoundedRect(-bw / 2, -22, bw, 44, 8);
       };
       draw(false);
-      const icon = this.scene.add.image(-bw / 2 + 22, 0, ICON_KEYS[item.action]).setScale(0.9);
+      const icon = this.scene.add.image(-bw / 2 + 18, 0, ICON_KEYS[item.action]).setScale(0.9);
       // crucible v1 #11 — yesterday's Satchel-action commit made this an 8-button row (112px
       // each, down from 129px at 7); 3 of 8 labels and all 8 hint lines overflowed with no
       // visual indication of the cut. Clamp both to the button's own inner width, ellipsizing
       // rather than letting later buttons' opaque backgrounds silently paint over the tail.
-      const availW = bw / 2 - 6 - (-bw / 2 + 40);
-      const label = this.scene.add.text(-bw / 2 + 40, -9, '', {
-        fontFamily: FONT, fontSize: '13px', color: hex(item.enabled ? P.parchment : P.stoneGrey),
+      // Task 5 — the icon/text split tightened (was 22/40, pad 6) to reclaim width toward
+      // labelSize's own fix above; the icon's own position/scale are unchanged, so its
+      // clearance from the text is preserved, just shifted left with it.
+      const availW = bw / 2 - 4 - (-bw / 2 + 36);
+      const label = this.scene.add.text(-bw / 2 + 36, -9, '', {
+        fontFamily: FONT, fontSize: `${labelSize}px`, color: hex(item.enabled ? P.parchment : P.stoneGrey),
       });
       fitText(label, meta.label, availW);
-      const key = this.scene.add.text(-bw / 2 + 40, 5, '', {
+      const key = this.scene.add.text(-bw / 2 + 36, 5, '', {
         fontFamily: FONT, fontSize: '9px', color: hex(item.enabled ? P.lanternGold : P.stoneGrey),
       });
       fitText(key, `[${meta.hotkey}] ${item.reason ?? meta.blurb}`, availW);
@@ -284,7 +292,7 @@ export class CombatHud {
     if (keeper) lines.push(`Keeper  ${bar(keeper)} ${keeper.hp}/${keeper.maxHp}`);
     if (mira) lines.push(`Mira    ${bar(mira)} ${mira.hp}/${mira.maxHp}`);
     lines.push(status.miraBonusActive ? 'Mira: fighting fiercer (mastery)' : 'Mira: no bonus yet');
-    lines.push(`Hearth: ${status.streak}`);
+    lines.push(`Vigil: ${status.streak}`);
     lines.push(`Solace: ${status.graceAvailable ? 'ready' : 'spent'}`);
     this.panelText.setText(lines.join('\n'));
 
@@ -295,7 +303,7 @@ export class CombatHud {
     const lh = this.panelText.height / lines.length;
     this.graceDot.setFillStyle(status.graceAvailable ? P.lanternGold : P.stoneGrey)
       .setPosition(160, 10 + (lines.length - 0.5) * lh);
-    const si = lines.findIndex((l) => l.startsWith('Hearth'));
+    const si = lines.findIndex((l) => l.startsWith('Vigil'));
     if (this.streakIcon) {
       this.streakIcon.setVisible(status.streak > 0).setPosition(88, 10 + (si + 0.5) * lh);
     }
@@ -351,8 +359,10 @@ export class CombatHud {
    *  showActionMenu uses above — lets the tier flyout anchor itself above the pressed Art's
    *  button without showActionMenu needing to expose any new state. */
   getActionButtonX(items: ActionItem[], action: ActionKind): number {
-    const gap = 6;
-    const bw = Math.min(148, Math.floor((W - 20 - (items.length - 1) * gap) / items.length));
+    // Task 5 — gap/margin MUST mirror showActionMenu's own bw math exactly (byte-for-byte),
+    // or this anchors above the wrong button once the row's width changes.
+    const gap = 4;
+    const bw = Math.min(148, Math.floor((W - 12 - (items.length - 1) * gap) / items.length));
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {

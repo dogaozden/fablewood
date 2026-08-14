@@ -223,11 +223,12 @@ test('measured turn: move, Strike, the turn stays open, move again, then End Tur
 
   const menu = await actionMenuDebug(page);
   expect(menu[0]?.hint, "Strike's rendered hint shows the refusal reason, not its normal blurb").toContain('spent');
-  // Task 3 grew the row to 9 buttons (Press On) — narrow enough now that fitText ellipsizes
-  // "End Turn" itself ("End Tu…"), same graceful-degradation the longer Art labels already
-  // accept at 8. A prefix match proves the Ch. VI relabel (off 'Wait') survives without pinning
-  // an exact truncation point that's Task 5's own territory to address (see brief).
-  expect(menu[7]?.label, "the Wait slot reads 'End Turn…' (Ch. VI relabel)").toMatch(/^End/);
+  // Task 3 grew the row to 9 buttons (Press On), then Task 4 to 10 (Brace) — narrow enough
+  // that fitText used to ellipsize "End Turn" itself ("End Tu…"), same graceful-degradation
+  // the longer Art labels still accept. Task 5 reworked hud.ts's shrink/fitText math so every
+  // short action label (Strike/Smite/.../End Turn/Press On/Brace) renders WHOLE even at the
+  // full 10-button row — exact match now, not a prefix.
+  expect(menu[7]?.label, "the Wait slot reads 'End Turn' in full (Ch. VI relabel)").toBe('End Turn');
 
   // --- Leg 2: move again with the remainder (back to (4,4)) — proves the SAME leftover
   // budget is spendable AFTER acting, not just before.
@@ -312,14 +313,13 @@ test('measured turn: Press On grants +move and spends the action — Strike is n
 
   const menuAfter = await actionMenuDebug(page);
   expect(menuAfter[0]?.hint, "Strike reads 'spent' now the action is gone").toContain('spent');
-  // 9 buttons narrows the row enough that fitText ellipsizes "End Turn" ("End Tu…") — same
-  // graceful degradation the longer Art labels already show; a prefix match proves the slot,
-  // not the exact truncation point (Task 5's territory — see brief).
-  expect(menuAfter[7]?.label, 'the Wait/End Turn slot is still present, unmoved by the new button').toMatch(/^End/);
-  // Ch. VI Task 4 — Brace grew the row to 10 buttons, narrowing it further: "Press On" (which
-  // fit exactly at 9) now itself ellipsizes ("Press…"). Same fix as the End Turn line just
-  // above — a prefix match proves the slot survives, not the exact truncation point.
-  expect(menuAfter[8]?.label, 'Press On is still the 9th slot').toMatch(/^Press/);
+  // Task 5's hud.ts legibility rework (shrink/fitText math) keeps every short action label
+  // whole through the full 10-button row — exact match now, not a prefix ("End Tu…" used to
+  // be the ellipsized form here, same graceful degradation the longer Art labels still show).
+  expect(menuAfter[7]?.label, 'the Wait/End Turn slot is still present, unmoved by the new button').toBe('End Turn');
+  // Ch. VI Task 4 — Brace grew the row to 10 buttons. Task 5's rework keeps "Press On" whole
+  // there too (it used to ellipsize to "Press…" once the row passed 8 buttons).
+  expect(menuAfter[8]?.label, 'Press On is still the 9th slot').toBe('Press On');
   expect(menuAfter[8]?.hint, 'Press On itself reads spent too — one action per turn').toContain('spent');
 
   // Fix round 1 (Important 1) — Press On locks the stance: a Careful Step attempt ('c') right

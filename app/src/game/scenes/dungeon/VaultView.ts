@@ -327,7 +327,7 @@ export class VaultView {
    *  level-keyed now, so the pip count must scale with it or a higher-level pool overflows
    *  the drawn pips. */
   setStatus(hp: number, maxHp: number, streak: number, embers: number, level: number, lanternLight: boolean): void {
-    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Lv ${level}     Hearth Streak  ${streak}`);
+    this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Lv ${level}     Vigil  ${streak}`);
     const pipsLeftEdge = this.drawEmberPips(embers, emberMaxForLevel(level));
     this.drawLanternGlyph(pipsLeftEdge, lanternLight);
   }
@@ -800,7 +800,7 @@ export class VaultView {
     const title = s.add.text(cx, cy - 62, 'THE VAULT OPENS', { fontFamily: FONT, fontSize: '38px', color: hex(C.lanternGold) }).setOrigin(0.5).setDepth(303).setAlpha(0).setShadow(0, 3, hex(C.deepEmber), 12, false, true);
     const rule = s.add.rectangle(cx, cy - 26, 220, 2, C.amber, 0.8).setDepth(303).setAlpha(0);
     const line = s.add.text(cx, cy + 4, reward, { fontFamily: FONT, fontSize: '20px', color: hex(C.lanternGold), fontStyle: 'bold', align: 'center', wordWrap: { width: 640 } }).setOrigin(0.5).setDepth(303).setAlpha(0);
-    const streakT = s.add.text(cx, cy + 48, `Hearth Streak  ${streak}`, { fontFamily: FONT, fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
+    const streakT = s.add.text(cx, cy + 48, `Vigil  ${streak}`, { fontFamily: FONT, fontSize: '16px', color: hex(C.leafHi) }).setOrigin(0.5).setDepth(303).setAlpha(0);
 
     return new Promise((resolve) => {
       s.tweens.add({ targets: scrim, alpha: 1, duration: 300 });
