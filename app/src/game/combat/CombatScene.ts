@@ -1430,13 +1430,17 @@ export class CombatScene extends Phaser.Scene {
     const context = action === 'parley' ? 'parley' : vsBoss ? 'boss' : 'combat';
 
     if (action === 'cast') this.hud.setDeliberating(true);
+    // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
+    // catch below (which would fabricate a graded result for a question never shown).
+    let held = false;
+    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
         context, kinds: [kind], factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1,
-        lanternLight: services.save.get()?.lanternLight === true,
+        lanternLight: held,
       });
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
@@ -1568,6 +1572,10 @@ export class CombatScene extends Phaser.Scene {
     const dueSetAtCast = this.snapshotDueSet();
 
     if (artKind === 'free_recall') this.hud.setDeliberating(true);
+    // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
+    // catch below (which would fabricate a graded result for a question never shown).
+    let held = false;
+    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1575,7 +1583,7 @@ export class CombatScene extends Phaser.Scene {
       result = await services.runEncounter({
         context, kinds: [artKind], factIds, packId: this.launch.packId, seed: roundSeed, flair: spell.label,
         spellTier: spell.tier,
-        lanternLight: services.save.get()?.lanternLight === true,
+        lanternLight: held,
       });
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
