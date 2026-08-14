@@ -3050,12 +3050,18 @@ export class CombatScene extends Phaser.Scene {
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
     let streak = 0;
-    try { streak = services.save.get()?.streak ?? 0; } catch { /* offline */ }
+    let lanternLight = false;
+    try {
+      const save = services.save.get();
+      streak = save?.streak ?? 0;
+      lanternLight = save?.lanternLight ?? false;
+    } catch { /* offline */ }
     this.hud.updateParty(keeper, mira, {
       graceAvailable: this.graceAvailable,
       miraBonusActive: this.miraBonusActive(),
       streak,
       glow: this.glow.pips,
+      lanternLight,
     });
   }
 

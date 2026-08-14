@@ -287,7 +287,7 @@ export class DungeonScene extends Phaser.Scene {
   private refreshStatus(): void {
     const sd = services.save.get();
     const lvl = sd.level ?? 1;
-    this.view.setStatus(sd.hp, maxHpForLevel(lvl), sd.streak, embersOf(sd), lvl);
+    this.view.setStatus(sd.hp, maxHpForLevel(lvl), sd.streak, embersOf(sd), lvl, sd.lanternLight ?? false);
   }
 
   private teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[] {

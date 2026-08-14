@@ -843,6 +843,11 @@ export class HamletScene extends Phaser.Scene {
           embers: emberMaxForLevel(lvl),
           lastHearthAt: now.toISOString(),
           lastPlayed: now.toISOString(),
+          // Ch. IV — banking the hearth night grants the ONE Lantern-light (binary:
+          // true stays true, no stockpiling). Grant lives in THIS patch only — never
+          // in grantXp (xp/level single-writer) and never keyed off save.streak
+          // (Wellspring/boss's counter is a different mechanic; controller ruling W5).
+          lanternLight: true,
         });
       } catch {
         /* save may be a stub */

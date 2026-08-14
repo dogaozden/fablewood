@@ -20,6 +20,10 @@ const STRIP_Y = 300;
 const TRIM_BTN_W = 176;
 const TRIM_BTN_H = 24;
 const TRIM_BTN_GAP = 14;
+/** Ch. IV — the lantern glyph's ring radius and its gap from the Ember pips' left edge
+ *  (matches TRIM_BTN_GAP/gapFromText's 14px convention for this header-strip cluster). */
+const LANTERN_GLYPH_R = 6;
+const LANTERN_GLYPH_GAP = 14;
 /** Match the encounters overlay's parchment type (encounters/styles.ts) so the
  * two card families read as one system. */
 const FONT = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
@@ -46,6 +50,7 @@ export class VaultView {
   private headerText?: Phaser.GameObjects.Text;
   private statusText?: Phaser.GameObjects.Text;
   private emberPips?: Phaser.GameObjects.Graphics;
+  private lanternGlyph?: Phaser.GameObjects.Graphics;
   private trimButton?: Phaser.GameObjects.Container;
   private tooltipCont?: Phaser.GameObjects.Container;
   private tooltipBg?: Phaser.GameObjects.Graphics;
@@ -99,9 +104,11 @@ export class VaultView {
       .setOrigin(1, 0.5)
       .setDepth(6);
     this.emberPips = s.add.graphics().setDepth(6);
+    this.lanternGlyph = s.add.graphics().setDepth(6);
     // Trim the Lantern — beside the Ember pips it spends (fix round 1). Built once, repositioned
-    // in drawEmberPips() alongside the pips it anchors to (same reason the pips themselves
-    // recompute off statusText.width every call: hp/streak digit counts shift the whole line).
+    // in drawLanternGlyph() alongside the pips/glyph it anchors to (same reason the pips
+    // themselves recompute off statusText.width every call: hp/streak digit counts shift the
+    // whole line).
     this.trimButton = this.button(0, 0, 'Trim the Lantern (1 Ember)', C.ember, onTrim, {
       w: TRIM_BTN_W,
       h: TRIM_BTN_H,
@@ -319,18 +326,20 @@ export class VaultView {
    *  this wave). Also drives the Ember pip TOTAL (see drawEmberPips): the cap itself is
    *  level-keyed now, so the pip count must scale with it or a higher-level pool overflows
    *  the drawn pips. */
-  setStatus(hp: number, maxHp: number, streak: number, embers: number, level: number): void {
+  setStatus(hp: number, maxHp: number, streak: number, embers: number, level: number, lanternLight: boolean): void {
     this.statusText?.setText(`Party  ${Math.max(0, hp)}/${maxHp}     Lv ${level}     Hearth Streak  ${streak}`);
-    this.drawEmberPips(embers, emberMaxForLevel(level));
+    const pipsLeftEdge = this.drawEmberPips(embers, emberMaxForLevel(level));
+    this.drawLanternGlyph(pipsLeftEdge, lanternLight);
   }
 
   /** Ember pips beside the status line — modeled on combat hud's glowPips loop
    *  (hud.ts:301-311): diamonds become small warm dots, filled up to `embers` of
    *  `emberMax` (Wave 4 — the caller's emberMaxForLevel(level) read, no longer a flat
    *  constant). Wordless (the line is already dense) and re-anchored off the status text's
-   *  live width every call, so it never overlaps as hp/level/streak digit counts change. */
-  private drawEmberPips(embers: number, emberMax: number): void {
-    if (!this.emberPips || !this.statusText) return;
+   *  live width every call, so it never overlaps as hp/level/streak digit counts change.
+   *  Returns the pips' own left edge — drawLanternGlyph anchors past it. */
+  private drawEmberPips(embers: number, emberMax: number): number {
+    if (!this.emberPips || !this.statusText) return 0;
     const pipR = 4;
     const pipGap = 3;
     const gapFromText = 14;
@@ -345,9 +354,27 @@ export class VaultView {
       this.emberPips.fillStyle(filled ? C.ember : C.shadowPlum, 1).fillCircle(cx, y, pipR);
       this.emberPips.lineStyle(1, C.outline, 1).strokeCircle(cx, y, pipR);
     }
-    // beside the pips, growing further left — same right-anchored-cluster layout as the pips
-    // themselves relative to statusText.
-    this.trimButton?.setPosition(pipsLeftEdge - TRIM_BTN_GAP - TRIM_BTN_W / 2, y);
+    return pipsLeftEdge;
+  }
+
+  /** Ch. IV — the lantern glyph past the Ember pips' extent: lit when Lantern-light is held,
+   *  guttered when not (chapter UI text). Same ring-and-diamond glyph as combat hud's
+   *  lanternGlyph (hud.ts), re-anchored off statusText's live width exactly as the pips are
+   *  (via pipsLeftEdge, drawEmberPips's own return). Also repositions the Trim button — it
+   *  sits beside THIS glyph now, same "growing further left" cluster layout the pips used. */
+  private drawLanternGlyph(pipsLeftEdge: number, lanternLight: boolean): void {
+    if (!this.lanternGlyph || !this.statusText) return;
+    const y = this.statusText.y;
+    const gx = pipsLeftEdge - LANTERN_GLYPH_GAP - LANTERN_GLYPH_R;
+    this.lanternGlyph.clear();
+    this.lanternGlyph.lineStyle(1.5, lanternLight ? C.lanternGold : C.stone, lanternLight ? 1 : 0.5)
+      .strokeCircle(gx, y, LANTERN_GLYPH_R);
+    diamond(this.lanternGlyph, gx, y, 3.5, lanternLight ? C.lanternGold : C.shadowPlum, true);
+    this.lanternGlyph.setAlpha(lanternLight ? 1 : 0.55);
+
+    // beside the glyph, growing further left — same right-anchored-cluster layout the pips use.
+    const glyphLeftEdge = gx - LANTERN_GLYPH_R;
+    this.trimButton?.setPosition(glyphLeftEdge - TRIM_BTN_GAP - TRIM_BTN_W / 2, y);
     this.trimButton?.setVisible(true); // first real placement — no longer clipped at the origin
   }
 
@@ -776,6 +803,15 @@ export class VaultView {
       });
     });
   }
+}
+
+/** A small diamond (rotated square) at (x,y) — the lantern glyph's flame, same helper as
+ *  combat hud's diamond() (hud.ts). `fill:true` fills with `color`; `fill:false` strokes the
+ *  outline in `color` instead. */
+function diamond(g: Phaser.GameObjects.Graphics, x: number, y: number, r: number, color: number, fill: boolean): void {
+  const pts = [{ x, y: y - r }, { x: x + r, y }, { x, y: y + r }, { x: x - r, y }];
+  if (fill) g.fillStyle(color, 1).fillPoints(pts, true);
+  else g.lineStyle(1, color, 1).strokePoints(pts, true);
 }
 
 /** Deterministic PRNG so dust/flicker are repeatable across seeded shots. */
