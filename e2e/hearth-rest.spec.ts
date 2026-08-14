@@ -128,8 +128,12 @@ test.describe('hearth night-rest (Wave 3)', () => {
     try {
       // Legacy shape: a pre-Wave-3 save — embers/lastHearthAt are entirely absent (not just
       // falsy), the additive-field regression guard (contracts.ts's embers?/lastHearthAt?).
+      // streak: 4 (distinguishable from 0) so Task 5's Vigil break law is also pinned here:
+      // an absent lastHearthAt is legacy GRACE, never a break — the streak must survive
+      // untouched, not get snapped to 0 by a break-detector that mistook "never rested" for
+      // "missed a night."
       await page.request.put('/api/state/save.json', {
-        data: { scene: 'hamlet', hp: 3, streak: 0, lastPlayed: '' },
+        data: { scene: 'hamlet', hp: 3, streak: 4, lastPlayed: '' },
       });
 
       await page.goto('/?scene=hamlet&seed=7');
@@ -145,6 +149,7 @@ test.describe('hearth night-rest (Wave 3)', () => {
       expect(after?.hp, 'legacy save still gets a first rest (heal to full)').toBe(16);
       expect(after?.embers, 'legacy save still gets embers refilled').toBe(2);
       expect(after?.lastHearthAt, 'legacy save still gets a lastHearthAt stamp').toBeTruthy();
+      expect(after?.streak, 'absent lastHearthAt is grace, not a break — streak untouched').toBe(4);
     } finally {
       await restoreSave(page, beforeSave);
     }

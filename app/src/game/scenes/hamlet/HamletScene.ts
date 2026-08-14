@@ -836,15 +836,47 @@ export class HamletScene extends Phaser.Scene {
     const now = new Date();
     let lastHearthAt: string | undefined;
     let lvl = 1;
+    let streak = 0;
     try {
       const save = services.save.get();
       lastHearthAt = save.lastHearthAt;
       lvl = save.level ?? 1;
+      streak = save.streak;
     } catch {
       /* no save yet — never rested, canRestTonight(undefined, now) already says so */
     }
 
     if (canRestTonight(lastHearthAt, now)) {
+      // Ch. VII amendment — the Vigil break law: a missed calendar hearth-night snaps the
+      // chain, detected lazily right here at the next rest (never enforced eagerly). Reuses
+      // canRestTonight's OWN day-boundary math (imported, never re-derived): last rested
+      // wasn't YESTERDAY either means at least one full night was skipped. Absent
+      // lastHearthAt (never rested) is legacy grace, not a break — short-circuits below
+      // before canRestTonight is even asked about yesterday.
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const broken = !!lastHearthAt && canRestTonight(lastHearthAt, yesterday);
+      let vigil: 'broken' | 'warded' | undefined;
+      let brokenStreak: number | undefined;
+      if (broken) {
+        let warded = false;
+        try {
+          // Ward of Focus — passive, never armed (combat/aids.ts's AidKind deliberately
+          // excludes it); its only mechanism is this remove. The remove IS the check: false
+          // (no write) means none held — atomic, so this doubles as spend-before-benefit.
+          warded = await services.inventory.removeItem('ward-of-focus', 1);
+        } catch {
+          /* inventory may be a stub — no ward available */
+        }
+        if (warded) {
+          vigil = 'warded';
+          brokenStreak = streak + 1; // the held streak, plus tonight's own bank
+        } else {
+          vigil = 'broken';
+          brokenStreak = 0;
+        }
+      }
+
       try {
         // Wave 4 — the hearth-rest patch goes level-keyed: the old flat HP/Ember caps died,
         // replaced by the single seam every cap reads (progression/xp.ts).
@@ -858,6 +890,9 @@ export class HamletScene extends Phaser.Scene {
           // in grantXp (xp/level single-writer) and never keyed off save.streak
           // (Wellspring/boss's counter is a different mechanic; controller ruling W5).
           lanternLight: true,
+          // Ch. VII amendment — the break law rides this SAME patch (single-write law);
+          // absent when the vigil wasn't broken tonight (untouched, exactly as shipped).
+          ...(brokenStreak === undefined ? {} : { streak: brokenStreak }),
         });
       } catch {
         /* save may be a stub */
@@ -866,7 +901,7 @@ export class HamletScene extends Phaser.Scene {
       // here, one grant per banked hearth night, immediately after the rest patch carrying
       // lastHearthAt lands. This wire touches save.streak in NO direction.
       const pending = grantXp('hearth-streak');
-      await this.dialogue.run(hearthRestConv());
+      await this.dialogue.run(hearthRestConv(vigil));
       await this.presentPendingLevelUp(pending);
       return;
     }

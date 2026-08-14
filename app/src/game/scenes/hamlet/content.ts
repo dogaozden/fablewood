@@ -118,13 +118,18 @@ export function cottageConv(alreadyRested?: boolean): Conversation {
 
 /** The Hearth's night-rest beat — plays instead of cottageConv() when canRestTonight() is
  *  true; the party heals in full and Embers refill (rest/embers.ts). Title stays the
- *  Cottage's own: the hearth lives inside it, not a separate speaker. */
-export function hearthRestConv(): Conversation {
+ *  Cottage's own: the hearth lives inside it, not a separate speaker. `vigil` appends the
+ *  Ch. VII amendment's break-law line: 'broken' when a missed night snapped the streak,
+ *  'warded' when Ward of Focus caught the break instead; absent when the vigil was never
+ *  broken (the normal, unbroken-cadence rest — no line appended, as shipped). */
+export function hearthRestConv(vigil?: 'broken' | 'warded'): Conversation {
   return {
     speaker: "Keeper's Cottage",
     pages: [
       'You bank the hearth, and the night keeps its side of the bargain. The party is whole; the embers are banked.',
       'The lantern drinks the hearthflame — its light is yours to spend.',
+      ...(vigil === 'broken' ? ['The vigil lapsed — the chain begins anew.'] : []),
+      ...(vigil === 'warded' ? ['The ward cracks — your vigil holds.'] : []),
     ],
   };
 }

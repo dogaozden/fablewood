@@ -1,5 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, currentScene, readState, waitForState, canvasClick } from './helpers';
+import {
+  waitReady,
+  currentScene,
+  readState,
+  waitForState,
+  canvasClick,
+  waitHamletPlayer,
+  warpHamletTo,
+  tapKey,
+} from './helpers';
 // Fix round 1 (task-4-review.md M1) — pure, no-Phaser module (CombatScene.ts's own header calls
 // grid/initiative/damage/boss/ai "the pure logic modules"), safe to import directly in a node
 // test process. Used once below to assert the damage pin's grace-exclusion precondition
@@ -131,6 +140,65 @@ async function seedSrsBaseline(page: Page): Promise<void> {
   facts[REVIVE_FACT] = { box: 1, next_due: now - 999_999_999, history: [] };
   const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
   expect(res.ok(), 'seeded state/srs.json through the dev bridge').toBe(true);
+}
+
+// Ch. VII Mira's Stall, Task 5 (Vigil break law + Ward of Focus) — hearth territory. Clones
+// hearth-rest.spec.ts's own Save type + Cottage conversation choreography (dialogueBodyText/
+// runCottageConversation/restoreSave) rather than importing across files: the established
+// own-file helper-clone convention (combat-magic.spec.ts / lantern-light.spec.ts precedent).
+type Save = {
+  scene?: string;
+  hp?: number;
+  streak?: number;
+  lastPlayed?: string;
+  embers?: number;
+  lastHearthAt?: string;
+};
+
+async function restoreSave(page: Page, save: Save | null): Promise<void> {
+  const data: Save = save ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
+  await page.request.put('/api/state/save.json', { data });
+}
+
+/** Read the live DialogueBox's currently-rendered page text (hearth-rest.spec.ts's own
+ *  backdoor — TS `private` is erased at runtime; no purpose-built e2e getter exists). */
+async function dialogueBodyText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const h = g?.scene?.getScene?.('hamlet') as
+      | { dialogue?: { bodyText?: { text?: string } } }
+      | undefined;
+    return h?.dialogue?.bodyText?.text ?? '';
+  });
+}
+
+/** Open the Cottage conversation, skip every page's typewriter, and close it —
+ *  hearth-rest.spec.ts's own choreography verbatim (2N+1 taps for an N-page, no-choice
+ *  dialogue). Returns the last page's fully-shown text, read right before the closing tap. */
+async function runCottageConversation(page: Page, pageCount: number): Promise<string> {
+  await tapKey(page, 'e'); // open (page 1 starts typing)
+  await page.waitForTimeout(250);
+  await tapKey(page, 'e'); // skip page 1's typewriter
+  await page.waitForTimeout(200);
+  for (let p = 1; p < pageCount; p++) {
+    await tapKey(page, 'e'); // advance to the next page (starts typing)
+    await page.waitForTimeout(250);
+    await tapKey(page, 'e'); // skip its typewriter
+    await page.waitForTimeout(200);
+  }
+  const lastPageText = await dialogueBodyText(page);
+  await tapKey(page, 'e'); // the closing tap
+  await page.waitForTimeout(200);
+  return lastPageText;
+}
+
+/** A fixture lastHearthAt exactly N calendar days before today (LOCAL setDate arithmetic —
+ *  the same calendar-day technique the break law itself reuses from canRestTonight, so the
+ *  fixture and the implementation can never disagree about what "N days ago" means). */
+function daysAgoIso(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString();
 }
 
 // Ch. VII Mira's Stall, Task 2 (arming-model amendment): the combat Satchel used to filter
@@ -543,4 +611,99 @@ test('armed Second Wind Seal retries a failed cast; the retry drives damage, the
   const history = srs?.facts?.[REVIVE_FACT]?.history ?? [];
   expect(history.length, 'exactly one Ledger row — the original miss, no second row for the retry').toBe(1);
   expect(history[0]?.quality, "the standing row is the ORIGINAL miss's quality").toBe(0);
+});
+
+// Ch. VII Mira's Stall, Task 5 scenario d: the Vigil break law — a missed calendar
+// hearth-night (gap > 1 night since lastHearthAt, per canRestTonight's own day-boundary
+// math) snaps save.streak to 0 at the next rest, with NO ward held. Detected lazily in
+// doCottage, not enforced eagerly (Global Constraint 4).
+test('a missed night with no Ward of Focus snaps the streak to 0', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<Save>(page, 'save.json');
+  const beforeInv = await readState<{ gold?: number; stacks?: Record<string, number> }>(
+    page, 'inventory.json',
+  );
+
+  try {
+    // Fixture: rested 3 calendar days ago (a two-night gap — broken), a distinguishable
+    // streak (7) so "snapped to 0" is unambiguous, no ward held.
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 3, embers: 0, lastHearthAt: daysAgoIso(3), streak: 7, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 0, stacks: {} } });
+
+    await page.goto('/?scene=hamlet&seed=7');
+    await waitReady(page, 'hamlet');
+    await waitHamletPlayer(page);
+
+    const warped = await warpHamletTo(page, 'cottage');
+    expect(warped, 'warp hook parked the Keeper at the Cottage').toBe(true);
+
+    // hearthRestConv's 2 base pages + the break line (Ch. VII amendment) = 3 pages.
+    const lastLine = await runCottageConversation(page, 3);
+    expect(lastLine.replace(/\s+/g, ' '), 'the break line is the verbatim amendment copy').toBe(
+      'The vigil lapsed — the chain begins anew.',
+    );
+
+    const after = await waitForState<Save>(page, 'save.json', (s) => s?.streak === 0);
+    expect(after?.streak, 'the missed night snapped the chain to 0').toBe(0);
+    expect(after?.hp, 'the rest itself still banks normally').toBe(16);
+    expect(after?.lastHearthAt, 'lastHearthAt still stamps tonight').toBeTruthy();
+
+    await page.screenshot({ path: `${EV}/miras-stall-vigil-break.png` });
+  } finally {
+    await restoreSave(page, beforeSave);
+    await page.request.put('/api/state/inventory.json', {
+      data: beforeInv ?? { version: 1, gold: 0, stacks: {} },
+    });
+  }
+});
+
+// Ch. VII Mira's Stall, Task 5 scenario e: the SAME broken fixture as scenario d, but a Ward
+// of Focus is held — the ward intercepts the break, holds the chain at its prior value, and
+// tonight's own bank still proceeds on top (7 held + 1 tonight = 8). The ward is spent doing
+// it (spend-before-benefit — removed before the save patch composes).
+test('a missed night WITH Ward of Focus holds the chain and consumes the ward', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<Save>(page, 'save.json');
+  const beforeInv = await readState<{ gold?: number; stacks?: Record<string, number> }>(
+    page, 'inventory.json',
+  );
+
+  try {
+    // Same broken fixture as scenario d — the ward is the ONLY difference, isolating its
+    // own effect from the break-detection itself.
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 3, embers: 0, lastHearthAt: daysAgoIso(3), streak: 7, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { 'ward-of-focus': 1 } },
+    });
+
+    await page.goto('/?scene=hamlet&seed=7');
+    await waitReady(page, 'hamlet');
+    await waitHamletPlayer(page);
+
+    const warped = await warpHamletTo(page, 'cottage');
+    expect(warped, 'warp hook parked the Keeper at the Cottage').toBe(true);
+
+    // hearthRestConv's 2 base pages + the ward line (Ch. VII amendment) = 3 pages.
+    const lastLine = await runCottageConversation(page, 3);
+    expect(lastLine.replace(/\s+/g, ' '), 'the ward line is the verbatim amendment copy').toBe(
+      'The ward cracks — your vigil holds.',
+    );
+
+    const after = await waitForState<Save>(page, 'save.json', (s) => s?.streak === 8);
+    expect(after?.streak, 'the ward held the chain (7) and banked tonight (+1) = 8').toBe(8);
+
+    const inv = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+    expect(inv?.stacks?.['ward-of-focus'] ?? 0, 'the ward is consumed').toBe(0);
+
+    await page.screenshot({ path: `${EV}/miras-stall-vigil-warded.png` });
+  } finally {
+    await restoreSave(page, beforeSave);
+    await page.request.put('/api/state/inventory.json', {
+      data: beforeInv ?? { version: 1, gold: 0, stacks: {} },
+    });
+  }
 });
