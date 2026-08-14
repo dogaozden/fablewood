@@ -31,6 +31,34 @@ export const XP_AMOUNTS: Record<XpSource, number> = {
 };
 
 /**
+ * The values THIS module last computed, held only while its own save write is still in flight.
+ *
+ * Why it exists (Wave 4 final review, C1): services.save.get() is a synchronous cache read and
+ * ObjectStore.save() (srs/store.ts) assigns that cache only at the END of its awaited
+ * getState→putState round trip, while grantXp fires its write WITHOUT awaiting. So two grants in
+ * one synchronous block both read the pre-first-grant cache, both build an ABSOLUTE xp patch, and
+ * the serialized write chain lets the second silently overwrite the first — the first grant's XP
+ * destroyed, and its level re-announced by the second. Two shipped sequences do exactly that
+ * (DungeonScene.runGate's renewal-then-gate pass branch; bossVictory's boss-then-quest pair), and
+ * HamletScene's doWellspring/doAmendments loops are the same shape, safe today only because a
+ * human click outlasts a save round trip. Reading this baseline instead of the lagging cache
+ * makes a SEQUENCE of grants safe at the seam, so no call site has to know about the hazard.
+ *
+ * SINGLE-WRITER ASSUMPTION (xp/level): sound only because grant.ts is the sole writer of xp and
+ * level — the module contract stated at the top of this file, verified by grepping every
+ * services.save.save() call site in app/src (they patch hp/scene/dungeon/streak/embers/lastPlayed,
+ * never xp or level). If that ever stops being true, this baseline goes stale and must be dropped.
+ *
+ * hp is NOT single-writer (CombatScene's three sync sites, DungeonScene.applyHp, consume.ts all
+ * write it), so it is carried only as far as it must be: the level-up bump of a LATER grant in the
+ * same tick, which would otherwise re-bump from the same stale pool. That is also why the baseline
+ * is released the moment the last grant write settles — from then on the store's cache is freshest
+ * again, and a foreign hp write must win.
+ */
+let pending: { xp: number; hp?: number } | null = null;
+let pendingWrites = 0;
+
+/**
  * Grants XP from `source` and returns the levels gained (empty = no level-up ceremony).
  * Writes exactly one save patch: { xp, level, hp? }. hp is included only when a level was
  * gained AND opts.applyHp !== false, clamped to maxHpForLevel(newLevel) — the applyHp:false
@@ -55,18 +83,31 @@ export function grantXp(source: XpSource, opts?: { amount?: number; applyHp?: bo
     const requested = source === 'quest' ? (opts?.amount ?? 0) : XP_AMOUNTS[source];
     const amount = Number.isFinite(requested) && requested > 0 ? requested : 0;
 
+    // `pending` (see above) is the freshest value whenever an earlier grant's write from this
+    // same tick has not landed in the cache yet; the cache is authoritative the rest of the time.
     const save = services.save.get();
-    const { xp, levelsGained } = awardXp(save.xp ?? 0, amount);
+    const { xp, levelsGained } = awardXp(pending?.xp ?? save.xp ?? 0, amount);
     const level = levelForXp(xp);
 
     const patch: Partial<SaveData> = { xp, level };
     if (levelsGained.length > 0 && opts?.applyHp !== false) {
-      patch.hp = Math.min(save.hp + 2 * levelsGained.length, maxHpForLevel(level));
+      patch.hp = Math.min((pending?.hp ?? save.hp) + 2 * levelsGained.length, maxHpForLevel(level));
     }
 
-    void services.save.save(patch).catch((err) => {
-      console.warn('[progression] grantXp failed — dropping this XP grant', err);
-    });
+    // A grant that patches no hp (no level gained, or applyHp:false) leaves an earlier grant's
+    // in-flight hp standing as the baseline rather than reverting to the cache behind it.
+    const carriedHp = patch.hp ?? pending?.hp;
+    const write = services.save.save(patch);
+    pending = { xp, hp: carriedHp };
+    pendingWrites += 1;
+    void write
+      .catch((err) => {
+        console.warn('[progression] grantXp failed — dropping this XP grant', err);
+      })
+      .finally(() => {
+        // Last write settled → the store's cache now holds it; stop shadowing it.
+        if ((pendingWrites -= 1) === 0) pending = null;
+      });
     return levelsGained;
   } catch (err) {
     console.warn('[progression] grantXp failed — dropping this XP grant', err);

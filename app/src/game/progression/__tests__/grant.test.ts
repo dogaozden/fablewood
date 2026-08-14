@@ -112,3 +112,120 @@ describe('grantXp', () => {
     expect(patches).toEqual([{ xp: 100, level: 2 }]);              // no hp key at all
   });
 });
+
+/**
+ * Wave 4 final review, C1 — TWO grants in ONE synchronous block against a save whose save() is
+ * genuinely async. This is the shape the whole suite missed: every other case above installs a
+ * fake whose save() mutates immediately, so the "cache lags the in-flight write" window that the
+ * real SaveStore has (srs/store.ts's ObjectStore.save() assigns this.cache only after an awaited
+ * getState→putState round trip) never opened, and the two shipped call sites that grant twice per
+ * tick — DungeonScene.runGate's renewal-then-gate pass branch and bossVictory's boss-then-quest
+ * pair — both silently destroyed the first grant's XP and re-announced its level.
+ *
+ * Expected values are the reviewer's own proof table, verified against the real modules:
+ * quality-1 gate pass 0 → 15 · 95 → 110 with ceremony [2] once · boss+quest 0 → 650 (vc-law's
+ * bossQuest resolves to q.vaults.warden, reward.xp 500) with ceremony [2,3] and no duplicate.
+ */
+describe('grantXp — a SEQUENCE of grants in one tick (C1 regression)', () => {
+  /** consume.test.ts's makeFakeSave(hp, delayMs) shape, reused rather than reinvented (the
+   *  reviewer's own pointer): get() is a synchronous cache read, save() performs a real async
+   *  round trip BEFORE the cache is updated — the one property that reproduces C1. Writes are
+   *  serialized on a chain, like ObjectStore's own writeChain, so a later patch merges over an
+   *  earlier one exactly as the real store's `{ ...base, ...patch }` does. */
+  function makeAsyncSave(over: Record<string, unknown>, delayMs: number) {
+    let cache: Record<string, unknown> = makeSave(over);
+    const patches: Record<string, unknown>[] = [];
+    let chain: Promise<void> = Promise.resolve();
+    return {
+      patches,
+      ready: async () => {},
+      get: () => cache as ReturnType<typeof makeSave> & { xp?: number; level?: number },
+      save(patch: Record<string, unknown>) {
+        patches.push(patch);
+        chain = chain.then(async () => {
+          await new Promise((r) => setTimeout(r, delayMs));
+          cache = { ...cache, ...patch };
+        });
+        return chain;
+      },
+    };
+  }
+
+  /** Let every queued write settle, so the cache is authoritative again. */
+  const drain = (delayMs: number) => new Promise((r) => setTimeout(r, delayMs * 4 + 20));
+
+  function install(over: Record<string, unknown>, delayMs = 15) {
+    const fake = makeAsyncSave(over, delayMs);
+    // consume.test.ts's own install-by-cast idiom (services is a bare mutable registry).
+    (services as unknown as { save: typeof fake }).save = fake;
+    return fake;
+  }
+
+  it('a clean gate pass banks BOTH grants: renewal(+5) then gate(+10) from 0 reaches 15', async () => {
+    const fake = install({ xp: 0 });
+
+    // DungeonScene.runGate's pass branch, verbatim in shape: no await between the two.
+    const pending = [...grantXp('renewal', { applyHp: true }), ...grantXp('gate')];
+
+    expect(pending, 'no level crossed on the way to 15').toEqual([]);
+    expect(fake.patches.map((p) => p.xp), 'the second grant builds on the first, not on 0').toEqual([5, 15]);
+    await drain(15);
+    expect(fake.get().xp, 'both grants are banked — XP is never lost').toBe(15);
+  });
+
+  it('a gate pass that crosses a level announces it ONCE: 95 → 110, ceremony [2]', async () => {
+    const fake = install({ xp: 95, hp: 10 });
+
+    const pending = [...grantXp('renewal', { applyHp: true }), ...grantXp('gate')];
+
+    expect(pending, 'Level 2 listed once, not once per grant in the tick').toEqual([2]);
+    await drain(15);
+    expect(fake.get().xp).toBe(110);
+    expect(fake.get().level).toBe(2);
+    expect(fake.get().hp, '+2 for the one level actually gained (10 → 12), not twice').toBe(12);
+  });
+
+  it('a boss victory with a quest reward banks both: 0 → 650, ceremony [2,3], hp 16 → 20', async () => {
+    const fake = install({ xp: 0, hp: 16 });
+
+    // DungeonScene.bossVictory, verbatim in shape: the flat boss grant, then the pack's quest xp.
+    const pending = [...grantXp('boss'), ...grantXp('quest', { amount: 500 })];
+
+    expect(pending, 'two DISTINCT levels, in the order they were crossed').toEqual([2, 3]);
+    expect(fake.patches.map((p) => p.xp), 'the quest grant builds on the boss grant').toEqual([150, 650]);
+    await drain(15);
+    expect(fake.get().xp, "the boss's 150 survives the quest's write").toBe(650);
+    expect(fake.get().level).toBe(3);
+    expect(
+      fake.get().hp,
+      'each level bumps the pool from the PREVIOUS bump: 16 → 18 (L2 cap) → 20 (L3 cap)',
+    ).toBe(20);
+  });
+
+  it('three grants in one tick all land (doWellspring/doAmendments loop shape)', async () => {
+    const fake = install({ xp: 0 });
+
+    grantXp('amendment');
+    grantXp('amendment');
+    grantXp('amendment');
+
+    await drain(15);
+    expect(fake.get().xp, '3 × 20, none overwritten').toBe(60);
+  });
+
+  it('once the writes settle the store is authoritative again — a foreign hp write is not shadowed', async () => {
+    const fake = install({ xp: 95, hp: 10 });
+
+    expect(grantXp('renewal', { applyHp: true })).toEqual([2]); // 95 → 100, hp 10 → 12
+    await drain(15);
+
+    // Something that is NOT grantXp writes hp (CombatScene's sync sites, applyHp, consume.ts all
+    // do): the party is bloodied down to 4 and the write lands.
+    await fake.save({ hp: 4 });
+
+    expect(grantXp('quest', { amount: 250 }), '100 → 350 crosses L3').toEqual([3]);
+    await drain(15);
+    expect(fake.get().xp).toBe(350);
+    expect(fake.get().hp, 'the bump reads the bloodied 4, never the stale 12 this module wrote').toBe(6);
+  });
+});
