@@ -36,7 +36,7 @@ import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } fr
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
-import { mkTurnBudget, spendLeg, spendAction, turnExhausted, type TurnBudget } from './turnBudget';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
@@ -193,10 +193,10 @@ export class CombatScene extends Phaser.Scene {
   private orderIndex = -1;
 
   private state: Phase = 'boot';
-  private moved = false;
-  /** Ch. VI — spendable movement: move -> act -> move the remainder. `moved` stays alongside
-   *  it (mirrors `budget.legSpent`, flips true the instant the first leg commits) rather than
-   *  being replaced everywhere, so its existing "has moved at all" readers are untouched. */
+  /** Ch. VI — spendable movement: move -> act -> move the remainder. `legSpent` (inside the
+   *  budget) is the single source of truth for "has moved this turn" — the stance-lock guard,
+   *  the demo pilot's approach gate, and the keydown 'c' handler all read it directly (fix
+   *  round 2, T2 review M3: the old `moved` mirror field was collapsed into this). */
   private budget: TurnBudget = mkTurnBudget(0);
   private activeId = '';
   private moveField: MoveField | null = null;
@@ -353,7 +353,6 @@ export class CombatScene extends Phaser.Scene {
     this.order = [];
     this.orderIndex = -1;
     this.state = 'boot';
-    this.moved = false;
     this.budget = mkTurnBudget(0);
     this.activeId = '';
     this.moveField = null;
@@ -909,7 +908,6 @@ export class CombatScene extends Phaser.Scene {
   private beginPlayerTurn(unit: UnitState): void {
     this.state = 'playerMove';
     this.budget = mkTurnBudget(this.moveBudgetFor(unit));
-    this.moved = false;
     this.pendingAction = null;
     this.pendingSpell = null;
     this.overglowOn = false;
@@ -932,19 +930,18 @@ export class CombatScene extends Phaser.Scene {
   /** §4.2 — 'c' toggles Careful Step while choosing a move: half move (floor, min 1), no
    *  opportunity strikes provoked. Recomputes the move field/range in place. */
   private toggleCarefulStep(unit: UnitState): void {
-    if (this.moved) return;
+    if (this.budget.legSpent) return;
     this.carefulStepOn = !this.carefulStepOn;
-    // Ch. VI — the `moved` guard above only proves no LEG has been spent (moved mirrors
-    // legSpent); it says nothing about the action, which can be spent on a turn that acts
-    // before ever moving. A bare `mkTurnBudget(...)` here would silently wipe actionSpent back
-    // to false (fixed round 1, I1) — re-anchoring total/left off the new stance while spreading
-    // the old flags back over the result preserves both: legSpent (always false here anyway,
-    // but stated for symmetry) and, critically, actionSpent. Without the total/left re-anchor at
-    // all, `this.budget` stayed pinned to the PRE-toggle total and a Careful-Step turn could
-    // spend its (halved) visible range, then spend the untouched difference again as a "second
-    // leg" — quietly doubling back to a full move split across two legs. This is the same
-    // `moveBudgetFor` this method already recomputes `moveField` from, just also re-anchoring
-    // the budget object.
+    // Ch. VI — the `legSpent` guard above only proves no LEG has been spent; it says nothing
+    // about the action, which can be spent on a turn that acts before ever moving. A bare
+    // `mkTurnBudget(...)` here would silently wipe actionSpent back to false (fixed round 1,
+    // I1) — re-anchoring total/left off the new stance while spreading the old flags back over
+    // the result preserves both: legSpent (always false here anyway, but stated for symmetry)
+    // and, critically, actionSpent. Without the total/left re-anchor at all, `this.budget`
+    // stayed pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved)
+    // visible range, then spend the untouched difference again as a "second leg" — quietly
+    // doubling back to a full move split across two legs. This is the same `moveBudgetFor` this
+    // method already recomputes `moveField` from, just also re-anchoring the budget object.
     this.budget = { ...mkTurnBudget(this.moveBudgetFor(unit)), legSpent: this.budget.legSpent, actionSpent: this.budget.actionSpent };
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
@@ -954,6 +951,18 @@ export class CombatScene extends Phaser.Scene {
       this.carefulStepOn ? 'Careful Step: half move, no opportunity strikes.' : 'Careful Step off.',
       this.carefulStepOn ? P.waterLight : P.parchment,
     );
+  }
+
+  /** Ch. VI — Press On: forgo the action for +moveBudgetFor(u) (stance-aware — halved under
+   *  Careful Step, same grant the turn started with, so two halves recombine toward the full
+   *  base move; see the turnBudget.test.ts compose-law pin). Reuses returnToActionMenu's own
+   *  "recompute the move field off budget.left, then reshow the menu" idiom — Press On spends
+   *  the action exactly like the five gated action handlers, just with no delayedCall
+   *  presentation beat (nothing here can fell anyone, so there's no checkEnd to run first). */
+  private pressOn(unit: UnitState): void {
+    this.budget = grantPressOn(this.budget, this.moveBudgetFor(unit));
+    this.hud.showBanner('You press on — the road stretches further.', P.lanternGold);
+    this.returnToActionMenu(unit);
   }
 
   /** §4.4 — free interact: light an adjacent unlit brazier (once per brazier — the tile
@@ -1006,7 +1015,7 @@ export class CombatScene extends Phaser.Scene {
     const eligible = (e: UnitState): boolean => (this.debugPrefer === 'parley' ? !!e.parley : true);
     const pool = enemies.filter(eligible);
     const approachPool = pool.length ? pool : enemies;
-    if (approachPool.length && !this.moved && this.moveField) {
+    if (approachPool.length && !this.budget.legSpent && this.moveField) {
       const near = approachPool.reduce((b, e) => (manhattan(unit, e) < manhattan(unit, b) ? e : b), approachPool[0]);
       let best: Coord | null = null;
       let bestD = manhattan(unit, near);
@@ -1032,6 +1041,9 @@ export class CombatScene extends Phaser.Scene {
       // is unspent — an empty satchel is handled inside the panel (a friendly line), not by
       // disabling this.
       if (action === 'satchel') return { action, enabled: true };
+      // Ch. VI — Press On has no target either (it grants movement, not a strike); always
+      // pickable while the action is unspent, same self-cast shape as Satchel above.
+      if (action === 'press_on') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
       return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no foe within reach' };
     });
@@ -1047,6 +1059,8 @@ export class CombatScene extends Phaser.Scene {
     // keydown fires regardless of what's currently rendered and must not bypass a greyed button.
     if (this.budget.actionSpent) return;
     if (action === 'satchel') { void this.openSatchel(unit); return; }
+    // Ch. VI — Press On: no targeting phase, resolves immediately like Satchel above.
+    if (action === 'press_on') { this.pressOn(unit); return; }
     // §12.2 — Rank≥2 pressing an Art opens the tier flyout instead of casting T1 directly.
     // At Rank 1 this branch never taken: today's exact flow, zero regression.
     if (ART_ACTIONS.has(action) && this.rank >= 2) { this.openTierFlyout(unit, action); return; }
@@ -1110,6 +1124,7 @@ export class CombatScene extends Phaser.Scene {
         return enemies.filter((e) => hasLineOfFire(unit, e, ACTIONS.sequence.range, this.layout.tiles));
       case 'satchel':
       case 'wait':
+      case 'press_on':
         return [];
       default: {
         // trap 4 — this switch is touched this phase, so it gets an exhaustiveness check
@@ -1326,13 +1341,11 @@ export class CombatScene extends Phaser.Scene {
     if (this.budget.left <= 0 || !this.moveField) return;
     const path = pathTo(this.moveField, tile);
     if (!path || path.length < 2) return;
-    // Ch. VI — spend this leg's exact tile-cost before anything else; `moved` still flips
-    // true here too (it mirrors `budget.legSpent` — see the field's own doc comment) so its
-    // other "has moved at all" readers (toggleCarefulStep's stance lock, the demo pilot) are
-    // untouched.
+    // Ch. VI — spend this leg's exact tile-cost before anything else; `legSpent` (set inside
+    // spendLeg) is what locks the Careful Step stance and gates the demo pilot's approach step
+    // — see toggleCarefulStep/autoStep.
     const cost = this.moveField.cost.get(key(tile.c, tile.r)) ?? Infinity;
     this.budget = spendLeg(this.budget, cost);
-    this.moved = true;
     this.state = 'resolving';
     this.rangeGfx.clear();
     this.hoverGfx.clear();
@@ -1467,6 +1480,15 @@ export class CombatScene extends Phaser.Scene {
         if (turnExhausted(this.budget)) {
           this.endPlayerTurn();
         } else {
+          // Ch. VI re-review N1 — a killing blow can leave movement banked (turnExhausted
+          // stays false: left>0), but the fight itself is already over; checking here, BEFORE
+          // the steps-remain banner, resolves victory/defeat immediately instead of leaving a
+          // "Steps remain" menu open over an empty board until End Turn is pressed. Mirrors
+          // endPlayerTurn's own checkEnd handling exactly (retreat → the door, not a bare
+          // resolveBattle — Death's Door still gets its say).
+          const end = this.checkEnd();
+          if (end === 'retreat') { this.enterDeathsDoor(); return; }
+          if (end) { this.resolveBattle(end); return; }
           this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
           this.returnToActionMenu(unit);
           // Ch. VI — re-invoke the pilot: the "steps remain" branch otherwise re-invokes
@@ -1615,6 +1637,11 @@ export class CombatScene extends Phaser.Scene {
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
       } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
         // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment.
@@ -1795,6 +1822,11 @@ export class CombatScene extends Phaser.Scene {
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
       } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
         // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment. (T2/T3 is
@@ -2159,6 +2191,12 @@ export class CombatScene extends Phaser.Scene {
         if (turnExhausted(this.budget)) {
           this.endPlayerTurn();
         } else {
+          // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+          // comment. Satchel deals no damage itself, but symmetry with the other four gated
+          // sites is worth more than the (today, always-null) check it costs here.
+          const end = this.checkEnd();
+          if (end === 'retreat') { this.enterDeathsDoor(); return; }
+          if (end) { this.resolveBattle(end); return; }
           this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
           this.returnToActionMenu(unit);
           if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
@@ -2214,6 +2252,11 @@ export class CombatScene extends Phaser.Scene {
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
       } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
         if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
@@ -2778,7 +2821,7 @@ export class CombatScene extends Phaser.Scene {
       }
       if (e.key === 'Escape' && this.state === 'playerTarget') { this.cancelTargeting(unit); return; }
       if (e.key === 'e' && this.state === 'playerMove') { this.tryLightBrazier(unit); return; }
-      if (e.key === 'c' && this.state === 'playerMove' && !this.moved) { this.toggleCarefulStep(unit); return; }
+      if (e.key === 'c' && this.state === 'playerMove' && !this.budget.legSpent) { this.toggleCarefulStep(unit); return; }
       if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
       const action = (Object.keys(ACTIONS) as ActionKind[]).find((a) => ACTIONS[a].hotkey === e.key);
       if (action) this.onPickAction(unit, action);
