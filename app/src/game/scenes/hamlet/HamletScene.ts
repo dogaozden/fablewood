@@ -836,12 +836,10 @@ export class HamletScene extends Phaser.Scene {
     const now = new Date();
     let lastHearthAt: string | undefined;
     let lvl = 1;
-    let streak = 0;
     try {
       const save = services.save.get();
       lastHearthAt = save.lastHearthAt;
       lvl = save.level ?? 1;
-      streak = save.streak;
     } catch {
       /* no save yet — never rested, canRestTonight(undefined, now) already says so */
     }
@@ -869,8 +867,12 @@ export class HamletScene extends Phaser.Scene {
           /* inventory may be a stub — no ward available */
         }
         if (warded) {
+          // Controller ruling (fix round 1): the ward RESTORES THE STATUS QUO — it holds
+          // the chain, it never grows it. No normal unbroken rest increments streak either
+          // (grantXp('hearth-streak') below is XP-only), so a ward-saved night gets the
+          // same "untouched" treatment: brokenStreak stays undefined, no streak key rides
+          // the patch below.
           vigil = 'warded';
-          brokenStreak = streak + 1; // the held streak, plus tonight's own bank
         } else {
           vigil = 'broken';
           brokenStreak = 0;
@@ -891,7 +893,8 @@ export class HamletScene extends Phaser.Scene {
           // (Wellspring/boss's counter is a different mechanic; controller ruling W5).
           lanternLight: true,
           // Ch. VII amendment — the break law rides this SAME patch (single-write law);
-          // absent when the vigil wasn't broken tonight (untouched, exactly as shipped).
+          // absent (no streak key at all) when the vigil wasn't broken tonight, OR when
+          // the ward caught the break — either way, untouched, exactly as shipped.
           ...(brokenStreak === undefined ? {} : { streak: brokenStreak }),
         });
       } catch {

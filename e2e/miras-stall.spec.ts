@@ -660,9 +660,11 @@ test('a missed night with no Ward of Focus snaps the streak to 0', async ({ page
 });
 
 // Ch. VII Mira's Stall, Task 5 scenario e: the SAME broken fixture as scenario d, but a Ward
-// of Focus is held — the ward intercepts the break, holds the chain at its prior value, and
-// tonight's own bank still proceeds on top (7 held + 1 tonight = 8). The ward is spent doing
-// it (spend-before-benefit — removed before the save patch composes).
+// of Focus is held — the ward intercepts the break and restores the status quo: the chain
+// holds at EXACTLY its prior value, never grows (controller ruling, fix round 1 — no normal
+// unbroken Cottage rest increments streak either, so a ward-save gets the same untouched
+// treatment). The ward is spent doing it (spend-before-benefit — removed before the save
+// patch composes).
 test('a missed night WITH Ward of Focus holds the chain and consumes the ward', async ({ page }) => {
   test.setTimeout(60_000);
   const beforeSave = await readState<Save>(page, 'save.json');
@@ -693,8 +695,8 @@ test('a missed night WITH Ward of Focus holds the chain and consumes the ward', 
       'The ward cracks — your vigil holds.',
     );
 
-    const after = await waitForState<Save>(page, 'save.json', (s) => s?.streak === 8);
-    expect(after?.streak, 'the ward held the chain (7) and banked tonight (+1) = 8').toBe(8);
+    const after = await waitForState<Save>(page, 'save.json', (s) => s?.streak === 7);
+    expect(after?.streak, 'the ward holds the chain unchanged — restores the status quo, never grows it').toBe(7);
 
     const inv = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
     expect(inv?.stacks?.['ward-of-focus'] ?? 0, 'the ward is consumed').toBe(0);
