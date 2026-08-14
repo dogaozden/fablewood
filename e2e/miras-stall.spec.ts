@@ -1,5 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState, waitForState, canvasClick } from './helpers';
+// Fix round 1 (task-4-review.md M1) — pure, no-Phaser module (CombatScene.ts's own header calls
+// grid/initiative/damage/boss/ai "the pure logic modules"), safe to import directly in a node
+// test process. Used once below to assert the damage pin's grace-exclusion precondition
+// structurally, the same computation the reviewer ran standalone to verify it by hand.
+import { buildLayout } from '../app/src/game/combat/grid';
 
 const EV = 'screenshots';
 
@@ -510,11 +515,21 @@ test('armed Second Wind Seal retries a failed cast; the retry drives damage, the
   await onward2.click();
   await page.waitForTimeout(700); // let applyOutcome/actionLog/endPlayerTurn settle
 
-  // ---- damage reflects the RETRY's quality (1 -> SPELLBOOK.cast.effects.q1.hits:6), never the
-  // original miss's (quality 0 -> q0's hits:0/fade:2). Grace is structurally excluded here (the
-  // Keeper never stands on a lantern tile), so positive damage is possible ONLY if the retry's
-  // quality substituted into dmgQuality before the outcome math ran — this is the Step-3
-  // ordering pin.
+  // ---- precondition, asserted structurally rather than merely assumed (task-4-review.md M1):
+  // the Keeper's forced cast tile (5,3) must not be a lantern, or graceAppliesTo('attestation')
+  // + a broken retry's q0 could turn into grace's q0.5 (SPELLBOOK.cast.effects.q05 hits:2) —
+  // which lands EXACTLY the same dmg:2 the assertion below expects from a genuine q1 retry,
+  // since wisp-0's own 2 HP (units.ts) caps q1's hits:6 down to the same number. An "assert
+  // exact q1 damage" pin alone would NOT catch that regression against this target — asserting
+  // the tile precondition is what actually makes the pin self-defending, per the review.
+  const layout = buildLayout('dev-antechamber', 7); // seed(7) -> fixtureLaunch -> fixtureRoom(false)
+  expect(layout.tiles[3]?.[5], "the Keeper's cast tile (r3,c5) must not be a lantern").not.toBe('lantern');
+
+  // ---- damage reflects the RETRY's quality (1 -> SPELLBOOK.cast.effects.q1.hits:6, capped at
+  // wisp-0's own 2 HP -> dmg:2), never the original miss's (quality 0 -> q0's hits:0/fade:2 ->
+  // dmg:0). With the precondition above ruling grace out structurally, positive damage is
+  // reachable ONLY via the retry's quality substituting into dmgQuality before the outcome math
+  // ran — this is the Step-3 ordering pin.
   const afterCast = await snap(page);
   const lastAction = afterCast?.log.at(-1);
   expect(lastAction?.action, 'the logged action is the cast').toBe('cast');

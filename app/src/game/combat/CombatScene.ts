@@ -1741,13 +1741,32 @@ export class CombatScene extends Phaser.Scene {
           });
           sealQuality = retry.quality;
         } catch {
-          // A retry-call fault (e.g. chained off an already-degraded offline-catch original,
-          // whose fabricated local-* encounterId the provider can't resolve) leaves the
-          // already-recorded original quality driving outcome — no crash, no fabricated
-          // second grade. The item is still spent and the arm still cleared: fire already
-          // happened above (aids contract: deduct on fire, not on retry success) — same
-          // "item consumed for no visible benefit" residual T3's review accepted for the
-          // Hint's own offline-catch path, not a new gap this task introduces.
+          // Fix round 1 (task-4-review.md I2) — the true fault surface, corrected: the judge.
+          // kinds.ts:220's `ctx.judge(...)` is unwrapped, so a judge fault on the retry's
+          // free_recall/scenario_branch throws straight out of runEncounter — and a judge
+          // fault is exactly what would have driven a free_recall cast into the offline-catch
+          // below in the first place, so this is a likely path here, not an exotic one. It is
+          // NOT loadPacks (register.ts's own .catch(() => []) already makes that leg unable to
+          // throw) and NOT an unresolvable local-* encounterId (engine.ts's pick() silently
+          // falls through to a fresh draw on a miss rather than throwing — see the residual
+          // below). Uncaught here is catastrophic, not just a lost benefit: every entry point
+          // into this method is a fire-and-forget `void this.runPlayerAction(...)` (no
+          // await/.catch()), so an uncaught throw becomes an unhandled rejection that strands
+          // state='resolving' forever — endPlayerTurn() never runs and the battle soft-locks
+          // permanently, with no error surface. Caught here, the already-recorded original
+          // quality simply drives outcome instead; the item is still spent and the arm still
+          // cleared (fire already happened above — aids contract: deduct on fire, not on retry
+          // success) — same "item consumed for no visible benefit" residual T3's review
+          // accepted for the Hint's own offline-catch path.
+          //
+          // Known, accepted residual (I1): if the ORIGINAL cast itself came from the
+          // offline-catch fallback below (quality 0.5 < 1 still fires the Seal) and the fault
+          // has since cleared, this retry's forced encounterId is equally unresolvable but
+          // fails SILENTLY into a fresh due-first draw (same engine.ts fallthrough) instead of
+          // throwing here — the Seal can re-present a DIFFERENT question under the "returns to
+          // your hand" notice. Constraints 1/2 still hold either way (nothing recorded, only
+          // retry.quality feeds outcome); accepted rather than engineered around with
+          // detail==='offline'-style id detection.
         }
       }
     }
