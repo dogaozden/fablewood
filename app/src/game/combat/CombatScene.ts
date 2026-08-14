@@ -47,6 +47,7 @@ import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
 // the task report as a deviation from the codebase's usual services-locator pattern.
 import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
+import { planRedraw, FATE_HOLDS_LINE } from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -1429,11 +1430,28 @@ export class CombatScene extends Phaser.Scene {
     const context = action === 'parley' ? 'parley' : vsBoss ? 'boss' : 'combat';
 
     if (action === 'cast') this.hud.setDeliberating(true);
+    // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
+    const roundSeed = this.encSeed++;
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
-        context, kinds: [kind], factIds, packId: this.launch.packId, seed: this.encSeed++, spellTier: 1,
+        context, kinds: [kind], factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1,
+        lanternLight: services.save.get()?.lanternLight === true,
       });
+      if (result.redraw) {
+        // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
+        // own drawn pool minus what was shown; the census never moves (no new draw).
+        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
+          this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
+        }
+        result = await services.runEncounter({
+          context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId,
+          seed: roundSeed, spellTier: 1,
+          lanternLight: false, notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+        });
+      }
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
@@ -1550,12 +1568,29 @@ export class CombatScene extends Phaser.Scene {
     const dueSetAtCast = this.snapshotDueSet();
 
     if (artKind === 'free_recall') this.hud.setDeliberating(true);
+    // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
+    const roundSeed = this.encSeed++;
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
-        context, kinds: [artKind], factIds, packId: this.launch.packId, seed: this.encSeed++, flair: spell.label,
+        context, kinds: [artKind], factIds, packId: this.launch.packId, seed: roundSeed, flair: spell.label,
         spellTier: spell.tier,
+        lanternLight: services.save.get()?.lanternLight === true,
       });
+      if (result.redraw) {
+        // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
+        // own drawn pool minus what was shown; the census never moves (no new draw).
+        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
+          this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
+        }
+        result = await services.runEncounter({
+          context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
+          seed: roundSeed, flair: spell.label, spellTier: spell.tier,
+          lanternLight: false, notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+        });
+      }
     } catch {
       result = { encounterId: `local-${spell.id}`, kind: artKind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
