@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted } from '../turnBudget';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked } from '../turnBudget';
 import { carefulStepMove } from '../ai';
 
 describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remainder)', () => {
   it('mkTurnBudget: fresh budget has left===total and nothing spent', () => {
     const b = mkTurnBudget(5);
-    expect(b).toEqual({ total: 5, left: 5, legSpent: false, actionSpent: false });
+    expect(b).toEqual({ total: 5, left: 5, legSpent: false, actionSpent: false, pressedOn: false });
   });
 
   it('spendLeg subtracts the exact cost and sets legSpent', () => {
@@ -29,11 +29,12 @@ describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remaind
     expect(b.legSpent).toBe(true);
   });
 
-  it('grantPressOn adds the bonus to both total and left, and marks the action spent', () => {
+  it('grantPressOn adds the bonus to both total and left, marks the action spent, and locks the stance (pressedOn)', () => {
     const b = grantPressOn(mkTurnBudget(5), 2);
     expect(b.total).toBe(7);
     expect(b.left).toBe(7);
     expect(b.actionSpent).toBe(true);
+    expect(b.pressedOn).toBe(true);
   });
 
   it('grantPressOn extends an already-partly-spent budget rather than refilling it', () => {
@@ -42,6 +43,36 @@ describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remaind
     expect(b.total).toBe(7);
     expect(b.left).toBe(3);
     expect(b.actionSpent).toBe(true);
+  });
+
+  it('spendLeg and spendAction preserve an existing pressedOn flag (fix round 1: the stance lock must survive whichever spend runs afterward)', () => {
+    const pressed = grantPressOn(mkTurnBudget(5), 2); // pressedOn=true
+    expect(spendLeg(pressed, 1).pressedOn, 'spendLeg must not clear pressedOn').toBe(true);
+    expect(spendAction(pressed).pressedOn, 'spendAction must not clear pressedOn').toBe(true);
+  });
+
+  describe('stanceLocked — fix round 1: the toggle guard predicate, given a proper pure home', () => {
+    it('unlocked only when NEITHER legSpent nor pressedOn is set', () => {
+      expect(stanceLocked(mkTurnBudget(5))).toBe(false);
+    });
+
+    it('locked once a leg is spent', () => {
+      expect(stanceLocked(spendLeg(mkTurnBudget(5), 1))).toBe(true);
+    });
+
+    it('locked once Press On fires, even with no leg spent yet — this is the fix-round bug: the old ' +
+      'guard only checked legSpent, so pressing Press On before ever moving left the toggle live, and ' +
+      'toggling re-anchored total/left from raw unit stats with no memory of the granted bonus, silently ' +
+      'discarding it', () => {
+      const pressed = grantPressOn(mkTurnBudget(5), 2);
+      expect(pressed.legSpent, 'sanity: Press On alone does not spend a leg').toBe(false);
+      expect(stanceLocked(pressed)).toBe(true);
+    });
+
+    it('locked when both are set', () => {
+      const both = spendLeg(grantPressOn(mkTurnBudget(5), 2), 1);
+      expect(stanceLocked(both)).toBe(true);
+    });
   });
 
   it('turnExhausted is false when neither action spent nor movement depleted', () => {

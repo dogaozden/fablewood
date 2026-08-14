@@ -36,7 +36,7 @@ import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } fr
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
-import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, type TurnBudget } from './turnBudget';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
@@ -930,19 +930,31 @@ export class CombatScene extends Phaser.Scene {
   /** §4.2 — 'c' toggles Careful Step while choosing a move: half move (floor, min 1), no
    *  opportunity strikes provoked. Recomputes the move field/range in place. */
   private toggleCarefulStep(unit: UnitState): void {
-    if (this.budget.legSpent) return;
+    if (stanceLocked(this.budget)) return;
     this.carefulStepOn = !this.carefulStepOn;
-    // Ch. VI — the `legSpent` guard above only proves no LEG has been spent; it says nothing
-    // about the action, which can be spent on a turn that acts before ever moving. A bare
-    // `mkTurnBudget(...)` here would silently wipe actionSpent back to false (fixed round 1,
-    // I1) — re-anchoring total/left off the new stance while spreading the old flags back over
-    // the result preserves both: legSpent (always false here anyway, but stated for symmetry)
-    // and, critically, actionSpent. Without the total/left re-anchor at all, `this.budget`
-    // stayed pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved)
-    // visible range, then spend the untouched difference again as a "second leg" — quietly
-    // doubling back to a full move split across two legs. This is the same `moveBudgetFor` this
-    // method already recomputes `moveField` from, just also re-anchoring the budget object.
-    this.budget = { ...mkTurnBudget(this.moveBudgetFor(unit)), legSpent: this.budget.legSpent, actionSpent: this.budget.actionSpent };
+    // Ch. VI — `stanceLocked` above only proves no LEG has been spent and Press On hasn't fired;
+    // it says nothing about the action having been spent some OTHER way (a Strike/Cast/Satchel
+    // before ever moving). A bare `mkTurnBudget(...)` here would silently wipe actionSpent back
+    // to false (fixed round 1, I1) — re-anchoring total/left off the new stance while spreading
+    // the old flags back over the result preserves all three: legSpent/pressedOn (always false
+    // here anyway, since the guard above already refused otherwise — stated for symmetry) and,
+    // critically, actionSpent. Without the total/left re-anchor at all, `this.budget` stayed
+    // pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved) visible
+    // range, then spend the untouched difference again as a "second leg" — quietly doubling back
+    // to a full move split across two legs. This is the same `moveBudgetFor` this method already
+    // recomputes `moveField` from, just also re-anchoring the budget object.
+    // Fix round 1 (Important 1) — Press On now also locks the stance (pressedOn, checked by
+    // stanceLocked above), so this re-anchor can no longer run on a budget carrying an unpriced
+    // Press On bonus: pressedOn would have refused the guard first. Before this fix, Press On set
+    // only actionSpent, which the OLD guard never checked — the toggle stayed live, and this same
+    // re-anchor line silently discarded the granted bonus (moveBudgetFor has zero awareness of
+    // `this.budget.total`, only of the unit's raw stats + current stance).
+    this.budget = {
+      ...mkTurnBudget(this.moveBudgetFor(unit)),
+      legSpent: this.budget.legSpent,
+      actionSpent: this.budget.actionSpent,
+      pressedOn: this.budget.pressedOn,
+    };
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
@@ -2821,7 +2833,7 @@ export class CombatScene extends Phaser.Scene {
       }
       if (e.key === 'Escape' && this.state === 'playerTarget') { this.cancelTargeting(unit); return; }
       if (e.key === 'e' && this.state === 'playerMove') { this.tryLightBrazier(unit); return; }
-      if (e.key === 'c' && this.state === 'playerMove' && !this.budget.legSpent) { this.toggleCarefulStep(unit); return; }
+      if (e.key === 'c' && this.state === 'playerMove' && !stanceLocked(this.budget)) { this.toggleCarefulStep(unit); return; }
       if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
       const action = (Object.keys(ACTIONS) as ActionKind[]).find((a) => ACTIONS[a].hotkey === e.key);
       if (action) this.onPickAction(unit, action);

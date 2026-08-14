@@ -3,17 +3,21 @@
 
 /** total = effectiveMove after stance/Press On math (turn start / recompute); left = remaining
  *  tiles-worth of cost. legSpent locks the Careful Step stance at the first committed leg;
- *  actionSpent + an empty budget together mean the turn is over (see turnExhausted). */
+ *  pressedOn ALSO locks it (fix round 1) — the grant priced the stance in ("+effectiveMove,
+ *  halved under Careful Step"), so once Press On has fired, re-deriving total/left from a
+ *  flipped stance would silently discard the pressed road (see stanceLocked); actionSpent + an
+ *  empty budget together mean the turn is over (see turnExhausted). */
 export interface TurnBudget {
   total: number;
   left: number;
   legSpent: boolean;
   actionSpent: boolean;
+  pressedOn: boolean;
 }
 
 /** A fresh turn: the full move is available, nothing committed yet. */
 export function mkTurnBudget(total: number): TurnBudget {
-  return { total, left: total, legSpent: false, actionSpent: false };
+  return { total, left: total, legSpent: false, actionSpent: false, pressedOn: false };
 }
 
 /** One movement leg: spend the exact tile-cost, floor at 0 (never go into debt), lock legSpent —
@@ -29,12 +33,22 @@ export function spendAction(b: TurnBudget): TurnBudget {
 }
 
 /** Press On ~= Dash: forgo the action for +effectiveMove. Grants the bonus to both total
- *  and left (extends the budget rather than just refilling it) and spends the action slot. */
+ *  and left (extends the budget rather than just refilling it), spends the action slot, and
+ *  locks the stance (fix round 1 — see stanceLocked/TurnBudget's own doc comment). */
 export function grantPressOn(b: TurnBudget, bonus: number): TurnBudget {
-  return { ...b, total: b.total + bonus, left: b.left + bonus, actionSpent: true };
+  return { ...b, total: b.total + bonus, left: b.left + bonus, actionSpent: true, pressedOn: true };
 }
 
 /** The turn is over once the action is spent AND there's no movement left to spend. */
 export function turnExhausted(b: TurnBudget): boolean {
   return b.actionSpent && b.left <= 0;
+}
+
+/** Fix round 1 — the Careful Step toggle's guard predicate, given a proper pure home: locked
+ *  once a leg is spent (legSpent) OR once Press On has fired (pressedOn). Both callers
+ *  (CombatScene's toggleCarefulStep and its keydown 'c' pre-check) call this rather than
+ *  duplicating the OR — the bug this fix round closes was exactly two lock checks drifting out
+ *  of sync (the old guard only knew about legSpent; Press On only ever set actionSpent). */
+export function stanceLocked(b: TurnBudget): boolean {
+  return b.legSpent || b.pressedOn;
 }

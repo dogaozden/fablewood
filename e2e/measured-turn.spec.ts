@@ -8,7 +8,7 @@ function tileXY(c: number, r: number): { x: number; y: number } {
   return { x: ORIGIN.x + c * CELL + CELL / 2, y: ORIGIN.y + r * CELL + CELL / 2 };
 }
 
-type Budget = { total: number; left: number; legSpent: boolean; actionSpent: boolean };
+type Budget = { total: number; left: number; legSpent: boolean; actionSpent: boolean; pressedOn: boolean };
 type Snap = {
   state: string;
   activeId: string;
@@ -276,10 +276,12 @@ test('measured turn: Press On grants +move and spends the action — Strike is n
   await page.goto('/?scene=combat&seed=7');
   await waitReady(page, 'combat');
   await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn to open");
+  await setPos(page, 'keeper', 4, 4);
 
   const fresh = await snap(page);
   expect(fresh?.budget.total, "Keeper's fresh move budget").toBe(4);
   expect(fresh?.budget.actionSpent, 'a fresh turn has not spent its action').toBe(false);
+  expect(fresh?.budget.pressedOn, 'a fresh turn has not pressed on').toBe(false);
   const menuBefore = await actionMenuDebug(page);
   expect(menuBefore[0]?.hint, 'Strike is offered on a fresh turn').not.toContain('spent');
 
@@ -287,6 +289,7 @@ test('measured turn: Press On grants +move and spends the action — Strike is n
   const after = await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'Press On to spend the action');
   expect(after.budget.total, 'Press On adds the full (un-halved — no Careful Step this turn) effectiveMove').toBe(8);
   expect(after.budget.left, 'the bonus extends what was left, not a refill').toBe(8);
+  expect(after.budget.pressedOn, 'Press On locks the stance (fix round 1)').toBe(true);
   expect(after.state, "still the Keeper's own turn, back at the action menu").toBe('playerMove');
   expect(after.activeId).toBe('keeper');
 
@@ -299,12 +302,33 @@ test('measured turn: Press On grants +move and spends the action — Strike is n
   expect(menuAfter[8]?.label, 'Press On is the new 9th, rightmost slot').toBe('Press On');
   expect(menuAfter[8]?.hint, 'Press On itself reads spent too — one action per turn').toContain('spent');
 
+  // Fix round 1 (Important 1) — Press On locks the stance: a Careful Step attempt ('c') right
+  // after Press On, before any movement, must be refused exactly like it would be after a leg is
+  // spent. Before this fix, the toggle's guard only checked legSpent (which Press On never
+  // sets), so 'c' stayed live and toggling re-derived total/left from the unit's raw stats —
+  // silently discarding the whole +4 bonus just granted (total would have dropped to 2, even
+  // BELOW the pre-Press-On base of 4).
+  await page.keyboard.press('c');
+  await page.waitForTimeout(300); // long enough for a wrongly-accepted toggle to fully resolve
+  const afterToggleAttempt = await snap(page);
+  expect(afterToggleAttempt?.budget.total, 'a rejected toggle must not re-derive the total off raw stats').toBe(8);
+  expect(afterToggleAttempt?.budget.left, 'nor touch what is left').toBe(8);
+  expect(afterToggleAttempt?.budget.pressedOn, 'still locked').toBe(true);
+
   // The refusal is real, not cosmetic: a Strike attempt must not open targeting or resolve.
   await page.keyboard.press('1');
   await page.waitForTimeout(300);
   const refused = await snap(page);
   expect(refused?.state, 'the refused Strike must never even enter targeting').toBe('playerMove');
   expect(refused?.log.length, 'no Strike may have resolved').toBe(0);
+
+  // "movement uses the full pressed budget": the 8 is genuinely spendable, not a number sitting
+  // inert — walk one ordinary tile and confirm it draws from the pressed total, proving the
+  // budget the toggle-rejection above left untouched is the SAME one movePlayerTo spends from.
+  await canvasClick(page, tileXY(5, 4).x, tileXY(5, 4).y);
+  await waitForPos(page, 'keeper', 5, 4, 'a leg spent out of the pressed budget to land');
+  const afterMove = await waitForSnap(page, (s) => s?.state === 'playerMove', 'control back after spending from the pressed budget');
+  expect(afterMove.budget.left, 'one tile spent out of the full pressed 8, not a halved/reverted total').toBe(7);
 });
 
 // Ch. VI Task 3, scenario b2 (re-review N1) — a killing blow that leaves movement banked must
