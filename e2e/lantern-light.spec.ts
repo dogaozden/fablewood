@@ -8,6 +8,7 @@ import {
   readState,
   canvasClick,
   waitProvincesLoaded,
+  currentScene,
 } from './helpers';
 
 // Wave 5 (Lantern-Light) Task 3, scenario (a) — Concordance Ch. IV, DECIDED: "banking a
@@ -148,6 +149,35 @@ async function answerAnyOverlay(page: Page): Promise<void> {
   const cont = page.getByRole('button', { name: 'Onward ▸' });
   if (await cont.count()) await cont.click();
   await page.waitForTimeout(250);
+}
+
+// Task 6, scenario (d) — the Death's Door re-draw. Unlike combat/Wellspring (re-present from
+// the round's own drawn pool), the door's pool is a SINGLE fact, so raising the lantern here
+// triggers a genuine second draw through ddDraw itself: salted (LANTERN_REDRAW_SALT) and
+// exclusion-listed against the shown fact. Entry drive cloned from deaths-door.spec.ts's own
+// Pins (own-file convention, as above): the packless-DUNGEON `dev=1&sim=0&auto=win` harness
+// (two wisps, no gate/boss), driveToZeroHp's Wait-spam idiom to bring the party to 0 HP.
+//
+// T4 fix-round note resolved: that route is safe for a prompt-text assertion here, unlike the
+// packless `?scene=combat` T1 combat-cast route. Confirmed by reading the source, not assumed:
+// ddDraw (CombatScene.ts) never scopes to the launch's packId — it awaits
+// services.draw.indexReady() itself and draws off the GLOBAL index, so `id`/the salted `alt`
+// are always real installed-pack fact ids, never the dev route's fixture ids. And pick()
+// (encounters/engine.ts) resolves each requested factId via services.draw.encountersOf
+// (register.ts:83, threaded whenever real packs are installed — always true on the e2e
+// server), a global per-fact lookup independent of req.packId. The T1 bug's mechanism (pick()
+// falling through to the same candidates[0] regardless of which factId was requested) only
+// bites when the requested factIds themselves have zero entries in encountersOf — true for
+// the T1 route's fixture moss-* ids, never true for ddDraw's real ones.
+async function driveToDeathsDoor(page: Page, timeoutMs = 75_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if ((await currentScene(page)) !== 'combat') return;
+    const s = await combatSnap(page);
+    if (!s || s.state === 'over' || s.state === 'deathsdoor') return;
+    if (s.state === 'playerMove') await page.keyboard.press('7'); // Wait
+    await page.waitForTimeout(150);
+  }
 }
 
 test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
@@ -331,6 +361,62 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
         await answerAnyOverlay(page);
         await page.waitForTimeout(400);
       }
+
+      // assert 2 (persistence law): the light is spent.
+      const s = await waitForState<Save>(page, 'save.json', (x) => x?.lanternLight === false);
+      expect(s?.lanternLight).toBe(false);
+    } finally {
+      await restoreSave(page, beforeSave);
+    }
+  });
+
+  test("Death's Door: raising the lantern re-draws a different memory and spends the light", async ({ page }) => {
+    test.setTimeout(120_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+
+    try {
+      // fixture: hp low enough that one connecting hit ends the party (deaths-door.spec.ts's
+      // own seedSave idiom, hp:2 — splitPooledHp(2) leaves the Keeper at 2 pool hp, Mira at 0),
+      // lanternLight held.
+      await page.request.put('/api/state/save.json', {
+        data: {
+          scene: 'hamlet', hp: 2, streak: 0, lastPlayed: '',
+          dungeon: { roomIndex: 0, cleared: [] }, lanternLight: true,
+        },
+      });
+
+      // Same route as deaths-door.spec.ts's Pins (see the file-level note above for why this
+      // is safe for a prompt-text assertion despite the dungeon room itself being fixture-fed).
+      await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
+      await waitReady(page, 'combat');
+
+      await driveToDeathsDoor(page);
+
+      const doorCard = page.locator('.fw-overlay', { hasText: /Ledger Holds Your Line/ });
+      await doorCard.waitFor({ state: 'visible', timeout: 15_000 });
+      await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+
+      await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+      const firstPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+
+      await page.locator('.fw-lantern-btn').click();
+
+      // The old overlay closes (170ms exit anim), the spend PUTs, and ddDraw runs again —
+      // salted + exclusion-listed against the shown fact. The door's pool is ONE fact, so this
+      // is a genuine second draw (not a re-present from an already-drawn pool like combat/
+      // Wellspring) — draw-census law still holds: it's the SAME ddDraw call site, parameterized.
+      await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+      await expect(page.locator('.fw-overlay')).toBeVisible();
+      await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+
+      // assert 1: a different memory surfaced — the real vc-law pack's global due/fresh/shuffle
+      // ladder, exclusion-filtered, so a build that re-presented the SAME fact (the likeliest
+      // regression) fails here.
+      const secondPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+      expect(secondPrompt, 'a different memory surfaced on the re-present').not.toBe(firstPrompt);
+
+      // answer the re-presented question so the round resolves cleanly.
+      await answerAnyOverlay(page);
 
       // assert 2 (persistence law): the light is spent.
       const s = await waitForState<Save>(page, 'save.json', (x) => x?.lanternLight === false);

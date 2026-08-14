@@ -47,7 +47,7 @@ import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
 // the task report as a deviation from the codebase's usual services-locator pattern.
 import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
-import { planRedraw, FATE_HOLDS_LINE } from '../lantern';
+import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT } from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -2935,36 +2935,60 @@ export class CombatScene extends Phaser.Scene {
    * indexReady() (never the fuller ready(), which can reject on an unrelated srs/amendments fault
    * while the index is still fine), and never stall — a failure just falls to the ladder below.
    */
-  private async ddDraw(): Promise<string | null> {
-    // Read encSeed; the paired runEncounter below consumes this.encSeed++ (one round, one seed).
-    const seed = this.encSeed;
+  private async ddDraw(seed: number, excludeIds: readonly string[] = []): Promise<string | null> {
+    // Seed is the caller's now (one round, one seed) — the Ch. IV salted replacement pick
+    // passes roundSeed + LANTERN_REDRAW_SALT so it's deterministic but distinct from the round's
+    // own draw. excludeIds is empty on the round's first call; the redraw passes the shown id.
     try { await services.draw.indexReady(); } catch { /* index down — the ladder below still holds */ }
     const now = Date.now();
     let due: string[] = [];
     let fresh: string[] = [];
     try {
-      due = services.draw.due({ kinds: DD_KINDS, count: 1, seed, now });
-      if (!due.length) fresh = services.draw.fresh({ count: 1, seed, now });
+      // Overdraw by the exclusion count so there's still a candidate left after filtering.
+      due = services.draw.due({ kinds: DD_KINDS, count: 1 + excludeIds.length, seed, now });
+      if (!due.length) fresh = services.draw.fresh({ count: 1 + excludeIds.length, seed, now });
     } catch { /* service fault falls through to the shuffle tier, like globalDraw */ }
-    const pick = due[0] ?? fresh[0]
-      ?? seededShuffle(this.eligibleFactIds([...this.allFactIds]), mulberry32(layoutSeed('deathsdoor-fallback', seed)))[0];
+    const exclude = new Set(excludeIds);
+    const pick = due.find((id) => !exclude.has(id)) ?? fresh.find((id) => !exclude.has(id))
+      ?? seededShuffle(
+        this.eligibleFactIds([...this.allFactIds]).filter((id) => !exclude.has(id)),
+        mulberry32(layoutSeed('deathsdoor-fallback', seed)),
+      )[0];
     return pick ?? null;
   }
 
   /** One round at the door: deal a fact, ask it, score it, route the machine's verdict. */
   private async runDeathsDoorRound(): Promise<void> {
     if (this.destroyed || !this.dd) return;
-    const id = await this.ddDraw();
+    // Ch. IV — one round, one seed (hoisted; ddDraw and both presents share it).
+    const roundSeed = this.encSeed++;
+    const id = await this.ddDraw(roundSeed);
     if (this.destroyed || !this.dd) return;
     // No fact exists anywhere (packless/fixture edge). Never trap the player behind a question
     // that cannot be asked — an unanswerable door stabilizes, which is the old retreat.
     if (!id) { this.stabilizeAtDoor(); return; }
+    // Ch. IV — guarded read (T4 review ruling): a save fault degrades to "no lantern".
+    let held = false;
+    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
         context: 'drill', kinds: DD_KINDS, factIds: [id], packId: this.launch.packId,
-        seed: this.encSeed++, flair: DEATHS_DOOR_TITLE,
+        seed: roundSeed, flair: DEATHS_DOOR_TITLE,
+        lanternLight: held,
       });
+      if (result.redraw) {
+        // The door's pool is ONE fact — this is the surface that re-draws for real:
+        // salted, exclusion-listed, through the same ddDraw (census site unchanged).
+        const alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, result.redraw.shownFactIds);
+        if (this.destroyed || !this.dd) return;
+        if (alt) await services.save.save({ lanternLight: false });
+        result = await services.runEncounter({
+          context: 'drill', kinds: DD_KINDS, factIds: [alt ?? id], packId: this.launch.packId,
+          seed: roundSeed, flair: DEATHS_DOOR_TITLE,
+          lanternLight: false, notice: alt ? undefined : FATE_HOLDS_LINE,
+        });
+      }
     } catch {
       result = { encounterId: 'local-deathsdoor', kind: 'free_recall', factIds: [id], quality: 0, detail: 'offline' };
     }
