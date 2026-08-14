@@ -124,6 +124,9 @@ const CSS = `
   border-left: 3px solid var(--ember-deep); color: var(--ink-deep); font-size: .96rem; line-height: 1.45; animation: fw-rise .24s ease both; }
 .fw-teach .fw-teachhead { font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; color: var(--ember-deep); font-weight: 700; display: block; margin-bottom: .25em; }
 .fw-teach b { color: var(--ink-2); }
+/* the answer block outranks the surrounding teach blocks — it is what the player came back for */
+.fw-teach-answer { background: rgba(247,206,107,.30); border-left-color: var(--amber); color: var(--ink-2); }
+.fw-teach-answer .fw-teachhead { color: var(--ink-soft); }
 
 /* reclaimed-from-the-fade — the redemption bell (§3.1). A warm lantern-flare, not confetti. */
 .fw-reclaim { display: flex; align-items: center; gap: .8em; margin: 2px 0 16px; padding: .72em 1.05em;

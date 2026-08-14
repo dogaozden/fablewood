@@ -59,6 +59,11 @@ function buildPrompt({ prompt, answer, rubric }: JudgeArgs): string {
     '{"verdict":"pass"|"partial"|"fail","line":"<one dry in-world line the Clerk says, <=90 chars>"}',
     'verdict: pass = satisfies the rubric; partial = partially right or missing a key piece; fail = wrong or empty.',
     'The line is the Clerk speaking — terse, dry, never explains at length. One short sentence.',
+    // A line that names the mechanism and names it WRONG teaches the miss instead of correcting
+    // it. Observed: on the nonparticipating-preferred question the Clerk said "your preference
+    // takes the greater spoil" when the rubric has the holder CONVERTING. Nudge, or say nothing.
+    'The line must never contradict the rubric. If you name the rule or the figure, it must be the',
+    "rubric's — otherwise just mark the answer wrong without explaining why.",
   ].join('\n');
 }
 

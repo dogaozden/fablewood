@@ -213,6 +213,19 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
         el('span', { text: answer }),
       ]),
     ];
+    // The answer to the QUESTION ASKED, which only the rubric holds. facts[0].statement below
+    // is the concept the encounter was built from — for a definitional prompt that happens to
+    // be the answer, but for an applied one ("$5M pref, 20%, $100M exit — what do you take
+    // home?") it is a definition and the number never appears. A player who missed then had
+    // no way to learn what they should have said.
+    if (quality < 1 && rubric) {
+      parts.push(
+        el('div', { class: 'fw-teach fw-teach-answer' }, [
+          el('span', { class: 'fw-teachhead', text: 'The answer' }),
+          el('span', { text: rubric }),
+        ]),
+      );
+    }
     if (quality < 1 && facts[0]) {
       parts.push(
         el('div', { class: 'fw-teach' }, [

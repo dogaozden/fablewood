@@ -107,6 +107,36 @@ test.describe('encounter overlay — all kinds', () => {
     await expect(page.locator('.fw-cite')).toContainText('compendium');
   });
 
+  test('free_recall: a miss reveals the rubric, so the player learns what they should have said', async ({ page }) => {
+    // Regression (the author, 2026-08-14): the reveal only ever showed facts[0].statement — the
+    // CONCEPT the encounter was built from. On a definitional prompt that reads as the answer,
+    // so nobody noticed; on an applied one ("$5M pref, 20%, $100M exit — what do you take
+    // home?") the card taught a definition and the number ($20M) appeared nowhere. mcq has had
+    // teach-on-miss since the start; free_recall's answer lives in the rubric and was orphaned.
+    await openOverlay(page, 'free_recall');
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+    await page.locator('.fw-textarea').fill('twenty five million dollars');
+    await page.getByRole('button', { name: 'Cast' }).click();
+    await expect(page.locator('.fw-verdict.fail')).toBeVisible({ timeout: 10_000 });
+
+    const answer = page.locator('.fw-teach-answer');
+    await expect(answer, 'a miss must surface the rubric — it is the only place the answer lives')
+      .toBeVisible();
+    await expect(answer).toContainText('frost-bell');
+    // ...and it outranks the concept block, which stays below it.
+    await expect(page.locator('.fw-teach').first()).toContainText('You cast');
+    await expect(answer).toContainText('The answer');
+  });
+
+  test('free_recall: a clean cast does NOT spoil the rubric', async ({ page }) => {
+    await openOverlay(page, 'free_recall');
+    await page.waitForTimeout(450);
+    await page.locator('.fw-textarea').fill('wait for the frost-bell before harvesting whispermoss');
+    await page.getByRole('button', { name: 'Cast' }).click();
+    await expect(page.locator('.fw-verdict.pass')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.fw-teach-answer')).toHaveCount(0);
+  });
+
   test('free_recall: real typing survives the game key captures (WASD/E/Space)', async ({ page }) => {
     // Regression: hamlet's Phaser key captures preventDefault'ed W/A/S/D/E/Space at the
     // window level even while the recall textarea was focused — "economics and control"
