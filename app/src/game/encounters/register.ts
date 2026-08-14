@@ -91,7 +91,7 @@ services.runEncounter = async (req: EncounterRequest): Promise<EncounterResult> 
   const facts = factsFor(chosen.fact_ids, sourcePack, factOf);
   const result = await presentEncounter(reskinned, facts, {
     context: req.context, judge: services.judge, flair: req.flair,
-    lanternLight: req.lanternLight, notice: req.notice,
+    lanternLight: req.lanternLight, notice: req.notice, strikeOneFalse: req.strikeOneFalse,
   });
   return stampDifficulty(result, reskinned);
 };

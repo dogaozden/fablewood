@@ -124,6 +124,11 @@ const CSS = `
 .fw-opt.is-wrong .fw-key { background: linear-gradient(#D98A85, var(--berry)); color: #F3E7C8; }
 .fw-opt.is-dimmed { opacity: .45; }
 .fw-opt:disabled { cursor: default; }
+/* Ch. VII Mira's Stall — Scrivener's Hint: the struck option wraps its own sub-line onto a
+   second row (flex-basis: 100% forces the wrap) instead of sitting beside the key/label. */
+.fw-opt.fw-struck { flex-wrap: wrap; opacity: .55; }
+.fw-opt.fw-struck .fw-struck-sub { flex-basis: 100%; margin-top: .15em; font-size: .82rem;
+  font-style: italic; color: var(--ink-soft); }
 
 /* verdict banner + on-miss teach */
 .fw-verdict { display: flex; align-items: flex-start; gap: .7em; padding: .75em 1em; border-radius: 12px;

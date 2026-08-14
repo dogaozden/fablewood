@@ -42,7 +42,7 @@ import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
-import { armAid, type ArmedAid } from './aids';
+import { armAid, aidFires, type ArmedAid } from './aids';
 import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // Direct import, not services.* — presentHoldTheLine is brand new to Task 7, both this file and
 // overlay.ts are in this task's own file list, and contracts.ts (the services.* registry's
@@ -1619,13 +1619,16 @@ export class CombatScene extends Phaser.Scene {
     // catch below (which would fabricate a graded result for a question never shown). C6 —
     // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
     const held = heldLanternLight();
+    // Ch. VII Mira's Stall — Scrivener's Hint: an armed Hint strikes a false MCQ option on the
+    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the Court's).
+    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat';
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
     try {
       result = await services.runEncounter({
         context, kinds: [kind], factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1,
-        lanternLight: held,
+        lanternLight: held, strikeOneFalse: hint || undefined,
       });
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
@@ -1652,10 +1655,23 @@ export class CombatScene extends Phaser.Scene {
           context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId,
           seed: roundSeed, spellTier: 1,
           lanternLight: false, notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+          strikeOneFalse: hint || undefined,
         });
       }
     } catch {
       result = { encounterId: `local-${action}`, kind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
+    }
+    // Ch. VII Mira's Stall — fire only on the answered pass: the redraw sentinel above already
+    // re-presented with the SAME strikeOneFalse flag riding it (the strike itself persists
+    // through a redraw), so this one spot — after both the direct and redrawn paths have
+    // funneled back together — is the single terminal point that means "genuinely answered."
+    // Removal at fire time, per the arming law (combat/aids.ts).
+    if (hint) {
+      const fired = aidFires(this.armedAid, 'reveal_option');
+      if (fired) {
+        this.armedAid = null;
+        await services.inventory.removeItem(fired.itemId, 1);
+      }
     }
     // §5.1 Glow source 4 (trap 14): snapshot due-ness BEFORE record() mutates the queue.
     // This applies to every T1 cast too, not just T2/T3 — the SRS loop is the mana engine
@@ -1794,6 +1810,9 @@ export class CombatScene extends Phaser.Scene {
     // catch below (which would fabricate a graded result for a question never shown). C6 —
     // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
     const held = heldLanternLight();
+    // Ch. VII Mira's Stall — Scrivener's Hint: an armed Hint strikes a false MCQ option on the
+    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the Court's).
+    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat';
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1801,7 +1820,7 @@ export class CombatScene extends Phaser.Scene {
       result = await services.runEncounter({
         context, kinds: [artKind], factIds, packId: this.launch.packId, seed: roundSeed, flair: spell.label,
         spellTier: spell.tier,
-        lanternLight: held,
+        lanternLight: held, strikeOneFalse: hint || undefined,
       });
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
@@ -1831,10 +1850,20 @@ export class CombatScene extends Phaser.Scene {
           context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
           seed: roundSeed, flair: spell.label, spellTier: spell.tier,
           lanternLight: false, notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+          strikeOneFalse: hint || undefined,
         });
       }
     } catch {
       result = { encounterId: `local-${spell.id}`, kind: artKind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
+    }
+    // Ch. VII Mira's Stall — fire only on the answered pass (mirrors the T1 site in
+    // runPlayerAction above — see its comment for why this one spot is the right one).
+    if (hint) {
+      const fired = aidFires(this.armedAid, 'reveal_option');
+      if (fired) {
+        this.armedAid = null;
+        await services.inventory.removeItem(fired.itemId, 1);
+      }
     }
     // §5.5 the weld edge: capture every involved fact's box BEFORE record() mutates it (trap
     // 14 — same capture-before-record duty as the due-renewal snapshot above).

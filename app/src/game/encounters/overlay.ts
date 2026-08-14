@@ -35,6 +35,9 @@ export interface EncounterCtx {
   /** One italic line under the eyebrow (e.g. lantern.ts FATE_HOLDS_LINE on a re-present).
    *  Absent = none. */
   notice?: string;
+  /** Ch. VII Mira's Stall — Scrivener's Hint fired: renderMcq strikes one wrong option.
+   *  Absent/false = no strike. Threaded straight from EncounterRequest (register.ts). */
+  strikeOneFalse?: boolean;
 }
 
 export interface Overlay {

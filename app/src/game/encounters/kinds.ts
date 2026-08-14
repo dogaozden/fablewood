@@ -103,14 +103,19 @@ function reclaimBeat(
 
 // --- mcq · Smite -------------------------------------------------------------
 
-const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
+const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
   const options = (enc.options ?? []).map(String);
   const answer = String(enc.answer ?? '');
   const cards: HTMLButtonElement[] = [];
   let answered = false;
 
+  // Ch. VII Mira's Stall — Scrivener's Hint (T3): deterministic, first wrong option in
+  // presentation order (no rng anywhere near answers). -1 (no match) is a safe no-op below —
+  // no real index ever equals it, so nothing renders struck.
+  const struckIndex = ctx.strikeOneFalse ? options.findIndex((opt) => opt !== answer) : -1;
+
   const choose = (idx: number) => {
-    if (answered || !o.isArmed()) return;
+    if (answered || !o.isArmed() || idx === struckIndex) return;
     answered = true;
     const correct = options[idx] === answer;
     cards.forEach((c, i) => {
@@ -145,10 +150,20 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
 
   const list = el('div', { class: 'fw-opts' });
   options.forEach((label, i) => {
-    const card = el('button', { class: 'fw-opt', type: 'button', 'data-commit': 'true', onclick: () => choose(i) }, [
-      el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
-      el('span', { class: 'fw-optlabel', text: label }),
-    ]);
+    // Struck option gets its own build (not the shared commit-button path) — it must stay
+    // inert: disabled, no onclick, and NO data-commit. W6's lantern-raise disarm listener
+    // (overlay.ts) only fires on [data-commit] buttons, so withholding the attribute here is
+    // what keeps a struck line from counting as a commit as well as from being clickable.
+    const card = i === struckIndex
+      ? el('button', { class: 'fw-opt fw-struck', type: 'button', disabled: true }, [
+          el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
+          el('span', { class: 'fw-optlabel', text: label }),
+          el('span', { class: 'fw-struck-sub', text: "— struck by the scrivener's hand" }),
+        ])
+      : el('button', { class: 'fw-opt', type: 'button', 'data-commit': 'true', onclick: () => choose(i) }, [
+          el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
+          el('span', { class: 'fw-optlabel', text: label }),
+        ]);
     cards.push(card);
     list.append(card);
   });

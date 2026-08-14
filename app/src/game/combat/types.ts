@@ -98,8 +98,9 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
   // validTargets has no case for it (falls to the default `[]`) — CombatScene.onPickAction
   // special-cases 'satchel' before that gate anyway (same as 'wait'), so it's always
   // pickable. Resolves heals through combat/satchel.ts + services.inventory.useItem, not
-  // the damage table; reveal_option/retry_cast/streak_shield stay catalog-only (touching
-  // the encounter surface to actually consume them is out of scope — see satchel.ts).
+  // the damage table; streak_shield alone stays catalog-only (Ward of Focus is passive,
+  // never armed — combat/aids.ts Constraint 4). reveal_option/retry_cast now arm via the
+  // Satchel and reveal_option fires in combat too (combat/aids.ts, Tasks 2-3) — see satchel.ts.
   satchel: {
     kind: 'satchel', label: 'Satchel', hotkey: 'q', encounter: null, range: 0,
     shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item.',

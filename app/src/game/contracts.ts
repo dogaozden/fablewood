@@ -27,6 +27,10 @@ export interface EncounterRequest {
   /** One italic line under the eyebrow (e.g. lantern.ts FATE_HOLDS_LINE on a re-present).
    *  Absent = none. */
   notice?: string;
+  /** Ch. VII Mira's Stall — Scrivener's Hint fired: the mcq renderer strikes one wrong option.
+   *  CombatScene sets this at its two cast sites only; absent/false = no strike (every other
+   *  caller, and every cast with no Hint armed, never passes it). */
+  strikeOneFalse?: boolean;
   /** casting spell's tier — biases pick()'s difficulty filter. Absent (Strike/Satchel) = no filtering. */
   spellTier?: 1 | 2 | 3;
   /** @deprecated resolution is per-fact via the draw index */
