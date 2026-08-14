@@ -70,6 +70,21 @@ const CSS = `
 .fw-rule { height: 2px; margin: 16px 0 18px; border: 0;
   background: linear-gradient(90deg, transparent, rgba(247,206,107,.9), rgba(166,84,32,.45), transparent); }
 
+/* Ch. IV — Lantern-light: a muted notice line + the "Raise the lantern" re-draw strip,
+   both additive to the header (appended after setHeader's own replaceChildren). */
+.fw-notice { margin: .5em 0 0; font-size: .86rem; font-style: italic; color: var(--ink-soft); line-height: 1.4; }
+.fw-lantern { display: flex; align-items: center; gap: .7em; margin: 12px 0 0; padding: .5em .8em;
+  border-radius: 12px; background: rgba(247,206,107,.14); border: 1px solid rgba(247,206,107,.4); }
+.fw-lantern-btn { font: inherit; font-weight: 700; font-size: .84rem; cursor: pointer; color: var(--ink-2);
+  border: 1px solid var(--ember-deep); border-radius: 999px; padding: .38em 1em;
+  background: linear-gradient(var(--gold), var(--amber));
+  box-shadow: inset 0 1px 0 rgba(255,241,198,.8), 0 2px 8px -3px rgba(16,11,10,.5);
+  transition: transform .12s, box-shadow .12s, filter .12s; }
+.fw-lantern-btn:hover { filter: brightness(1.06); transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,241,198,.9), 0 4px 14px -3px rgba(16,11,10,.55), 0 0 16px rgba(247,206,107,.4); }
+.fw-lantern-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.fw-lantern-hint { font-size: .78rem; font-style: italic; color: var(--ink-soft); }
+
 .fw-body { display: block; }
 .fw-footer { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
 .fw-hint { font-size: .82rem; color: var(--ink-soft); font-style: italic; }
@@ -298,7 +313,7 @@ const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .fw-overlay, .fw-panel, .fw-verdict, .fw-teach, .fw-reclaim, .fw-holdline { animation: none !important; }
-  .fw-opt, .fw-chip, .fw-step, .fw-order-drop, .fw-btn, .fw-holdline-slot { transition: none !important; }
+  .fw-opt, .fw-chip, .fw-step, .fw-order-drop, .fw-btn, .fw-holdline-slot, .fw-lantern-btn { transition: none !important; }
   .fw-deliberate .fw-nib, .fw-dots span, .fw-reclaim .fw-reclaim-flare { animation: none !important; }
 }
 `;

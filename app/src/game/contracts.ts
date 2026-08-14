@@ -21,6 +21,12 @@ export interface EncounterRequest {
   encounterId?: string;
   /** spell title for the overlay eyebrow ("✦ Cinder-Rebuke · Multiple Choice") — T2+ casts only */
   flair?: string;
+  /** Ch. IV — caller holds a lit Lantern-light: show the overlay's re-draw affordance.
+   *  Absent/false = no affordance (gates, boss phases, trim, teaching never pass it). */
+  lanternLight?: boolean;
+  /** One italic line under the eyebrow (e.g. lantern.ts FATE_HOLDS_LINE on a re-present).
+   *  Absent = none. */
+  notice?: string;
   /** casting spell's tier — biases pick()'s difficulty filter. Absent (Strike/Satchel) = no filtering. */
   spellTier?: 1 | 2 | 3;
   /** @deprecated resolution is per-fact via the draw index */
@@ -42,6 +48,11 @@ export interface EncounterResult {
    * callers read `result.difficulty ?? 2` defensively.
    */
   difficulty?: EncounterDifficulty;
+  /** Ch. IV — the player raised the lantern INSTEAD of answering: nothing was judged, and
+   *  nothing may be recorded/granted from this result (factIds is deliberately [] and
+   *  quality 0 so a caller that forgets to branch stays inert). The presented-but-unanswered
+   *  encounter's fact ids ride here for the caller's exclusion list. Optional, additive. */
+  redraw?: { shownFactIds: string[] };
 }
 
 /** Opens the encounter overlay (DOM over canvas), resolves when answered. Combat pauses meanwhile. */
@@ -202,6 +213,12 @@ export interface SaveData {
   /** ISO stamp of the last Hearth night-rest; absence = never rested. W4's Lantern-light
    *  consumes this. */
   lastHearthAt?: string;
+  /** Lantern-light held (Concordance Ch. IV): ONE stored inspiration token, banked by the
+   *  hearth night-rest (HamletScene.doCottage — the lastHearthAt event above). Binary, no
+   *  stockpiling; absent = false = no light. Spent on a drill re-draw or a loot-rarity
+   *  advantage; game/lantern.ts + the spend sites own the rules. Optional, additive: old
+   *  consumers unaffected, same `?? `-default pattern as `xp?`/`level?`. */
+  lanternLight?: boolean;
   /** Cumulative XP (Concordance Ch. III). Absent = 0 — legacy saves start the spine at L1
    *  with no catch-up grant (W4 controller ruling). progression/xp.ts owns every number. */
   xp?: number;
