@@ -805,6 +805,7 @@ test("the replace law holds live: firing the replacing Seal never touches the re
 // with context:'drill' and never wires strikeOneFalse at all, and never once reads
 // this.armedAid across the whole round loop.
 type DdSave = Save & { dungeon?: { roomIndex: number; cleared: string[]; gatePending?: string } };
+type DdInventory = { version: number; gold: number; stacks: Record<string, number> };
 
 /** vc.econ.valuation.pre-vs-post-money carries an mcq encounter (enc.mcq.pre-post-money)
  *  EARLIER in the pack's own encounters array than its free_recall sibling (enc.fr.pre-post-
@@ -853,10 +854,45 @@ async function answerDoorDrillsWrong(page: Page, count: number): Promise<void> {
   }
 }
 
+/** Quiesced, polling restore — cloned from e2e/deaths-door.spec.ts's own restoreState (fix
+ *  round 1, review Important #2): this test's own finally runs right after a LIVE scene
+ *  transition (combat -> door -> wipe -> hamlet), the exact shape that file's doc comment
+ *  built this idiom for — "a live scene's own persist writes can otherwise land AFTER a bare
+ *  PUT and poison whatever spec runs next." page.goto('about:blank') first removes the
+ *  hamlet scene as a second, racing writer; the PUT-and-verify loop (5x, 150ms apart) then
+ *  confirms the restore actually settled rather than trusting one unverified write. Task 5's
+ *  tests correctly use the simpler non-polling restoreSave above — they never transition
+ *  scenes immediately before their own finally, so they were never exposed to this race. */
+async function restoreDoorState(page: Page, save: DdSave | null, inv: DdInventory | null): Promise<void> {
+  const saveData: DdSave = save ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
+  const invData: DdInventory = inv ?? { version: 1, gold: 20, stacks: {} };
+  await page.goto('about:blank');
+  for (let i = 0; i < 5; i++) {
+    await page.request.put('/api/state/save.json', { data: saveData });
+    await page.request.put('/api/state/inventory.json', { data: invData });
+    await new Promise((r) => setTimeout(r, 150));
+    const nowSave = (await page.request.get('/api/state/save.json').then((r) => r.json()).catch(() => undefined)) as
+      | DdSave
+      | undefined;
+    const nowInv = (await page.request
+      .get('/api/state/inventory.json')
+      .then((r) => r.json())
+      .catch(() => undefined)) as DdInventory | undefined;
+    if (
+      nowSave?.scene === saveData.scene &&
+      nowInv?.gold === invData.gold &&
+      JSON.stringify(nowInv?.stacks ?? {}) === JSON.stringify(invData.stacks ?? {})
+    ) {
+      return;
+    }
+  }
+  throw new Error('restoreDoorState: save.json/inventory.json never settled on the restored snapshot');
+}
+
 test("an armed aid is inert at Death's Door: no strike renders, the arm neither fires nor is consumed (Constraint 5's context gate)", async ({ page }) => {
   test.setTimeout(120_000);
   const beforeSave = await readState<DdSave>(page, 'save.json');
-  const beforeInv = await readState<{ gold?: number; stacks?: Record<string, number> }>(page, 'inventory.json');
+  const beforeInv = await readState<DdInventory>(page, 'inventory.json');
 
   try {
     await seedSrsForDoorMcq(page);
@@ -885,6 +921,19 @@ test("an armed aid is inert at Death's Door: no strike renders, the arm neither 
     await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
     await page.screenshot({ path: `${EV}/miras-stall-dd-aid-inert.png` });
 
+    // ---- precondition (fix round 1, review Important #1): prove this round really IS an
+    // MCQ presentation before trusting the no-strike check below. Without this, a future
+    // vc-law pack-content edit that reorders/adds an earlier-matching encounter for
+    // DD_MCQ_FACT could silently flip the door to a free_recall presentation (zero .fw-opt
+    // elements at all) — the count-0 check below would then stay green for the wrong
+    // reason (nothing to strike, not correctly-suppressed striking), permanently and
+    // silently losing the one test covering Constraint 5's context gate. This precondition
+    // turns that drift into a loud failure instead.
+    await expect(
+      page.locator('.fw-overlay .fw-opt'),
+      'precondition: the door drill really is MCQ-shaped (guards the no-strike check below from going vacuous)',
+    ).not.toHaveCount(0);
+
     // ---- Constraint 5: runDeathsDoorRound's own runEncounter call never wires
     // strikeOneFalse at all — no strike renders even though the Hint is armed and this IS
     // the seeded, guaranteed mcq presentation.
@@ -911,12 +960,7 @@ test("an armed aid is inert at Death's Door: no strike renders, the arm neither 
       'the Hint survives the whole door sequence untouched — drill context never fires it',
     ).toBe(1);
   } finally {
-    await page.request.put('/api/state/save.json', {
-      data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
-    });
-    await page.request.put('/api/state/inventory.json', {
-      data: beforeInv ?? { version: 1, gold: 20, stacks: {} },
-    });
+    await restoreDoorState(page, beforeSave, beforeInv);
   }
 });
 
