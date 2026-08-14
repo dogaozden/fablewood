@@ -42,6 +42,7 @@ import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
+import { armAid, type ArmedAid } from './aids';
 import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // Direct import, not services.* — presentHoldTheLine is brand new to Task 7, both this file and
 // overlay.ts are in this task's own file list, and contracts.ts (the services.* registry's
@@ -291,6 +292,12 @@ export class CombatScene extends Phaser.Scene {
   private packDifficultyClassified = false;
   /** party-shared, per-battle, reset in create() — NEVER persisted (§13/§14). */
   private glow: GlowState = { pips: 0 };
+  /** Ch. VII Mira's Stall — the standing trial-tool arm (combat/aids.ts), combat-transient like
+   *  glow above: reset in create() AND cleared at every battle-end branch (resolveBattle) — an
+   *  unfired arm simply dissolves (defer-removal law: the item was never taken, so clearing
+   *  this is the whole "refund," nothing else to do). A second arm replaces this outright
+   *  (armAid ignores the standing arm's data by design) — one live arm at a time. */
+  private armedAid: ArmedAid | null = null;
   /** the concrete spell about to be cast; set only when a T2/T3 tier is chosen via the
    *  flyout. Null (T1/strike) means runPlayerAction's untouched Phase-1/T1 path applies. */
   private pendingSpell: SpellDef | null = null;
@@ -402,6 +409,7 @@ export class CombatScene extends Phaser.Scene {
     this.pendingLevelUps = [];
     this.packDifficultyClassified = false;
     this.glow = { pips: 0 };
+    this.armedAid = null;
     this.pendingSpell = null;
     this.flyoutAction = null;
     this.overglowOn = false;
@@ -2314,6 +2322,26 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
 
+    // Ch. VII Mira's Stall — the trial tools (Scrivener's Hint/Second Wind Seal) ARM rather
+    // than consume: the item deducts ONLY when the arm fires (combat/aids.ts, Tasks 3-4),
+    // never here — contrast the glow branch above (and the heal branch below), which both
+    // consume immediately on use. NO services.inventory.removeItem/useItem call on this branch
+    // (defer-removal law): armAid always replaces the standing arm outright (one live arm at a
+    // time), so re-arming needs no special-case. Same turn-cost shape as glow/heal above/below
+    // (560ms delayedCall -> endPlayerTurn) — this branch predates W6's turn-budget rework.
+    if (item.effect.kind === 'reveal_option' || item.effect.kind === 'retry_cast') {
+      this.armedAid = armAid(this.armedAid, item.id, item.effect.kind);
+      this.hud.showBanner(
+        item.effect.kind === 'reveal_option'
+          ? 'The nib gleams — your next casting shows a false line struck.'
+          : 'The seal warms — a failed casting may be tried again, once.',
+        P.lanternGold,
+      );
+      this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
+      this.time.delayedCall(560, () => this.endPlayerTurn());
+      return;
+    }
+
     const keeper = this.unitById('keeper');
     const mira = this.unitById('mira');
     if (!keeper || !mira) { this.returnToActionMenu(unit); return; }
@@ -3153,6 +3181,11 @@ export class CombatScene extends Phaser.Scene {
   private resolveBattle(outcome: 'victory' | 'retreat' | 'wipe', wipeKeepsakeId: string | null = null): void {
     if (this.state === 'over') return;
     this.state = 'over';
+    // Mira's Stall — dissolve any standing unfired arm here, unconditionally, BEFORE the
+    // outcome branch below: all three outcomes (victory/wipe/retreat) funnel through this one
+    // function, so a single clear covers every battle-end branch alike. Defer-removal means
+    // clearing IS the dissolve (the item was never taken — nothing to refund).
+    this.armedAid = null;
     this.hud.hideActionMenu();
     this.rangeGfx.clear();
     this.hoverGfx.clear();
@@ -3594,6 +3627,9 @@ export class CombatScene extends Phaser.Scene {
     /** Ch. VI — direct read of the Careful Step stance flag (e2e-only; before this, a test
      *  could only infer it indirectly through budget arithmetic). */
     carefulStepOn: boolean;
+    /** Ch. VII Mira's Stall — e2e-only read of the standing trial-tool arm; null when nothing
+     *  is armed (same "read-only debug surface" family as rank/glow above). */
+    armedAid: ArmedAid | null;
   } {
     return {
       state: this.state,
@@ -3613,6 +3649,7 @@ export class CombatScene extends Phaser.Scene {
       welded3: this.rankInfo.welded3,
       welded4: this.rankInfo.welded4,
       glow: this.glow.pips,
+      armedAid: this.armedAid,
       reclaimed: this.reclaimed,
       newWelds: this.newWelds,
     };

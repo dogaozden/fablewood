@@ -18,6 +18,13 @@
  * items (wick-tallow/lantern-brand) are combat-only by design (catalog.ts's `use:'combat'`),
  * so unlike heals they have NO field-use path at all — consume.ts's useItem always refuses
  * them outside this scene.
+ *
+ * Phase 3 (Ch. VII Mira's Stall, arming-model amendment) widens the filter again to
+ * `heal | glow | reveal_option | retry_cast`: the trial tools (Scrivener's Hint/Second Wind
+ * Seal) are now usable-in-combat — the encounter-surface work the SCOPE note above flagged as
+ * separately-scoped has landed. Unlike heal/glow, a tool does NOT consume on use here: it ARMS
+ * (CombatScene owns the arm state via combat/aids.ts) and deducts only when the arm fires. Ward
+ * of Focus (streak_shield) stays excluded — passive, never armed, never in this list.
  */
 import { CATALOG, type ItemDef } from '../../inventory/catalog';
 import type { InventorySnapshot } from '../contracts';
@@ -27,9 +34,13 @@ export interface UsableSatchelItem {
   qty: number;
 }
 
-/** Owned items with a combat-resolvable effect (heal or glow — see file header), qty > 0, catalog order. */
+/** Owned items with a combat-resolvable effect (heal, glow, or trial tool — see file header), qty > 0, catalog order. */
 export function usableSatchelItems(snapshot: InventorySnapshot): UsableSatchelItem[] {
-  return CATALOG.filter((i) => (i.effect.kind === 'heal' || i.effect.kind === 'glow') && (snapshot.stacks[i.id] ?? 0) > 0).map((item) => ({
+  return CATALOG.filter(
+    (i) =>
+      (i.effect.kind === 'heal' || i.effect.kind === 'glow' || i.effect.kind === 'reveal_option' || i.effect.kind === 'retry_cast') &&
+      (snapshot.stacks[i.id] ?? 0) > 0,
+  ).map((item) => ({
     item,
     qty: snapshot.stacks[item.id] ?? 0,
   }));

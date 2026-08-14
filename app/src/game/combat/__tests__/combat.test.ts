@@ -689,21 +689,25 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
   const fullRestore = itemById('wardancers-restorative')!; // heal 999 ("to full")
   const trinket = itemById('faded-coin-cache')!; // effect kind 'none' — no combat effect
 
-  it('usableSatchelItems surfaces only owned heal items (qty > 0), catalog order', () => {
+  it('usableSatchelItems surfaces owned heal AND trial-tool items (qty > 0), catalog order', () => {
     const snap = {
       gold: 0,
       stacks: { 'embermend-draught': 2, 'scriveners-hint': 3, 'faded-coin-cache': 1, 'lanternoil-tonic': 0 },
     };
     const usable = usableSatchelItems(snap);
-    // tools ('scriveners-hint') and trinkets ('faded-coin-cache') are excluded even though
-    // owned; a zero-qty heal ('lanternoil-tonic') is excluded too — only a real, owned heal remains.
-    expect(usable.map((u) => u.item.id)).toEqual(['embermend-draught']);
+    // Phase 3 (Ch. VII Mira's Stall) — trial tools now surface alongside heals; trinkets
+    // ('faded-coin-cache') still stay excluded even though owned, and a zero-qty heal
+    // ('lanternoil-tonic') is excluded too. Both surfacing items appear in catalog order.
+    expect(usable.map((u) => u.item.id)).toEqual(['embermend-draught', 'scriveners-hint']);
     expect(usable[0].qty).toBe(2);
+    expect(usable[1].qty).toBe(3);
   });
 
-  it('usableSatchelItems is empty when nothing in the satchel is usable in combat (cannot-use-when-empty)', () => {
+  it('usableSatchelItems is empty when nothing owned is usable in combat (cannot-use-when-empty); Ward of Focus stays excluded', () => {
     expect(usableSatchelItems({ gold: 0, stacks: {} })).toEqual([]);
-    expect(usableSatchelItems({ gold: 0, stacks: { 'scriveners-hint': 5, 'ward-of-focus': 1 } })).toEqual([]);
+    // Ward of Focus (streak_shield) is passive — never armed, never in the combat Satchel,
+    // even when owned (Constraint 4). It's the one tool kind that stays excluded permanently.
+    expect(usableSatchelItems({ gold: 0, stacks: { 'ward-of-focus': 1 } })).toEqual([]);
   });
 
   it('resolveHealUse restores the item amount, clamped to the caller-supplied maxPool', () => {
