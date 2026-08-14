@@ -296,3 +296,89 @@ test('a lantern-raise redraw during a struck cast keeps the strike; the Hint fir
   expect(inv?.stacks?.['scriveners-hint'] ?? 0, 'the Hint fires exactly once, on the genuine answer').toBe(0);
   expect((await snap(page))?.armedAid, 'the arm is cleared after firing').toBeNull();
 });
+
+// Ch. VII Mira's Stall, Task 3 fix round 1 (Critical review finding): armedAid.kind + context
+// alone aren't enough to gate the fire — Weave/Sequence/Cast all share context:'combat' with
+// Smite too, but only renderMcq (kinds.ts) ever reads ctx.strikeOneFalse. Arms the Hint, casts
+// a non-MCQ form (Cast From Memory / free_recall) and proves it resolves with NO consume and
+// the arm still standing, then casts Smite on a later turn and proves the surviving arm still
+// fires normally.
+test('armed Hint survives a non-MCQ combat cast untouched; only an MCQ cast fires it', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 20, stacks: { 'scriveners-hint': 1 } },
+  });
+
+  await page.goto('/?scene=combat&seed=7&rank=1');
+  await waitReady(page, 'combat');
+
+  let s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+
+  await armHint(page);
+
+  // ---- second Keeper turn: Cast From Memory (free_recall) — context:'combat' just like
+  // Smite, but a different encounter kind; renderFreeRecall never reads ctx.strikeOneFalse.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's second turn opened, Hint still armed").toBe('playerMove');
+
+  await debugSetPos(page, 'keeper', 5, 3);
+  await debugSetPos(page, 'wisp-0', 6, 3);
+  await page.keyboard.press('5'); // Cast From Memory (T1, free_recall)
+  await page.waitForTimeout(150);
+  expect((await snap(page))?.state, 'Rank 1 goes straight to targeting').toBe('playerTarget');
+  await canvasClick(page, 192 + 6 * 48 + 24, 48 + 3 * 48 + 24); // wisp-0's tile
+
+  await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+  await expect(
+    page.locator('.fw-opt.fw-struck'),
+    'a free_recall overlay never renders a struck option (only renderMcq reads strikeOneFalse)',
+  ).toHaveCount(0);
+  await page.locator('.fw-textarea').fill('irrelevant answer — only the bookkeeping is under test');
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
+  try {
+    await cont.waitFor({ state: 'visible', timeout: 3000 });
+    await cont.click();
+  } catch { /* an unexpectedly-correct answer can auto-resolve without a continue button too */ }
+  await page.waitForTimeout(300);
+
+  // ---- the non-MCQ cast resolved; the Hint must be untouched (this is the fix under test).
+  const invAfterCast = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(invAfterCast?.stacks?.['scriveners-hint'] ?? 0, 'a non-MCQ cast consumes nothing').toBe(1);
+  expect((await snap(page))?.armedAid, 'the Hint is still armed after a non-MCQ cast').toEqual({
+    itemId: 'scriveners-hint', kind: 'reveal_option',
+  });
+
+  // ---- third Keeper turn: NOW cast Smite (mcq) — the surviving arm fires normally.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's third turn opened, Hint still armed").toBe('playerMove');
+
+  await debugSetPos(page, 'keeper', 5, 3);
+  await debugSetPos(page, 'wisp-0', 6, 3);
+  await page.keyboard.press('2'); // Smite (T1, mcq)
+  await page.waitForTimeout(150);
+  await canvasClick(page, 192 + 6 * 48 + 24, 48 + 3 * 48 + 24); // wisp-0's tile
+
+  await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(450);
+
+  const struck = page.locator('.fw-opt.fw-struck');
+  await expect(struck, 'the surviving arm strikes an option on the eventual MCQ cast').toHaveCount(1);
+
+  await page.locator('.fw-opt:not(.fw-struck)').first().click();
+  await page.waitForTimeout(300);
+  const onward = page.getByRole('button', { name: 'Onward ▸' });
+  try {
+    await onward.waitFor({ state: 'visible', timeout: 1500 });
+    await onward.click();
+  } catch { /* correct answer auto-resolves without a continue button (kinds.ts renderMcq) */ }
+
+  const inv = await waitForState<{ stacks?: Record<string, number> }>(
+    page, 'inventory.json', (i) => (i?.stacks?.['scriveners-hint'] ?? 0) === 0,
+  );
+  expect(inv?.stacks?.['scriveners-hint'] ?? 0, 'the Hint fires exactly once, on the eventual MCQ cast').toBe(0);
+  expect((await snap(page))?.armedAid, 'the arm is cleared after firing').toBeNull();
+});

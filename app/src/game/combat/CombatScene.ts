@@ -1620,8 +1620,11 @@ export class CombatScene extends Phaser.Scene {
     // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
     const held = heldLanternLight();
     // Ch. VII Mira's Stall — Scrivener's Hint: an armed Hint strikes a false MCQ option on the
-    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the Court's).
-    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat';
+    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the
+    // Court's) that ALSO actually draws an MCQ — kind === 'mcq' too, not just context, since
+    // Weave/Sequence/Cast all share context:'combat' with Smite but only renderMcq (kinds.ts)
+    // ever reads strikeOneFalse (fix round 1, Critical review finding).
+    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat' && kind === 'mcq';
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1811,8 +1814,11 @@ export class CombatScene extends Phaser.Scene {
     // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
     const held = heldLanternLight();
     // Ch. VII Mira's Stall — Scrivener's Hint: an armed Hint strikes a false MCQ option on the
-    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the Court's).
-    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat';
+    // next COMBAT cast only (never parley/boss — the aid reads Mira's own stall, not the
+    // Court's) that ALSO actually draws an MCQ — artKind === 'mcq' too, not just context, since
+    // other T2/T3 Arts share context:'combat' but only renderMcq (kinds.ts) ever reads
+    // strikeOneFalse (fix round 1, Critical review finding — mirrors the T1 site above).
+    const hint = this.armedAid?.kind === 'reveal_option' && context === 'combat' && artKind === 'mcq';
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
