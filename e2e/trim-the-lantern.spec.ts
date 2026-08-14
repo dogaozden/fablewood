@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, canvasClick, readState } from './helpers';
+import { waitReady, canvasClick, readState, waitForState } from './helpers';
 
 const EV = 'screenshots';
 
@@ -181,7 +181,9 @@ test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
         .toBe(0);
 
       // pip transition, half 1: the Ember stays spent — a miss is not a refund.
-      const after = await readState<Save>(page, 'save.json');
+      // Wait for the heal to round-trip to disk before reading the full shape (task-8-red-
+      // rootcause.md: a bare read here can race the save's GET+PUT and catch a pre-heal hp).
+      const after = await waitForState<Save>(page, 'save.json', (s) => s?.hp === 11);
       expect(after?.embers, 'the Ember stays spent through a miss').toBe(1);
       expect(after?.hp, 'a miss heals +1 (TRIM_HEAL_MISS)').toBe(11);
       expect(await trimDebugRead(page)).toEqual({ lastQuality: 0, embersSpent: 1 });

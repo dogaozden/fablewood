@@ -854,11 +854,13 @@ export class DungeonScene extends Phaser.Scene {
     for (const fid of res.factIds) {
       await services.srs.record(fid, res.quality, res.encounterId, this.facts.get(fid)?.type);
     }
-    this.trimLastQuality = res.quality;
 
     // DD-KNOB-1 (knob RT-1): partial credit (0.5) heals as a MISS, not a half-measure.
     const correct = res.quality >= 1;
     await this.applyHp(correct ? TRIM_HEAL_CORRECT : TRIM_HEAL_MISS);
+    // Set only after applyHp's save round-trips: trimDebug()'s marker means "drill fully
+    // settled, writes included," not "graded, persistence still pending" (e2e harness contract).
+    this.trimLastQuality = res.quality;
     this.view.toast(
       correct
         ? 'The flame answers. The party mends (+4).'
