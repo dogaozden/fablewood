@@ -2980,7 +2980,10 @@ export class CombatScene extends Phaser.Scene {
       if (result.redraw) {
         // The door's pool is ONE fact — this is the surface that re-draws for real:
         // salted, exclusion-listed, through the same ddDraw (census site unchanged).
-        const alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, result.redraw.shownFactIds);
+        // The requested id rides the exclusion list too (T6 review ruling): on pick()'s
+        // kind-fallback the shown encounter's fact_ids can omit id entirely, and without
+        // it the salted redraw can spend the light on the identical question.
+        const alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, [...result.redraw.shownFactIds, id]);
         if (this.destroyed || !this.dd) return;
         if (alt) await services.save.save({ lanternLight: false });
         result = await services.runEncounter({
