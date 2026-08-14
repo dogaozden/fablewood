@@ -82,6 +82,7 @@ describe('the Cottage banks the hearth (night rest)', () => {
     expect(conv.speaker).toBe("Keeper's Cottage");
     expect(conv.pages).toEqual([
       'You bank the hearth, and the night keeps its side of the bargain. The party is whole; the embers are banked.',
+      'The lantern drinks the hearthflame — its light is yours to spend.',
     ]);
   });
 

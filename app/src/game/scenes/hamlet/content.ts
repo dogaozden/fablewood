@@ -124,6 +124,7 @@ export function hearthRestConv(): Conversation {
     speaker: "Keeper's Cottage",
     pages: [
       'You bank the hearth, and the night keeps its side of the bargain. The party is whole; the embers are banked.',
+      'The lantern drinks the hearthflame — its light is yours to spend.',
     ],
   };
 }

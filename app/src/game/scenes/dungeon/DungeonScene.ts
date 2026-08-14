@@ -24,7 +24,7 @@ import { seededShuffle } from '../../recency';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
 import { music } from '../../../music/instance';
-import { roomClearLoot, bossLoot } from '../../../inventory/economy';
+import { roomClearLoot, bossLoot, type Edge } from '../../../inventory/economy';
 import { itemById } from '../../../inventory/catalog';
 import { openInventoryPane } from '../../../inventory/ui/inventoryPane';
 import {
@@ -287,7 +287,7 @@ export class DungeonScene extends Phaser.Scene {
   private refreshStatus(): void {
     const sd = services.save.get();
     const lvl = sd.level ?? 1;
-    this.view.setStatus(sd.hp, maxHpForLevel(lvl), sd.streak, embersOf(sd), lvl);
+    this.view.setStatus(sd.hp, maxHpForLevel(lvl), sd.streak, embersOf(sd), lvl, sd.lanternLight ?? false);
   }
 
   private teachingFacts(room: DungeonRoom, roomIndex: number): FactLite[] {
@@ -586,6 +586,13 @@ export class DungeonScene extends Phaser.Scene {
     this.drawMap();
     this.refreshStatus();
     const gold = await this.grantRoomLoot(room);
+    // Ch. IV final-review I1 — grantRoomLoot's own offerLantern can spend (or refund) the
+    // lantern via a save write, and nothing between here and the refreshStatus() above
+    // repaints the header glyph afterward: repaint again now the spend has settled, so "lit
+    // when held, guttered when spent" (the chapter's own UI text) holds on the one screen the
+    // player is watching when they spend it. The boss site needs no equivalent call — it ends
+    // in scene.start('hamlet'), which tears the scene down regardless.
+    this.refreshStatus();
     // §3.2 — fold this room into the run harvest; the Night's Ledger shows ONLY at run end (boss
     // victory / retreat), never mid-crawl (a per-room card would be five interruptions per vault).
     this.accrueHarvest(outcome, gold);
@@ -618,19 +625,46 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /** Ch. IV — offer the loot-advantage spend when a Lantern-light is held. Auto-drive
+   *  always raises (a hung prompt would strand sim/auto runs — presentPendingLevelUp's
+   *  own auto-threading rule). Consume-before-benefit; the no-trinket refund lives at
+   *  the call sites (trim's spend-first-refund idiom). */
+  private async offerLantern(troveName: string): Promise<Edge> {
+    // Guarded read (T4 review ruling): a save fault means "no lantern", never a thrown loot grant.
+    let held = false;
+    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    if (!held) return 'none';
+    const choice = this.auto ? 'raise' : await this.view.showLanternChoice(troveName);
+    if (choice !== 'raise') return 'none';
+    await services.save.save({ lanternLight: false });
+    return 'advantage';
+  }
+
   /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). Returns the
    *  gold granted, for the Night's Ledger harvest (§3.2). */
   private async grantRoomLoot(room: DungeonRoom): Promise<number> {
     const roomIndex = this.spec.rooms.findIndex((r) => r.id === room.id);
     const rng = mulberry32((this.seed + roomIndex * 7919 + 1) >>> 0);
-    const loot = roomClearLoot(roomIndex, rng);
+    const edge = await this.offerLantern(room.name);
+    const loot = roomClearLoot(roomIndex, rng, edge);
     await services.inventory.addGold(loot.gold);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
+    const lanternSuffix = edge === 'advantage' && loot.trinketId ? " — drawn by the lantern's light." : '';
+    const base = trinketName
+      ? `${room.name} falls quiet. +${loot.gold} coin, and a ${trinketName} glints in the dust${lanternSuffix || '.'}`
+      : `${room.name} falls quiet. +${loot.gold} coin.`;
+    // The 35% drop gate missed — advantage never touched it (chapter: rarity only). Honest
+    // refund, trim's idiom. Folded into the SAME toast as the gold line (not a second,
+    // separately-timed lootToast()) — two toasts fire from the same fixed screen position
+    // (VaultView.toast), so back-to-back calls here render as illegible overlapping text;
+    // confirmed by eyes-on screenshot during authoring (task-7-report.md).
+    const refunding = edge === 'advantage' && !loot.trinketId;
+    if (refunding) await services.save.save({ lanternLight: true });
     this.view.lootToast(
-      trinketName
-        ? `${room.name} falls quiet. +${loot.gold} coin, and a ${trinketName} glints in the dust.`
-        : `${room.name} falls quiet. +${loot.gold} coin.`,
+      refunding
+        ? `${base} The lantern flares — but only dust glitters back. Its light returns to you.`
+        : base,
     );
     return loot.gold;
   }
@@ -758,16 +792,25 @@ export class DungeonScene extends Phaser.Scene {
     const quest = this.pack ? bossQuest(this.pack) : undefined;
     const reward = (quest ? rewardText(quest) : null) ?? DEV_REWARD;
 
+    const edge = await this.offerLantern("the Warden's trove");
     // Boss bounty: gold + the guaranteed Warden Signet + a boss-weighted trinket (inventory-handoff §4).
     const rng = mulberry32((this.seed + 104729) >>> 0);
-    const loot = bossLoot(rng);
+    const loot = bossLoot(rng, edge);
     await services.inventory.addGold(loot.gold);
     await services.inventory.grantItem(loot.relicId);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
+    const lanternSuffix = edge === 'advantage' && loot.trinketId ? " — drawn by the lantern's light." : '';
     const lootLine = trinketName
-      ? ` The Warden yields ${loot.gold} coin, their signet, and a ${trinketName}.`
+      ? ` The Warden yields ${loot.gold} coin, their signet, and a ${trinketName}${lanternSuffix || '.'}`
       : ` The Warden yields ${loot.gold} coin and their signet.`;
+    if (edge === 'advantage' && !loot.trinketId) {
+      // Boss loot always attempts a trinket (no 35% gate here, unlike a room clear) — this
+      // only fires if the trinket pool is empty outright. Honest refund, trim's idiom (same
+      // shape as grantRoomLoot's own block).
+      await services.save.save({ lanternLight: true });
+      this.view.lootToast('The lantern flares — but only dust glitters back. Its light returns to you.');
+    }
 
     await services.save.save({ dungeon: this.progress, streak, scene: 'hamlet' });
     // Wave 4 Task 5, wire 5 — the flat boss grant, then the quest's own pack-authored xp

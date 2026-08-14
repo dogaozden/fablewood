@@ -34,6 +34,9 @@ export interface PartyStatus {
   streak: number;
   /** §12.3 — party-shared Glow pips (0..GLOW_CAP), additive to the existing status shape. */
   glow: number;
+  /** Ch. IV — Lantern-light held (Concordance): the HUD glyph beside the streak count is
+   *  lit when true, guttered when false. Additive to the existing status shape. */
+  lanternLight: boolean;
 }
 
 /** §12.2 — one row of the tier flyout. */
@@ -71,6 +74,7 @@ export class CombatHud {
   private streakIcon: Phaser.GameObjects.Image | null = null;
   private rankText: Phaser.GameObjects.Text;
   private glowPips: Phaser.GameObjects.Graphics;
+  private lanternGlyph: Phaser.GameObjects.Graphics;
   private lastMenuButtonWidth = 0;
   private lastGlowPips = -1;
   private flyout: Phaser.GameObjects.Container;
@@ -98,7 +102,8 @@ export class CombatHud {
     this.panelText = scene.add.text(12, 10, '', { fontFamily: FONT, fontSize: '13px', color: hex(P.parchment), lineSpacing: 5 });
     this.graceDot = scene.add.circle(160, 128, 5, P.lanternGold);
     this.glowPips = scene.add.graphics();
-    this.panel.add([this.panelBg, this.panelText, this.graceDot, this.glowPips]);
+    this.lanternGlyph = scene.add.graphics();
+    this.panel.add([this.panelBg, this.panelText, this.graceDot, this.glowPips, this.lanternGlyph]);
     // A2's real hearth-flame beside the streak (the "flame = streak" motif). Guarded:
     // absent in a texture-less boot; the text still reads the count either way.
     if (scene.textures.exists('icon.streak')) {
@@ -280,7 +285,7 @@ export class CombatHud {
     if (mira) lines.push(`Mira    ${bar(mira)} ${mira.hp}/${mira.maxHp}`);
     lines.push(status.miraBonusActive ? 'Mira: fighting fiercer (mastery)' : 'Mira: no bonus yet');
     lines.push(`Hearth: ${status.streak}`);
-    lines.push(`Lantern grace: ${status.graceAvailable ? 'ready' : 'spent'}`);
+    lines.push(`Solace: ${status.graceAvailable ? 'ready' : 'spent'}`);
     this.panelText.setText(lines.join('\n'));
 
     const h = this.panelText.height + 20;
@@ -314,6 +319,17 @@ export class CombatHud {
       this.scene.tweens.add({ targets: this.glowPips, scale: 1, duration: 260, ease: 'Back.easeOut' });
     }
     this.lastGlowPips = status.glow;
+
+    // Ch. IV — the lantern glyph beside the streak count: lit when held, guttered when
+    // spent (chapter UI text). Drawn, not textured: a stroked ring with a diamond flame,
+    // the glow-pip idiom at glyph scale.
+    const lx = 166;
+    this.lanternGlyph.clear();
+    const lit = status.lanternLight;
+    this.lanternGlyph.lineStyle(1.5, lit ? P.lanternGold : P.stoneGrey, lit ? 1 : 0.5)
+      .strokeCircle(lx, py, 6);
+    diamond(this.lanternGlyph, lx, py, 3.5, lit ? P.lanternGold : P.shadowPlum, true);
+    this.lanternGlyph.setAlpha(lit ? 1 : 0.55);
   }
 
   /** Debug: the party panel's current raw text (e2e-only — verifies the sidebar reflects

@@ -42,6 +42,7 @@ import {
 } from './content';
 import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
+import { planRedraw, FATE_HOLDS_LINE } from '../../lantern';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
 import { grantXp } from '../../progression/grant';
@@ -843,6 +844,11 @@ export class HamletScene extends Phaser.Scene {
           embers: emberMaxForLevel(lvl),
           lastHearthAt: now.toISOString(),
           lastPlayed: now.toISOString(),
+          // Ch. IV — banking the hearth night grants the ONE Lantern-light (binary:
+          // true stays true, no stockpiling). Grant lives in THIS patch only — never
+          // in grantXp (xp/level single-writer) and never keyed off save.streak
+          // (Wellspring/boss's counter is a different mechanic; controller ruling W5).
+          lanternLight: true,
         });
       } catch {
         /* save may be a stub */
@@ -975,12 +981,30 @@ export class HamletScene extends Phaser.Scene {
         // a prior Wellspring visit this session) behind fresh alternatives, so a
         // stale snapshot can't just re-ask what an earlier pass already covered.
         const factIds = partitionByRecency(ordered, wellspringRecentFactIds);
-        const res = await services.runEncounter({
+        // Ch. IV — guarded read (T4 review ruling): a save fault means "no lantern",
+        // it must never surface as a thrown round.
+        let held = false;
+        try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+        let res = await services.runEncounter({
           context: 'drill',
           packId: this.packId ?? '', // @deprecated (EncounterRequest) — resolution is per-fact once drawReady
           seed: roundSeed,
           factIds,
+          lanternLight: held,
         });
+        if (res.redraw) {
+          // Ch. IV — re-present from this round's own pool minus the shown facts (census law).
+          const plan = planRedraw(res.redraw.shownFactIds, factIds);
+          if (plan.consume) await services.save.save({ lanternLight: false });
+          res = await services.runEncounter({
+            context: 'drill',
+            packId: this.packId ?? '',
+            seed: roundSeed,
+            factIds: plan.factIds,
+            lanternLight: false,
+            notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+          });
+        }
         for (const fid of res.factIds) {
           // factOf() resolves type globally (fid may be from any installed pack); pv's own
           // factTypes map is pack-scoped and only valid on the legacy fallback path.

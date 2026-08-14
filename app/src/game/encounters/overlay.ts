@@ -20,6 +20,7 @@ import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
+import { createLanternGate, isCommitKey, redrawSentinel } from './lantern-ui';
 import { LEVEL_UP_TITLE, LEVEL_UP_SIGNOFF } from '../progression/ceremony';
 
 export interface EncounterCtx {
@@ -28,6 +29,12 @@ export interface EncounterCtx {
   /** §12.4 — T2/T3 spell casts pass their label through here for the eyebrow's action slot
    *  ("✦ Cinder-Rebuke · Multiple Choice"); T1 casts pass nothing (shipped eyebrows unchanged). */
   flair?: string;
+  /** Ch. IV — caller holds a lit Lantern-light: show the overlay's re-draw affordance.
+   *  Absent/false = no affordance (gates, boss phases, trim, teaching never pass it). */
+  lanternLight?: boolean;
+  /** One italic line under the eyebrow (e.g. lantern.ts FATE_HOLDS_LINE on a re-present).
+   *  Absent = none. */
+  notice?: string;
 }
 
 export interface Overlay {
@@ -227,10 +234,52 @@ export function presentEncounter(
     const o = buildOverlay();
     o.setHeader(encounter.kind, encounter.prompt, ctx.flair, difficultyOf(encounter));
 
+    // Ch. IV — one italic notice line under the eyebrow (fate-holds re-presents).
+    if (ctx.notice) {
+      o.panel.querySelector('.fw-header')!.appendChild(
+        el('p', { class: 'fw-notice', text: ctx.notice }),
+      );
+    }
+
+    // First resolution wins: the lantern strip and the kind's own done-callback race
+    // (a slow judge round-trip vs a late lantern click) — never double-settle.
+    const gate = createLanternGate();
     const finish = async (result: EncounterResult) => {
+      if (!gate.settle()) return;
       await o.close();
       resolve(result);
     };
+
+    // Ch. IV — "Raise the lantern": resolve a SENTINEL instead of answering. Chrome-level,
+    // kind-agnostic. Disarmed the moment an answer gesture commits (any other button click,
+    // Enter, or a digit key): "before answering any drill" means before COMMITTING an
+    // answer — a submitted free-recall mid-judge must not be dodgeable.
+    if (ctx.lanternLight) {
+      const strip = el('div', { class: 'fw-lantern' });
+      const btn = el('button', { class: 'fw-lantern-btn', text: 'Raise the lantern' }) as HTMLButtonElement;
+      strip.appendChild(btn);
+      strip.appendChild(el('span', { class: 'fw-lantern-hint', text: 'spend its light — a different memory surfaces' }));
+      o.panel.querySelector('.fw-header')!.appendChild(strip);
+      const disarm = (): void => {
+        gate.disarm();
+        strip.remove();
+      };
+      btn.addEventListener('click', () => {
+        if (!o.isArmed() || !gate.mayRaise()) return;
+        void finish(redrawSentinel(encounter));
+      });
+      o.root.addEventListener(
+        'click',
+        (e) => {
+          const t = e.target as HTMLElement | null;
+          if (t?.closest('button') && !t.closest('.fw-lantern')) disarm();
+        },
+        { capture: true },
+      );
+      o.onKey((e) => {
+        if (isCommitKey(e.key)) disarm();
+      });
+    }
 
     // ESC policy first, then the kind's own keys.
     o.onKey((e) => {

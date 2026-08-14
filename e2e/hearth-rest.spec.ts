@@ -80,8 +80,10 @@ test.describe('hearth night-rest (Wave 3)', () => {
       const warped = await warpHamletTo(page, 'cottage');
       expect(warped, 'warp hook parked the Keeper at the Cottage').toBe(true);
 
-      // --- Pin A: first rest of the night (hearthRestConv, 1 page, no choices) ---
-      await runCottageConversation(page, 1);
+      // --- Pin A: first rest of the night (hearthRestConv, 2 pages post W5 Task 3's
+      // lantern-grant line — the rest beat's own text already fills MAX_ROWS, so the
+      // appended line lands on its own page; no choices) ---
+      await runCottageConversation(page, 2);
 
       const afterA = await readState<Save>(page, 'save.json');
       expect(afterA?.hp, 'first rest heals to full (PARTY_MAX_HP)').toBe(16);
@@ -137,7 +139,7 @@ test.describe('hearth night-rest (Wave 3)', () => {
       const warped = await warpHamletTo(page, 'cottage');
       expect(warped, 'warp hook parked the Keeper at the Cottage').toBe(true);
 
-      await runCottageConversation(page, 1);
+      await runCottageConversation(page, 2); // hearthRestConv, 2 pages — see Pin A above
 
       const after = await readState<Save>(page, 'save.json');
       expect(after?.hp, 'legacy save still gets a first rest (heal to full)').toBe(16);

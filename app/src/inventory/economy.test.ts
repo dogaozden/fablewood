@@ -2,15 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { CATALOG, itemById, shopStock, RARITY_META, type Rarity } from './catalog';
 import {
   BOSS_RARITY_WEIGHTS,
+  RARITY_ORDER,
   RARITY_WEIGHTS,
   STARTING_GOLD,
   bossLoot,
   mulberry32,
   pickTrinket,
   rollRarity,
+  rollRarityEdged,
   roomClearLoot,
   sellPrice,
 } from './economy';
+
+/** rng stub that returns a scripted sequence, cycling back to the start past the end. */
+const rngOf = (vals: number[]) => {
+  let i = 0;
+  return () => vals[i++ % vals.length];
+};
 
 /** rng stub that returns a fixed sequence (repeating the last value). */
 const seq = (...vals: number[]) => {
@@ -163,5 +171,43 @@ describe('mulberry32 — deterministic, in [0,1)', () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
     }
+  });
+});
+
+describe('rollRarityEdged (Concordance Ch. IV advantage primitive)', () => {
+  // RARITY_WEIGHTS sums to 100; pick rng values that land in different tiers.
+  // Derive the two single-roll outcomes FIRST with rollRarity + the same values,
+  // then assert the edged pick keeps the better/worse of exactly those two.
+  it('advantage keeps the better of two rolls', () => {
+    const a = rollRarity(rngOf([0.01]), RARITY_WEIGHTS);   // low roll → common-end tier
+    const b = rollRarity(rngOf([0.99]), RARITY_WEIGHTS);   // high roll → rare-end tier
+    const picked = rollRarityEdged(rngOf([0.01, 0.99]), RARITY_WEIGHTS, 'advantage');
+    const better = RARITY_ORDER.indexOf(b) > RARITY_ORDER.indexOf(a) ? b : a;
+    expect(picked).toBe(better);
+  });
+  it('disadvantage keeps the worse of two rolls', () => {
+    const a = rollRarity(rngOf([0.01]), RARITY_WEIGHTS);
+    const b = rollRarity(rngOf([0.99]), RARITY_WEIGHTS);
+    const picked = rollRarityEdged(rngOf([0.01, 0.99]), RARITY_WEIGHTS, 'disadvantage');
+    const worse = RARITY_ORDER.indexOf(b) < RARITY_ORDER.indexOf(a) ? b : a;
+    expect(picked).toBe(worse);
+  });
+  it("'none' consumes exactly one roll and equals rollRarity", () => {
+    let calls = 0;
+    const rng = () => { calls += 1; return 0.5; };
+    const picked = rollRarityEdged(rng, RARITY_WEIGHTS, 'none');
+    expect(picked).toBe(rollRarity(() => 0.5, RARITY_WEIGHTS));
+    expect(calls).toBe(1);
+  });
+  it('advantage consumes exactly two rolls (stream determinism)', () => {
+    let calls = 0;
+    const rng = () => { calls += 1; return 0.5; };
+    rollRarityEdged(rng, RARITY_WEIGHTS, 'advantage');
+    expect(calls).toBe(2);
+  });
+  it('roomClearLoot/bossLoot without edge are byte-identical to today', () => {
+    // regression pin: same seed → same result with the param omitted
+    expect(roomClearLoot(2, mulberry32(42))).toEqual(roomClearLoot(2, mulberry32(42), 'none'));
+    expect(bossLoot(mulberry32(42))).toEqual(bossLoot(mulberry32(42), 'none'));
   });
 });
