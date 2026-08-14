@@ -709,3 +709,261 @@ test('a missed night WITH Ward of Focus holds the chain and consumes the ward', 
     });
   }
 });
+
+// ---- Task 6: wave e2e completeness sweep ------------------------------------
+
+// Ch. VII Mira's Stall, Task 6 (wave e2e completeness — replace law, live end-to-end):
+// combat/aids.test.ts (Task 1) proves armAid/aidFires as pure functions — no inventory, no
+// Satchel, no real cast anywhere near them. The Task 2 e2e test above proves the item survives
+// the moment of replacement itself, but never drives a fire afterward. This closes the gap:
+// arm the Hint (A), arm the Seal (B) — replacing A — genuinely FAIL a cast so B fires, and
+// prove through the REAL inventory that B's fire never touches A's retained item.
+test("the replace law holds live: firing the replacing Seal never touches the replaced Hint's item", async ({ page }) => {
+  test.setTimeout(90_000);
+  await seedSrsBaseline(page);
+  await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 20, stacks: { 'scriveners-hint': 1, 'second-wind-seal': 1 } },
+  });
+
+  await page.goto('/?scene=combat&seed=7&rank=1');
+  await waitReady(page, 'combat');
+
+  // ---- turn 1: arm the Hint (A).
+  let s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+  await armHint(page);
+  expect((await snap(page))?.armedAid, 'A (the Hint) is armed').toEqual({
+    itemId: 'scriveners-hint', kind: 'reveal_option',
+  });
+
+  // ---- turn 2: arm the Seal (B) — replaces A live, through the real Satchel/inventory loop.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's second turn opened, A still armed").toBe('playerMove');
+  await armSeal(page);
+  expect((await snap(page))?.armedAid, 'B (the Seal) REPLACED A').toEqual({
+    itemId: 'second-wind-seal', kind: 'retry_cast',
+  });
+  const invAfterReplace = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(invAfterReplace?.stacks?.['scriveners-hint'] ?? 0, "A's item survives the replace itself").toBe(1);
+
+  // ---- turn 3: genuinely FAIL a cast — B fires.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's third turn opened, B still armed").toBe('playerMove');
+  await debugSetPos(page, 'keeper', 5, 3);
+  await debugSetPos(page, 'wisp-0', 6, 3);
+  await page.keyboard.press('5'); // Cast From Memory (T1 Attestation, free_recall)
+  await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling
+  expect((await snap(page))?.state, 'Rank 1 goes straight to targeting').toBe('playerTarget');
+  await canvasClick(page, 192 + 6 * 48 + 24, 48 + 3 * 48 + 24); // wisp-0's tile
+
+  // ---- the ORIGINAL cast: a deliberately unrelated answer fails the stub judge's keyword bar.
+  await page.locator('.fw-overlay .fw-textarea').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+  await page.locator('.fw-textarea').fill(WRONG_ANSWER);
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const onward1 = page.getByRole('button', { name: 'Onward ▸' });
+  await onward1.waitFor({ state: 'visible', timeout: 10_000 });
+  await onward1.click();
+
+  // ---- B fires: the same encounter re-presents at once.
+  await page.locator('.fw-notice').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+  await page.screenshot({ path: `${EV}/miras-stall-replace-law-live.png` });
+
+  // ---- fired ALREADY, before the retry is even answered: B consumed, arm cleared, and —
+  // the new proof — A's item is completely untouched by B's fire.
+  const invMidRetry = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(invMidRetry?.stacks?.['second-wind-seal'] ?? 0, 'B is consumed on fire').toBe(0);
+  expect((await snap(page))?.armedAid, 'the arm is cleared on fire').toBeNull();
+  expect(
+    invMidRetry?.stacks?.['scriveners-hint'] ?? 0,
+    "A's item is untouched by B's fire — retention through replacement, proven live, not mocked",
+  ).toBe(1);
+
+  // ---- resolve the retry cleanly so the turn/battle loop settles.
+  await page.locator('.fw-textarea').fill(REVIVE_ANSWER);
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const onward2 = page.getByRole('button', { name: 'Onward ▸' });
+  await onward2.waitFor({ state: 'visible', timeout: 10_000 });
+  await onward2.click();
+  await page.waitForTimeout(700); // let applyOutcome/actionLog/endPlayerTurn settle
+
+  // ---- final check: A's item is STILL owned after the whole replace-then-fire cycle.
+  const invFinal = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(invFinal?.stacks?.['scriveners-hint'] ?? 0, "A's item is still owned after the full cycle").toBe(1);
+  expect(invFinal?.stacks?.['second-wind-seal'] ?? 0, 'B stays consumed').toBe(0);
+});
+
+// Ch. VII Mira's Stall, Task 6 (wave e2e completeness — Death's Door context gate, Global
+// Constraint 5): fixture/drive cloned from e2e/deaths-door.spec.ts's own Pin tests (own-file
+// helper-clone convention, this file's established practice) — the packless dev dungeon's
+// first room via ?dev=1&sim=0&auto=win, hp:2 so a single connecting enemy hit ends the party
+// and opens the door. Proves the context gate live: an aid armed BEFORE the door opens must
+// sit completely inert through it — no strike in the door's own MCQ, never fired, never
+// consumed — because runDeathsDoorRound's own runEncounter call (CombatScene.ts) is built
+// with context:'drill' and never wires strikeOneFalse at all, and never once reads
+// this.armedAid across the whole round loop.
+type DdSave = Save & { dungeon?: { roomIndex: number; cleared: string[]; gatePending?: string } };
+
+/** vc.econ.valuation.pre-vs-post-money carries an mcq encounter (enc.mcq.pre-post-money)
+ *  EARLIER in the pack's own encounters array than its free_recall sibling (enc.fr.pre-post-
+ *  money) — engine.ts's pick() takes encountersOf(factId)'s FIRST kind-matching entry (the
+ *  door's own runEncounter call carries no spellTier to narrow further), so seeding this fact
+ *  as the single most-overdue one deterministically draws the mcq encounter at the door's
+ *  first round. Same override shape as this file's own seedSrsBaseline (REVIVE_FACT) above. */
+const DD_MCQ_FACT = 'vc.econ.valuation.pre-vs-post-money';
+
+async function seedSrsForDoorMcq(page: Page): Promise<void> {
+  const ids = await installedFactIds(page);
+  const now = Date.now();
+  const facts: NonNullable<Srs['facts']> = {};
+  for (const id of ids) facts[id] = { box: 1, next_due: now - 5_000, history: [] };
+  facts[DD_MCQ_FACT] = { box: 1, next_due: now - 999_999_999, history: [] };
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded state/srs.json through the dev bridge').toBe(true);
+}
+
+/** Wait-spam damage-path idiom, cloned verbatim from deaths-door.spec.ts's own driveToZeroHp:
+ *  the party never fights back, so enemy turns whittle the seeded-low pool to 0, opening the
+ *  door. Stops the instant the door opens ('deathsdoor') or the fight otherwise resolves. */
+async function driveToDoorOpen(page: Page, timeoutMs = 75_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if ((await currentScene(page)) !== 'combat') return;
+    const st = await snap(page);
+    if (!st || st.state === 'over' || st.state === 'deathsdoor') return;
+    if (st.state === 'playerMove') await page.keyboard.press('7'); // Wait
+    await page.waitForTimeout(150);
+  }
+}
+
+/** Answers up to THREE door drills WRONG via Escape — cloned from deaths-door.spec.ts's own
+ *  answerDrillsWrong: overlay.ts's ESC policy fires on context:'drill' regardless of encounter
+ *  kind, so this is kind-agnostic. Three misses wipe the party (CombatScene's own "Three
+ *  marks" comment) — the simplest deterministic route through the WHOLE door sequence. */
+async function answerDoorDrillsWrong(page: Page, count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    const drill = page.locator('.fw-overlay .fw-textarea, .fw-overlay .fw-opt').first();
+    const appeared = await drill.waitFor({ state: 'visible', timeout: 4_000 }).then(() => true).catch(() => false);
+    if (!appeared) return;
+    await page.waitForTimeout(600); // arming guard (shared idiom, boss-victory.spec.ts's driveParley)
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+}
+
+test("an armed aid is inert at Death's Door: no strike renders, the arm neither fires nor is consumed (Constraint 5's context gate)", async ({ page }) => {
+  test.setTimeout(120_000);
+  const beforeSave = await readState<DdSave>(page, 'save.json');
+  const beforeInv = await readState<{ gold?: number; stacks?: Record<string, number> }>(page, 'inventory.json');
+
+  try {
+    await seedSrsForDoorMcq(page);
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 2, streak: 0, lastPlayed: '', dungeon: { roomIndex: 0, cleared: [] } },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { 'scriveners-hint': 1 } },
+    });
+
+    await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
+    await waitReady(page, 'combat');
+
+    let s = await waitForKeeperTurn(page);
+    expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+
+    await armHint(page);
+    expect((await snap(page))?.armedAid, 'the Hint is armed going into the door').toEqual({
+      itemId: 'scriveners-hint', kind: 'reveal_option',
+    });
+
+    await driveToDoorOpen(page);
+
+    await page.locator('.fw-holdline').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+    await page.screenshot({ path: `${EV}/miras-stall-dd-aid-inert.png` });
+
+    // ---- Constraint 5: runDeathsDoorRound's own runEncounter call never wires
+    // strikeOneFalse at all — no strike renders even though the Hint is armed and this IS
+    // the seeded, guaranteed mcq presentation.
+    await expect(
+      page.locator('.fw-opt.fw-struck'),
+      "no strike renders in the door's MCQ — context:'drill' excludes the aid (Constraint 5)",
+    ).toHaveCount(0);
+    expect((await snap(page))?.armedAid, 'the arm is untouched by the first drill round').toEqual({
+      itemId: 'scriveners-hint', kind: 'reveal_option',
+    });
+
+    // ---- drive the WHOLE door sequence to a terminal outcome (three misses wipe —
+    // deaths-door.spec.ts Pin B's own kind-agnostic terminal).
+    await answerDoorDrillsWrong(page, 3);
+    await expect.poll(() => currentScene(page), { timeout: 20_000 }).toBe('hamlet');
+
+    // ---- the arm survived the ENTIRE door sequence: never fired, never consumed. Checked
+    // through the real inventory — resolveBattle's own unconditional armedAid clear dissolves
+    // any standing arm at battle end regardless of outcome, so item retention (not armedAid)
+    // is the durable, honest signal that it was never FIRED along the way.
+    const invAfter = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+    expect(
+      invAfter?.stacks?.['scriveners-hint'] ?? 0,
+      'the Hint survives the whole door sequence untouched — drill context never fires it',
+    ).toBe(1);
+  } finally {
+    await page.request.put('/api/state/save.json', {
+      data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: beforeInv ?? { version: 1, gold: 20, stacks: {} },
+    });
+  }
+});
+
+// Ch. VII Mira's Stall, Task 6 (wave e2e completeness — W6-rebase pin): the pre-Mira's-Stall
+// heal/glow Satchel branches (satchel.ts's own Phase 1/Phase 2 history) still spend the turn
+// exactly like the new trial-tool arm branch proven above — the SAME actionLog.push({action:
+// 'satchel'}) + 560ms delayedCall(endPlayerTurn) shape (CombatScene.ts's useSatchelItem). W6
+// (the parallel wave) is landing a turn-BUDGET rework (spendAction/steps-remain) that both
+// branches predate — this pins TODAY's action-log shape on purpose, so that rebase converts
+// them deliberately instead of being surprised by an untouched regression corner.
+test('glow and heal Satchel uses still cost the turn (pre-W6 action-log shape)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.request.put('/api/state/save.json', { data: { hp: 10 } });
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 20, stacks: { 'embermend-draught': 1, 'wick-tallow': 1 } },
+  });
+
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+
+  // ---- heal: still spends the turn via the satchel actionLog entry.
+  let s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+
+  await page.keyboard.press('q');
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  const healRow = page.locator('.inv-row', { hasText: 'Embermend Draught' });
+  await healRow.getByRole('button', { name: 'Use' }).click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+  await page.waitForTimeout(700); // past useSatchelItem's 560ms delayedCall -> endPlayerTurn
+
+  // W6-rebase: convert to budget-gate shape (spendAction + steps-remain)
+  expect((await snap(page))?.log.at(-1)?.action, 'heal still spends the turn as a satchel action').toBe('satchel');
+
+  // ---- glow: same actionLog shape, on the Keeper's next open turn.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's second turn opened").toBe('playerMove');
+
+  await page.keyboard.press('q');
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  const glowRow = page.locator('.inv-row', { hasText: 'Wick-Tallow' });
+  await glowRow.getByRole('button', { name: 'Use' }).click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+  await page.waitForTimeout(700);
+
+  // W6-rebase: convert to budget-gate shape (spendAction + steps-remain)
+  expect((await snap(page))?.log.at(-1)?.action, 'glow still spends the turn as a satchel action').toBe('satchel');
+
+  await page.screenshot({ path: `${EV}/miras-stall-satchel-cost-pins.png` });
+});
