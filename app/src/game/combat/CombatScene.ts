@@ -934,13 +934,18 @@ export class CombatScene extends Phaser.Scene {
   private toggleCarefulStep(unit: UnitState): void {
     if (this.moved) return;
     this.carefulStepOn = !this.carefulStepOn;
-    // Ch. VI — nothing has been spent yet (the `moved` guard above guarantees it), so a fresh
-    // budget off the new stance's total is always correct here: without this, `this.budget`
-    // stayed pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved)
-    // visible range, then spend the untouched difference again as a "second leg" — quietly
-    // doubling back to a full move split across two legs. This is the same `moveBudgetFor`
-    // this method already recomputes `moveField` from, just also re-anchoring the budget object.
-    this.budget = mkTurnBudget(this.moveBudgetFor(unit));
+    // Ch. VI — the `moved` guard above only proves no LEG has been spent (moved mirrors
+    // legSpent); it says nothing about the action, which can be spent on a turn that acts
+    // before ever moving. A bare `mkTurnBudget(...)` here would silently wipe actionSpent back
+    // to false (fixed round 1, I1) — re-anchoring total/left off the new stance while spreading
+    // the old flags back over the result preserves both: legSpent (always false here anyway,
+    // but stated for symmetry) and, critically, actionSpent. Without the total/left re-anchor at
+    // all, `this.budget` stayed pinned to the PRE-toggle total and a Careful-Step turn could
+    // spend its (halved) visible range, then spend the untouched difference again as a "second
+    // leg" — quietly doubling back to a full move split across two legs. This is the same
+    // `moveBudgetFor` this method already recomputes `moveField` from, just also re-anchoring
+    // the budget object.
+    this.budget = { ...mkTurnBudget(this.moveBudgetFor(unit)), legSpent: this.budget.legSpent, actionSpent: this.budget.actionSpent };
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
@@ -971,18 +976,25 @@ export class CombatScene extends Phaser.Scene {
    *  A pilot preference (set via setPilotPreference, e2e-only) forces one action kind. */
   private autoStep(unit: UnitState): void {
     if (this.destroyed || this.state === 'over' || this.state === 'deathsdoor' || unit.id !== this.activeId) return;
-    const order: ActionKind[] = this.debugPrefer
-      ? [this.debugPrefer]
-      : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
-    for (const a of order) {
-      const targets = this.validTargets(unit, a);
-      if (targets.length) {
-        const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
-        this.state = 'playerTarget';
-        this.pendingAction = a;
-        this.pendingSpell = null; // autopilot always drives the T1 anchor action, never a flyout tier
-        void this.runPlayerAction(unit, a, { c: tgt.c, r: tgt.r });
-        return;
+    // Ch. VI — autoStep calls runPlayerAction directly, bypassing onPickAction's own
+    // budget.actionSpent gate entirely; without this check the pilot could re-act indefinitely
+    // once re-invoked after a "steps remain" turn (the action loop below would keep finding the
+    // same in-range target every time). Skipping straight to the approach/give-up logic once the
+    // action is spent mirrors what a real player does next: move the remainder, or End Turn.
+    if (!this.budget.actionSpent) {
+      const order: ActionKind[] = this.debugPrefer
+        ? [this.debugPrefer]
+        : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
+      for (const a of order) {
+        const targets = this.validTargets(unit, a);
+        if (targets.length) {
+          const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
+          this.state = 'playerTarget';
+          this.pendingAction = a;
+          this.pendingSpell = null; // autopilot always drives the T1 anchor action, never a flyout tier
+          void this.runPlayerAction(unit, a, { c: tgt.c, r: tgt.r });
+          return;
+        }
       }
     }
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
@@ -1010,9 +1022,16 @@ export class CombatScene extends Phaser.Scene {
 
   private showMenu(unit: UnitState): void {
     const items = (Object.keys(ACTIONS) as ActionKind[]).map((action) => {
-      // Self-cast, no targeting phase (inventory-handoff §10): always pickable, like Wait —
-      // an empty satchel is handled inside the panel (a friendly line), not by disabling this.
-      if (action === 'wait' || action === 'satchel') return { action, enabled: true };
+      // Wait/End Turn is always pickable, spent action or not.
+      if (action === 'wait') return { action, enabled: true };
+      // Ch. VI — the turn's one action (Strike/Cast/Satchel/Brace) is spent; only Wait/End Turn
+      // remains, even though movement may still be banked and spendable. Checked before the
+      // satchel/target-availability branches below so it wins over both.
+      if (this.budget.actionSpent) return { action, enabled: false, reason: 'spent' };
+      // Self-cast, no targeting phase (inventory-handoff §10): always pickable while the action
+      // is unspent — an empty satchel is handled inside the panel (a friendly line), not by
+      // disabling this.
+      if (action === 'satchel') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
       return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no foe within reach' };
     });
@@ -1024,6 +1043,9 @@ export class CombatScene extends Phaser.Scene {
     if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
     if (unit.id !== this.activeId) return;
     if (action === 'wait') { this.hud.showBanner('Holding position.', P.stoneGrey); this.endPlayerTurn(); return; }
+    // Ch. VI — the SAME gate showMenu's `enabled` computation applies, re-checked here since a
+    // keydown fires regardless of what's currently rendered and must not bypass a greyed button.
+    if (this.budget.actionSpent) return;
     if (action === 'satchel') { void this.openSatchel(unit); return; }
     // §12.2 — Rank≥2 pressing an Art opens the tier flyout instead of casting T1 directly.
     // At Rank 1 this branch never taken: today's exact flow, zero regression.
@@ -1436,12 +1458,23 @@ export class CombatScene extends Phaser.Scene {
       if (unit.team === 'party' && dealt > 0) this.glow = glowGain(this.glow, 'strike');
       this.refreshParty();
       this.time.delayedCall(440, () => {
+        // Ch. VI — the Warden's Objection riposte (inside meleeHit, above) can fell the actor
+        // with movement still banked; an unconditional end here, same as the OA-felled early-out
+        // in movePlayerTo, so checkEnd()/Death's Door still runs instead of returning a dead
+        // unit to its own action menu.
+        if (!unit.alive) { this.endPlayerTurn(); return; }
         this.budget = spendAction(this.budget);
         if (turnExhausted(this.budget)) {
           this.endPlayerTurn();
         } else {
           this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
           this.returnToActionMenu(unit);
+          // Ch. VI — re-invoke the pilot: the "steps remain" branch otherwise re-invokes
+          // nothing, so a demo turn that acted without moving first (target already in range at
+          // turn start) would freeze at the action menu forever. autoStep itself now refuses to
+          // re-act once budget.actionSpent is true, so this only lets it move the remainder or
+          // fall through to its own endPlayerTurn() — the pilot's version of End Turn.
+          if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
         }
       });
       return;
@@ -1573,12 +1606,19 @@ export class CombatScene extends Phaser.Scene {
 
     this.refreshParty();
     this.time.delayedCall(620, () => {
+      // Ch. VI — applyOutcome above can damage the ACTOR itself (o.fade/o.partyHit both prefer
+      // the caster, o.selfChip always targets it); an unconditional end here, same as the
+      // OA-felled early-out in movePlayerTo, so a self-felling cast still reaches checkEnd()/
+      // Death's Door instead of returning a dead unit to its own action menu.
+      if (!unit.alive) { this.endPlayerTurn(); return; }
       this.budget = spendAction(this.budget);
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
       } else {
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
+        // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment.
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
       }
     });
   }
@@ -1745,12 +1785,22 @@ export class CombatScene extends Phaser.Scene {
     if (bannerText) this.hud.showBanner(bannerText, quality > 0 ? ACTIONS[action].tint : P.duskRose);
     this.refreshParty();
     this.time.delayedCall(620, () => {
+      // Ch. VI — applySpellOps's 'fade' op above routes through the SAME damageParty(amount,
+      // caster) choke point o.fade does on the T1 path (spells.ts emits `fade` on a whiffed q0
+      // for several T2/T3 Arts), so a T2/T3 miss can fell the caster exactly like a T1 one. Not
+      // named alongside :1462/:1610 in the review that requested this fix, but it's the same
+      // mechanism through a parallel path — same unconditional-end treatment.
+      if (!unit.alive) { this.endPlayerTurn(); return; }
       this.budget = spendAction(this.budget);
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
       } else {
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
+        // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment. (T2/T3 is
+        // never actually reached by the demo pilot today — it always drives the T1 anchor — but
+        // gating this consistently with the other four sites avoids a silent asymmetry.)
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
       }
     });
   }
@@ -2041,8 +2091,15 @@ export class CombatScene extends Phaser.Scene {
   private returnToActionMenu(unit: UnitState): void {
     if (this.destroyed) return;
     this.state = 'playerMove';
-    // Ch. VI — the busiest call site for the "reachable is already in sync" reasoning above:
-    // every gated action that leaves movement banked routes back here.
+    // Ch. VI, fixed round 1 (I2) — rebuild from CURRENT position/occupancy, not just repaint the
+    // old set: an action can kill or push a unit (applyOutcome/applySpellOps), and this is the
+    // only one of the "reachable is already in sync" sites that follows an ACTION rather than a
+    // no-op cancel — a killed enemy's tile stayed permanently unreachable, and a tile a push just
+    // occupied stayed clickable, without this. Same three-line idiom as movePlayerTo's
+    // post-arrival recompute and toggleCarefulStep's own.
+    this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+    this.reachable.clear();
+    for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
     this.showMenu(unit);
   }
@@ -2096,12 +2153,15 @@ export class CombatScene extends Phaser.Scene {
       );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
       this.time.delayedCall(560, () => {
+        // Satchel can't fell its own actor (no I3-style self-damage path here), so no
+        // unit.alive check is needed — only the C1/C2 gate + pilot re-invoke.
         this.budget = spendAction(this.budget);
         if (turnExhausted(this.budget)) {
           this.endPlayerTurn();
         } else {
           this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
           this.returnToActionMenu(unit);
+          if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
         }
       });
       return;
@@ -2156,6 +2216,7 @@ export class CombatScene extends Phaser.Scene {
       } else {
         this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
         this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
       }
     });
   }

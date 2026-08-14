@@ -37,6 +37,20 @@ async function unitPos(page: Page, id: string): Promise<{ c: number; r: number }
   }, id);
 }
 
+/** The rendered action-bar buttons' label/hint text (e2e-only CombatScene.actionMenuDebug,
+ *  wraps hud.ts's own debug read — unmodified by this task). Index order matches
+ *  `Object.keys(ACTIONS)`: strike,smite,weave,sequence,cast,parley,satchel,wait — index 7 is
+ *  the Wait/End Turn slot. */
+async function actionMenuDebug(page: Page): Promise<Array<{ label: string; hint: string }>> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as
+      | { actionMenuDebug?(): Array<{ label: string; hint: string }> }
+      | undefined;
+    return s?.actionMenuDebug?.() ?? [];
+  });
+}
+
 /** Teleport a living unit (e2e-only CombatScene.debugSetPos — unmodified by this task; same
  *  spirit as the crucible v1 #6 specs' own use of it for controlled pincer/geometry setup). */
 async function setPos(page: Page, id: string, c: number, r: number): Promise<void> {
@@ -139,6 +153,22 @@ test('measured turn: move, Strike, the turn stays open, move again, then End Tur
   expect(afterStrike.state, "control returned to the action menu, not the next unit's turn").toBe('playerMove');
   expect(afterStrike.budget.actionSpent, 'the action registered as spent').toBe(true);
   expect(afterStrike.budget.left, 'move-after-act: acting must never touch the banked movement').toBe(leftAfterMove1);
+
+  // --- Fix round 1 (C1): the turn's one action is SPENT — a second Strike attempt must be
+  // refused both by the hotkey (onPickAction early-return) and by the rendered menu (showMenu
+  // disables every non-Wait item once actionSpent). Before the fix, wisp-0 survived the first
+  // Strike (2 hp, 1 dmg) so a second, wrongly-armed Strike would have opened targeting and
+  // resolved a real second hit — this is the "three Strikes in one turn" the review proved live.
+  await page.keyboard.press('1'); // Strike hotkey again
+  await page.waitForTimeout(400); // long enough for a wrongly-armed Strike to fully resolve
+  const afterSecondPress = await snap(page);
+  expect(afterSecondPress?.state, 'the refused Strike must never even enter targeting').toBe('playerMove');
+  expect(afterSecondPress?.log.length, 'a second Strike must NOT have resolved — the action is spent').toBe(afterStrike.log.length);
+  expect(afterSecondPress?.budget.left, 'the refused attempt must not touch the budget either').toBe(afterStrike.budget.left);
+
+  const menu = await actionMenuDebug(page);
+  expect(menu[0]?.hint, "Strike's rendered hint shows the refusal reason, not its normal blurb").toContain('spent');
+  expect(menu[7]?.label, "the Wait slot reads 'End Turn' (Ch. VI relabel)").toBe('End Turn');
 
   // --- Leg 2: move again with the remainder (back to (4,4)) — proves the SAME leftover
   // budget is spendable AFTER acting, not just before.
