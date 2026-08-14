@@ -94,7 +94,7 @@ export function alderFarewell(): Conversation {
 export function factorConv(): Conversation {
   return {
     speaker: 'Mira the Factor',
-    pages: ['Keeper! Coin to spend, or loot to weigh? My ledger is open either way.'],
+    pages: ['Keeper! Coin to spend, or loot to weigh? You know my ledger — same hand that holds the line beside you.'],
     choices: [
       { label: 'Browse wares', value: 'shop' },
       { label: 'Never mind', value: '__cancel__' },

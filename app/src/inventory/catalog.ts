@@ -117,7 +117,7 @@ export function itemById(id: string): ItemDef | undefined {
   return BY_ID.get(id);
 }
 
-/** Mira's shop stock: the six buyable items (3 draughts + 3 tools), catalog order. */
+/** Mira's shop stock: the eight wares (3 draughts + 2 glow + 3 tools), catalog order. */
 export function shopStock(): ItemDef[] {
   return CATALOG.filter((i) => i.type === 'consumable' || i.type === 'tool');
 }

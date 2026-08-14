@@ -35,7 +35,7 @@ test("closing Mira's Shop then opening the Satchel within 150ms opens it, not sw
 
   await openMiraShop(page);
   await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
-  await expect(page.locator('.inv-title')).toHaveText("Mira's Ledger — Wares & Trade");
+  await expect(page.locator('.inv-title')).toHaveText("Mira's Ledger — Wares & Trade (she fights, she trades, she remembers)");
 
   // Close Shop, then IMMEDIATELY request the Satchel. The two keys go back-to-back with
   // NO DOM assertion between them: pane close is synchronous on Escape, and an interposed

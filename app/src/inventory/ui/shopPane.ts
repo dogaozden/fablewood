@@ -42,7 +42,7 @@ export function openShopPane(): Promise<void> {
     const body = el('div', { class: 'inv-body' });
     panel.append(
       el('div', { class: 'inv-header' }, [
-        el('h2', { class: 'inv-title', text: "Mira's Ledger — Wares & Trade" }),
+        el('h2', { class: 'inv-title', text: "Mira's Ledger — Wares & Trade (she fights, she trades, she remembers)" }),
         goldEl,
       ]),
       el('hr', { class: 'inv-rule' }),
