@@ -114,6 +114,11 @@ const DD_KINDS: EncounterKind[] = ['free_recall', 'mcq'];
  *  the question is FOR (encounters/overlay.ts's `flair` slot). Task 7 lands the full frame. */
 const DEATHS_DOOR_TITLE = 'The Ledger Holds Your Line';
 
+/** Ch. VII Mira's Stall — Second Wind Seal's fire notice (encounters/overlay.ts's `notice`
+ *  slot, the same one FATE_HOLDS_LINE rides for a lantern re-present). Verbatim, both cast
+ *  sites (runPlayerAction/castGatedSpell fire blocks, below). */
+const SEAL_LINE = 'The seal breaks — the moment returns to your hand.';
+
 let warnedCombatDrawFailure = false;
 
 /**
@@ -1705,12 +1710,54 @@ export class CombatScene extends Phaser.Scene {
       this.refreshParty();
     }
 
+    // Ch. VII Mira's Stall — Second Wind Seal: a failed COMBAT cast (never parley/boss — same
+    // single-predicate aid eligibility as the Hint above, Global Constraint 5) may be retried
+    // once. Placed AFTER record() — the miss above is already in the Ledger (the SAME `result`
+    // that was just pushed/recorded; this retry is a SEPARATE call, never pushed, never passed
+    // to record() — Global Constraint 1/2) — and BEFORE grace/outcome math, so the retry can
+    // still feed dmgQuality below (the ordering grace's own softening depends on: dmgQuality
+    // starts from sealQuality, not result.quality, so if the Seal fired, grace's `dmgQuality
+    // === 0` check below already sees the RETRY's outcome, never the original miss's zero).
+    // `!result.redraw` keeps this off the lantern-redraw sentinel — nothing was judged there
+    // (contracts.ts's own EncounterResult.redraw doc: "nothing may be recorded/granted from
+    // this result"); structurally unreachable here anyway since the try/catch above already
+    // settled on a genuine answer (same guarantee the Hint fire block above relies on), but
+    // stated explicitly since a sentinel's quality is deliberately 0, i.e. < 1. Kind-agnostic
+    // by design (unlike the Hint above, which needs kind==='mcq'): a failed Weave/Sequence/Cast
+    // retries exactly like a failed Smite — "a failed casting may be tried again, once."
+    let sealQuality = result.quality;
+    if (result.quality < 1 && this.armedAid?.kind === 'retry_cast' && context === 'combat' && !result.redraw) {
+      const fired = aidFires(this.armedAid, 'retry_cast');
+      if (fired) {
+        this.armedAid = null;
+        await services.inventory.removeItem(fired.itemId, 1);
+        // Ch. IV one-round-one-seed law: reuse roundSeed — the forced encounterId below makes
+        // the draw moot anyway (same fact/question re-presented), so the seed can't actually
+        // change what's drawn; reused to keep the law's letter, not because it does anything.
+        try {
+          const retry = await services.runEncounter({
+            context, kinds: [kind], factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1,
+            lanternLight: false, encounterId: result.encounterId, notice: SEAL_LINE,
+          });
+          sealQuality = retry.quality;
+        } catch {
+          // A retry-call fault (e.g. chained off an already-degraded offline-catch original,
+          // whose fabricated local-* encounterId the provider can't resolve) leaves the
+          // already-recorded original quality driving outcome — no crash, no fabricated
+          // second grade. The item is still spent and the arm still cleared: fire already
+          // happened above (aids contract: deduct on fire, not on retry success) — same
+          // "item consumed for no visible benefit" residual T3's review accepted for the
+          // Hint's own offline-catch path, not a new gap this task introduces.
+        }
+      }
+    }
+
     // Lantern grace: standing on a lantern can soften a whiff for DAMAGE only —
     // the SRS record stays honest (we record result.quality, above). graceAppliesTo excludes
     // Courtcraft, whose outcome comes from branchTag and never from this quality: softening it
     // there changed nothing while still burning the once-per-battle charge and claiming it had
     // helped (crucible-2 lantern-grace-false-banner).
-    let dmgQuality = result.quality;
+    let dmgQuality = sealQuality;
     const graceArt = this.spellForAction(action)?.art;
     if (graceArt && graceAppliesTo(graceArt)
         && dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
@@ -1891,8 +1938,30 @@ export class CombatScene extends Phaser.Scene {
       this.refreshParty();
     }
 
+    // Ch. VII Mira's Stall — Second Wind Seal: mirrors the T1 site in runPlayerAction above
+    // exactly (see its comment for the full ordering/sentinel/offline-catch reasoning). Courtcraft
+    // never reaches this: context is 'parley' for it always (above), so `context === 'combat'`
+    // already excludes it — no separate art check needed, same as the Hint's own exclusion.
+    let sealQuality = result.quality;
+    if (result.quality < 1 && this.armedAid?.kind === 'retry_cast' && context === 'combat' && !result.redraw) {
+      const fired = aidFires(this.armedAid, 'retry_cast');
+      if (fired) {
+        this.armedAid = null;
+        await services.inventory.removeItem(fired.itemId, 1);
+        try {
+          const retry = await services.runEncounter({
+            context, kinds: [artKind], factIds, packId: this.launch.packId, seed: roundSeed,
+            flair: spell.label, spellTier: spell.tier,
+            lanternLight: false, encounterId: result.encounterId, notice: SEAL_LINE,
+          });
+          sealQuality = retry.quality;
+        } catch { /* see runPlayerAction's own note: leaves the already-recorded original
+          quality driving outcome; the item is still spent, the arm still cleared */ }
+      }
+    }
+
     // Grace is meaningless for Courtcraft here too — see runPlayerAction's own note.
-    let dmgQuality = result.quality;
+    let dmgQuality = sealQuality;
     if (graceAppliesTo(spell.art)
         && dmgQuality === 0 && this.graceAvailable && this.tileTypeOf(unit) === 'lantern') {
       dmgQuality = 0.5;

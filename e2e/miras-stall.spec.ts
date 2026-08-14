@@ -73,6 +73,61 @@ async function armHint(page: Page): Promise<void> {
   await page.waitForTimeout(250); // let useSatchelItem's arm branch land + the banner render
 }
 
+/** Arm the Second Wind Seal via the Satchel — mirrors armHint exactly, targeting the other
+ *  trial tool's row. Shared setup for Task 4's fire scenario below. */
+async function armSeal(page: Page): Promise<void> {
+  await page.keyboard.press('q');
+  await page.locator('.inv-overlay').waitFor({ state: 'visible', timeout: 5_000 });
+  const sealRow = page.locator('.inv-row', { hasText: 'Second Wind Seal' });
+  await sealRow.getByRole('button', { name: 'Use' }).click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+  await page.waitForTimeout(250); // let useSatchelItem's arm branch land + the banner render
+}
+
+type Srs = {
+  facts?: Record<string, { box: number; next_due: number; history?: Array<{ ts: string; quality: 0 | 0.5 | 1; encounter_id: string }> }>;
+};
+
+// Ch. VII Mira's Stall, Task 4 — a known fact/answer pair for a deterministic Second Wind Seal
+// retry, reused verbatim from e2e/deaths-door.spec.ts's own Pin C precedent: REVIVE_FACT carries
+// a free_recall encounter (enc.fr.economics-vs-control) and REVIVE_ANSWER is a proven stub-judge
+// PASS for it (redemption-bell.spec.ts:123, "a terse, correct answer clears the stub judge's
+// keyword bar"). The wrong answer is the generic stub-judge FAIL trick (crucible-v1-package-a.
+// spec.ts's answerGateWrong): near-zero keyword overlap fails against ANY rubric, so unlike the
+// correct answer it doesn't need to be fact-specific.
+const REVIVE_FACT = 'vc.econ.overview.economics-vs-control';
+const REVIVE_ANSWER = 'Economics and control.';
+const WRONG_ANSWER = 'zzz completely unrelated nonsense zzz qqq';
+
+/** Every real installed fact id (deaths-door.spec.ts/redemption-bell.spec.ts's own idiom) — the
+ *  combat draw is a global services.draw read, same pool as any other combat cast. */
+async function installedFactIds(page: Page): Promise<string[]> {
+  const res = await page.request.get('/api/packs');
+  expect(res.ok(), 'read installed packs').toBe(true);
+  const { packs } = (await res.json()) as { packs: Array<{ pack?: { facts?: Array<{ id: string }> } }> };
+  const ids: string[] = [];
+  for (const entry of packs) for (const f of entry.pack?.facts ?? []) ids.push(f.id);
+  expect(ids.length, 'the installed pack has facts to seed').toBeGreaterThan(0);
+  return ids;
+}
+
+/** Seed EVERY installed fact at box 1 (due, empty history), overriding REVIVE_FACT to be far
+ *  MORE overdue — deaths-door.spec.ts's own seedSrsBaseline, verbatim technique: due()'s sort is
+ *  exact-ms, and the e2e server installs exactly one pack (vc-law), so the override's next_due
+ *  alone deterministically wins "most overdue" for a free_recall-kind combat draw, no same-day
+ *  noise to dodge. Fresh empty history also sidesteps the shared .state-e2e directory's cross-run
+ *  accumulation (the Hint scenarios above don't need this — they never assert an exact history
+ *  length). */
+async function seedSrsBaseline(page: Page): Promise<void> {
+  const ids = await installedFactIds(page);
+  const now = Date.now();
+  const facts: NonNullable<Srs['facts']> = {};
+  for (const id of ids) facts[id] = { box: 1, next_due: now - 5_000, history: [] };
+  facts[REVIVE_FACT] = { box: 1, next_due: now - 999_999_999, history: [] };
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded state/srs.json through the dev bridge').toBe(true);
+}
+
 // Ch. VII Mira's Stall, Task 2 (arming-model amendment): the combat Satchel used to filter
 // usableSatchelItems down to heal|glow only — the trial tools (Scrivener's Hint/Second Wind
 // Seal) stayed catalog/shop-only, with the encounter-surface hookup explicitly deferred
@@ -381,4 +436,96 @@ test('armed Hint survives a non-MCQ combat cast untouched; only an MCQ cast fire
   );
   expect(inv?.stacks?.['scriveners-hint'] ?? 0, 'the Hint fires exactly once, on the eventual MCQ cast').toBe(0);
   expect((await snap(page))?.armedAid, 'the arm is cleared after firing').toBeNull();
+});
+
+// Ch. VII Mira's Stall, Task 4 scenario c: an armed Second Wind Seal fires on a genuinely FAILED
+// combat cast — the SAME encounter re-presents at once (verbatim notice), answering it correctly
+// there drives the combat outcome, while the SRS Ledger keeps only the ORIGINAL miss. "The
+// Ledger remembers the stumble; the seal only buys the moment" (Concordance Ch. VII, Global
+// Constraint 1). Pins the Step-3 ordering too: grace never touches this cast (the Keeper never
+// stands on a lantern tile below), so the ONLY way positive damage can land is the retry's
+// quality substituting in BEFORE the outcome math runs.
+test('armed Second Wind Seal retries a failed cast; the retry drives damage, the miss stands in the Ledger', async ({ page }) => {
+  test.setTimeout(90_000);
+  await seedSrsBaseline(page);
+  await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 20, stacks: { 'second-wind-seal': 1 } },
+  });
+
+  await page.goto('/?scene=combat&seed=7&rank=1');
+  await waitReady(page, 'combat');
+
+  let s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+
+  await armSeal(page);
+  expect((await snap(page))?.armedAid, 'the Seal is armed going into the cast').toEqual({
+    itemId: 'second-wind-seal', kind: 'retry_cast',
+  });
+
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's second turn opened, Seal still armed").toBe('playerMove');
+
+  await debugSetPos(page, 'keeper', 5, 3);
+  await debugSetPos(page, 'wisp-0', 6, 3);
+  await page.keyboard.press('5'); // Cast From Memory (T1 Attestation, free_recall)
+  await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling
+  expect((await snap(page))?.state, 'Rank 1 goes straight to targeting').toBe('playerTarget');
+  await canvasClick(page, 192 + 6 * 48 + 24, 48 + 3 * 48 + 24); // wisp-0's tile
+
+  // ---- the ORIGINAL cast: a deliberately unrelated answer fails the stub judge's keyword bar
+  // (quality 0) regardless of which real rubric REVIVE_FACT carries — pinned deterministically
+  // by seedSrsBaseline above, so this IS that fact/encounter.
+  await page.locator('.fw-overlay .fw-textarea').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+  await page.locator('.fw-textarea').fill(WRONG_ANSWER);
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const onward1 = page.getByRole('button', { name: 'Onward ▸' });
+  await onward1.waitFor({ state: 'visible', timeout: 10_000 });
+  await onward1.click();
+
+  // ---- the Seal fires: the SAME encounter re-presents at once, verbatim notice line.
+  await page.locator('.fw-notice').waitFor({ state: 'visible', timeout: 15_000 });
+  expect(await page.locator('.fw-notice').textContent(), 'the Seal fire notice is verbatim').toBe(
+    'The seal breaks — the moment returns to your hand.',
+  );
+  await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+  await page.screenshot({ path: `${EV}/miras-stall-seal-retry.png` });
+
+  // ---- fired ALREADY, before the retry is even answered: item consumed, arm cleared (aids
+  // contract — deduct on fire, not on retry success).
+  const invMidRetry = await readState<{ stacks?: Record<string, number> }>(page, 'inventory.json');
+  expect(
+    invMidRetry?.stacks?.['second-wind-seal'] ?? 0,
+    'the Seal is consumed on fire, before the retry resolves',
+  ).toBe(0);
+  expect((await snap(page))?.armedAid, 'the arm is cleared on fire').toBeNull();
+
+  // ---- answer the retry CORRECTLY — the retry drives combat outcome.
+  await page.locator('.fw-textarea').fill(REVIVE_ANSWER);
+  await page.getByRole('button', { name: 'Cast' }).click();
+  const onward2 = page.getByRole('button', { name: 'Onward ▸' });
+  await onward2.waitFor({ state: 'visible', timeout: 10_000 });
+  await onward2.click();
+  await page.waitForTimeout(700); // let applyOutcome/actionLog/endPlayerTurn settle
+
+  // ---- damage reflects the RETRY's quality (1 -> SPELLBOOK.cast.effects.q1.hits:6), never the
+  // original miss's (quality 0 -> q0's hits:0/fade:2). Grace is structurally excluded here (the
+  // Keeper never stands on a lantern tile), so positive damage is possible ONLY if the retry's
+  // quality substituted into dmgQuality before the outcome math ran — this is the Step-3
+  // ordering pin.
+  const afterCast = await snap(page);
+  const lastAction = afterCast?.log.at(-1);
+  expect(lastAction?.action, 'the logged action is the cast').toBe('cast');
+  expect(lastAction?.dmg ?? 0, 'damage reflects the RETRY quality, not the original miss').toBeGreaterThan(0);
+
+  // ---- the SRS Ledger keeps ONLY the original miss — no second row for the retry (the retry
+  // result is never pushed to this.results, never passed to record() — Global Constraint 1/2).
+  const srs = await waitForState<Srs>(
+    page, 'srs.json', (x) => (x?.facts?.[REVIVE_FACT]?.history?.length ?? 0) >= 1,
+  );
+  const history = srs?.facts?.[REVIVE_FACT]?.history ?? [];
+  expect(history.length, 'exactly one Ledger row — the original miss, no second row for the retry').toBe(1);
+  expect(history[0]?.quality, "the standing row is the ORIGINAL miss's quality").toBe(0);
 });
