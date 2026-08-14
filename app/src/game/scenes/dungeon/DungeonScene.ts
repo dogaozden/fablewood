@@ -586,6 +586,13 @@ export class DungeonScene extends Phaser.Scene {
     this.drawMap();
     this.refreshStatus();
     const gold = await this.grantRoomLoot(room);
+    // Ch. IV final-review I1 — grantRoomLoot's own offerLantern can spend (or refund) the
+    // lantern via a save write, and nothing between here and the refreshStatus() above
+    // repaints the header glyph afterward: repaint again now the spend has settled, so "lit
+    // when held, guttered when spent" (the chapter's own UI text) holds on the one screen the
+    // player is watching when they spend it. The boss site needs no equivalent call — it ends
+    // in scene.start('hamlet'), which tears the scene down regardless.
+    this.refreshStatus();
     // §3.2 — fold this room into the run harvest; the Night's Ledger shows ONLY at run end (boss
     // victory / retreat), never mid-crawl (a per-room card would be five interruptions per vault).
     this.accrueHarvest(outcome, gold);

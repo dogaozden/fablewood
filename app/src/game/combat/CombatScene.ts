@@ -2971,6 +2971,9 @@ export class CombatScene extends Phaser.Scene {
     let held = false;
     try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
     let result: EncounterResult;
+    // Final-review A3 — hoisted so the catch below can see whichever fact was actually shown:
+    // once the redraw branch runs, the player was asked about `alt`, not `id`.
+    let alt: string | null = null;
     try {
       result = await services.runEncounter({
         context: 'drill', kinds: DD_KINDS, factIds: [id], packId: this.launch.packId,
@@ -2983,7 +2986,7 @@ export class CombatScene extends Phaser.Scene {
         // The requested id rides the exclusion list too (T6 review ruling): on pick()'s
         // kind-fallback the shown encounter's fact_ids can omit id entirely, and without
         // it the salted redraw can spend the light on the identical question.
-        const alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, [...result.redraw.shownFactIds, id]);
+        alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, [...result.redraw.shownFactIds, id]);
         if (this.destroyed || !this.dd) return;
         if (alt) await services.save.save({ lanternLight: false });
         result = await services.runEncounter({
@@ -2993,7 +2996,9 @@ export class CombatScene extends Phaser.Scene {
         });
       }
     } catch {
-      result = { encounterId: 'local-deathsdoor', kind: 'free_recall', factIds: [id], quality: 0, detail: 'offline' };
+      // Final-review A3 — the player was shown `alt` once the redraw branch ran; recording
+      // against `id` here would be an SRS lie (a quality-0 row on a fact never asked).
+      result = { encounterId: 'local-deathsdoor', kind: 'free_recall', factIds: [alt ?? id], quality: 0, detail: 'offline' };
     }
     if (this.destroyed) return;
     // The revive gate reads the box the fact carried BEFORE the answer is recorded: record()
