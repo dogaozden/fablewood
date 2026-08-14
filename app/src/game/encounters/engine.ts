@@ -37,11 +37,22 @@ export function difficultyOf(e: Encounter): EncounterDifficulty {
   return (e.difficulty as EncounterDifficulty | undefined) ?? 2;
 }
 
-/** Shared presentation metadata for the encounter difficulty axis (§1, §7). */
-export const DIFFICULTY_DEFS: Record<EncounterDifficulty, { name: string; glyph: string; tint: number }> = {
-  1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
-  2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
-  3: { name: 'Beacon', glyph: '■', tint: 0xa65420 },
+/**
+ * Shared presentation metadata for the encounter difficulty axis (§1, §7).
+ *
+ * Two colours per tier, because the badge is drawn on two grounds. `tint` is the canvas
+ * colour — lantern-bright, authored to glow against the dusk-dark Phaser stage. `panelInk`
+ * is the same hue pulled down into ink for the cream parchment overlay, where the bright
+ * tints wash out (Lantern's gold lands at ~1.1:1 on parchment — effectively invisible).
+ * Harder tiers read heavier, so the ladder darkens as it climbs.
+ */
+export const DIFFICULTY_DEFS: Record<
+  EncounterDifficulty,
+  { name: string; glyph: string; tint: number; panelInk: string }
+> = {
+  1: { name: 'Ember', glyph: '▫', tint: 0xd2792c, panelInk: '#8f4a0c' },
+  2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b, panelInk: '#7a5610' },
+  3: { name: 'Beacon', glyph: '■', tint: 0xa65420, panelInk: '#7c2e17' },
 };
 
 /** Short policy badge for the tier flyout: floors use +, T3's preference uses ?. */

@@ -72,15 +72,40 @@ describe('stampDifficulty — encounter result producer', () => {
 describe('difficulty presentation metadata (§7)', () => {
   it('keeps the shipped name, glyph, tint, and short policy badge in one registry', () => {
     expect(DIFFICULTY_DEFS).toEqual({
-      1: { name: 'Ember', glyph: '▫', tint: 0xd2792c },
-      2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b },
-      3: { name: 'Beacon', glyph: '■', tint: 0xa65420 },
+      1: { name: 'Ember', glyph: '▫', tint: 0xd2792c, panelInk: '#8f4a0c' },
+      2: { name: 'Lantern', glyph: '◧', tint: 0xf7ce6b, panelInk: '#7a5610' },
+      3: { name: 'Beacon', glyph: '■', tint: 0xa65420, panelInk: '#7c2e17' },
     });
     expect(difficultyPolicyGlyph(1)).toBe('▫+');
     expect(difficultyPolicyGlyph(2)).toBe('◧+');
     expect(difficultyPolicyGlyph(3)).toBe('■?');
   });
+
+  // Regression: the overlay badge once painted itself with `tint`, the canvas colour. On the
+  // cream panel Lantern's gold measured 1.1:1 — the tier name was legible only as a smudge.
+  it('gives every tier a panelInk that is actually readable on parchment', () => {
+    const PARCHMENT = '#ebd9b2'; // .fw-panel's ground (styles.ts --parchment)
+    for (const tier of [1, 2, 3] as const) {
+      const ratio = contrast(DIFFICULTY_DEFS[tier].panelInk, PARCHMENT);
+      // 4.5:1 — WCAG AA for small text, and the eyebrow is small: .72rem uppercase.
+      expect(ratio, `${DIFFICULTY_DEFS[tier].name} on parchment (${ratio.toFixed(2)}:1)`)
+        .toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });
+
+/** WCAG relative luminance / contrast, so the parchment legibility bar is a number, not a vibe. */
+function contrast(a: string, b: string): number {
+  const lum = (hex: string): number => {
+    const chan = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2];
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
 
 describe('pick — difficulty filter (§3 difficulty-rewards.md)', () => {
   const difficultyPack = (...difficulties: Array<1 | 2 | 3>): Pack => mkPack(

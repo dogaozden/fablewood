@@ -182,7 +182,8 @@ function buildOverlay(): Overlay {
         ? el('span', { class: 'fw-difficulty', text: `· ${difficultyMeta.glyph} ${difficultyMeta.name}` })
         : null;
       if (difficultySpan && difficultyMeta) {
-        difficultySpan.style.color = `#${difficultyMeta.tint.toString(16).padStart(6, '0')}`;
+        // panelInk, not tint: this badge sits on parchment, where the canvas tints wash out.
+        difficultySpan.style.color = difficultyMeta.panelInk;
       }
       const parts: Array<Node | string> = [
         el('div', { class: 'fw-eyebrow' }, [

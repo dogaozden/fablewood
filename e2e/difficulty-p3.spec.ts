@@ -15,12 +15,12 @@ const RIDER_LINE = 'The truth burns brighter. (+1)';
 
 /** §1's three tiers, exactly as overlay.ts composes them: `· ${glyph} ${name}`. */
 const TIERS = [
-  { tier: 1, text: '· ▫ Ember' },
-  { tier: 2, text: '· ◧ Lantern' },
-  { tier: 3, text: '· ■ Beacon' },
+  { tier: 1, text: '· ▫ Ember', ink: 'rgb(143, 74, 12)' },
+  { tier: 2, text: '· ◧ Lantern', ink: 'rgb(122, 86, 16)' },
+  { tier: 3, text: '· ■ Beacon', ink: 'rgb(124, 46, 23)' },
 ] as const;
 
-for (const { tier, text } of TIERS) {
+for (const { tier, text, ink } of TIERS) {
   test(`overlay eyebrow renders tier ${tier} as "${text}"`, async ({ page }) => {
     // `&difficulty=` is the dev-only override (register.ts): the fixture encounters carry no
     // difficulty of their own, so without it every dev overlay would render Lantern via
@@ -31,8 +31,11 @@ for (const { tier, text } of TIERS) {
 
     const eyebrow = page.locator('.fw-difficulty');
     await expect(eyebrow).toHaveText(text);
-    // The tier is colour-coded too (§1's palette tokens) — prove it isn't inheriting body text.
-    await expect(eyebrow).not.toHaveCSS('color', 'rgba(0, 0, 0, 0)');
+    // The tier is colour-coded too — and specifically with `panelInk`, the parchment-ground
+    // colour, NOT the bright `tint` the Phaser canvas uses. Painting the badge with the tint
+    // put Lantern's gold at 1.1:1 on the cream panel; engine.test.ts owns the contrast floor,
+    // this owns the plumbing that actually delivers the right colour to the DOM.
+    await expect(eyebrow).toHaveCSS('color', ink);
 
     // Settle: the overlay fades in, so an immediate shot catches a half-transparent card over
     // the boot screen. Wait for the fade to finish before capturing evidence.
