@@ -1,5 +1,14 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, waitHamletPlayer, warpHamletTo, tapKey, waitForState, readState, canvasClick } from './helpers';
+import {
+  waitReady,
+  waitHamletPlayer,
+  warpHamletTo,
+  tapKey,
+  waitForState,
+  readState,
+  canvasClick,
+  waitProvincesLoaded,
+} from './helpers';
 
 // Wave 5 (Lantern-Light) Task 3, scenario (a) — Concordance Ch. IV, DECIDED: "banking a
 // hearth streak-night grants ONE stored Lantern-light (binary, no stockpiling)". Fresh
@@ -107,6 +116,38 @@ async function findAdjacentFloorPair(page: Page): Promise<[{ c: number; r: numbe
     }
   }
   throw new Error('no adjacent floor pair found in the room layout');
+}
+
+// Task 5, scenario (c) — the Wellspring round re-draw. Cloned drive: wellspring-srs.spec.ts's
+// own boot → hamlet → warp → intro-advance → answerAnyOverlay idioms (own-file convention, as
+// above). Real-pack drive (waitProvincesLoaded before the warp — else doWellspring() takes the
+// no-pack branch): T4's fix-round finding applies here too — only a real pack's due queue can
+// prove a DIFFERENT question surfaced; a packless launch always falls through to the same fixed
+// encounter regardless of which factIds were excluded.
+async function answerAnyOverlay(page: Page): Promise<void> {
+  await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8000 });
+  await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
+  if (await page.locator('.fw-textarea').count()) {
+    await page.locator('.fw-textarea').fill('the preferred shares convert at the stated ratio');
+    await page.getByRole('button', { name: 'Cast' }).click();
+  } else if (await page.locator('.fw-chip').count()) {
+    const lefts = page.locator('.fw-col').nth(0).locator('.fw-chip');
+    const rights = page.locator('.fw-col').nth(1).locator('.fw-chip');
+    const n = await lefts.count();
+    for (let i = 0; i < n; i++) {
+      await lefts.nth(i).click();
+      await rights.nth(i).click();
+    }
+    await page.getByRole('button', { name: /Seal the Weave/ }).click();
+  } else if (await page.locator('.fw-step').count()) {
+    await page.getByRole('button', { name: /Seal the Sequence/ }).click();
+  } else {
+    await page.locator('.fw-opt').first().click(); // mcq or scenario
+  }
+  await page.waitForTimeout(300);
+  const cont = page.getByRole('button', { name: 'Onward ▸' });
+  if (await cont.count()) await cont.click();
+  await page.waitForTimeout(250);
 }
 
 test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
@@ -230,6 +271,70 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
         await onward.click();
       } catch { /* correct answer auto-resolves without a continue button (kinds.ts renderMcq) */ }
       await page.locator('.fw-overlay').waitFor({ state: 'detached', timeout: 10_000 });
+    } finally {
+      await restoreSave(page, beforeSave);
+    }
+  });
+
+  test('Wellspring round: raising the lantern re-presents a different memory and spends the light', async ({ page }) => {
+    test.setTimeout(90_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+
+    try {
+      // fixture: lanternLight held, otherwise the same base fixture as the SRS wellspring drive.
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+
+      await page.goto('/?scene=hamlet&seed=7');
+      await waitReady(page, 'hamlet');
+      await waitHamletPlayer(page);
+      await waitProvincesLoaded(page); // else doWellspring() takes the no-pack branch (no drill)
+
+      const warped = await warpHamletTo(page, 'wellspring');
+      expect(warped, 'dev warp hook parked the Keeper at the Wellspring').toBe(true);
+      await tapKey(page, 'e'); // open the Wellspring intro (real keypress)
+      await page.waitForTimeout(220);
+
+      // advance the intro dialogue until the first drill encounter opens (wellspring-srs.spec.ts
+      // idiom).
+      for (let k = 0; k < 12; k++) {
+        if (await page.locator('.fw-overlay').count()) break;
+        await tapKey(page, 'e');
+        await page.waitForTimeout(300);
+      }
+      await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8000 });
+      await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+
+      await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+      const firstPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+
+      await page.locator('.fw-lantern-btn').click();
+
+      // The old overlay closes (170ms exit anim), the spend PUTs, and a fresh runEncounter
+      // re-presents from THIS ROUND's own drawn pool — no new draw (draw-census law stays at
+      // five sites). This poll is the SETTLE signal, not the regression check itself.
+      await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+      await expect(page.locator('.fw-overlay')).toBeVisible();
+      await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+
+      // assert 1: a different memory surfaced, and the strip does not return this round (the
+      // light is spent, not offered again mid-round). Real vc-law pack, WELLSPRING_DRAW_COUNT=20
+      // candidates — planRedraw excludes the shown fact from that pool, so this is deterministic.
+      const secondPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+      expect(secondPrompt, 'a different memory surfaced on the re-present').not.toBe(firstPrompt);
+      expect(await page.locator('.fw-lantern-btn').count(), 'the lantern strip is gone — the light is spent').toBe(0);
+
+      // answer out the rest of the drill: this round's re-presented question, then rounds 2 and 3.
+      for (let n = 0; n < 3; n++) {
+        if (!(await page.locator('.fw-overlay').count())) break;
+        await answerAnyOverlay(page);
+        await page.waitForTimeout(400);
+      }
+
+      // assert 2 (persistence law): the light is spent.
+      const s = await waitForState<Save>(page, 'save.json', (x) => x?.lanternLight === false);
+      expect(s?.lanternLight).toBe(false);
     } finally {
       await restoreSave(page, beforeSave);
     }
