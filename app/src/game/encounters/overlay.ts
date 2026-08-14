@@ -20,7 +20,7 @@ import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
-import { createLanternGate, isCommitKey, redrawSentinel } from './lantern-ui';
+import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel } from './lantern-ui';
 import { LEVEL_UP_TITLE, LEVEL_UP_SIGNOFF } from '../progression/ceremony';
 
 export interface EncounterCtx {
@@ -272,7 +272,7 @@ export function presentEncounter(
         'click',
         (e) => {
           const t = e.target as HTMLElement | null;
-          if (t?.closest('button') && !t.closest('.fw-lantern')) disarm();
+          if (t && isCommitTarget(t)) disarm();
         },
         { capture: true },
       );

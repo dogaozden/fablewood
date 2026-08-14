@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, canvasClick } from './helpers';
+import { waitReady, canvasClick, readState } from './helpers';
 
 /** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 (the formula every combat spec uses). */
 const CELL = 48;
@@ -469,4 +469,81 @@ test('measured turn: Brace raises a ward that softens the next hit by exactly 1,
 
   const afterSecondHit = await unitState(page, 'keeper');
   expect(afterSecondHit?.hp, 'the second hit lands full — nothing left to absorb it').toBe((afterFirstHit?.hp ?? 0) - 1);
+});
+
+// W5-backlog M2, scenario (d) — overlay.ts's lantern disarm used to fire on ANY button click in
+// the overlay, so match's chips (real <button>s, kinds.ts's leftBtns/rightBtns) killed the raise
+// the instant a player started experimenting with pairings, long before any answer was
+// committed. The fix (lantern-ui.ts's isCommitTarget) disarms only on a kinds.ts-marked
+// `data-commit` button. Weave (hotkey '3', ACTIONS.weave.encounter === 'match' — types.ts) always
+// draws a match-kind encounter, so this is deterministic unlike leaving the kind to chance; the
+// packless `?scene=combat` route this file already uses throughout is safe here because
+// lanternLight is threaded from save state (CombatScene.ts's heldLanternLight), never scoped by
+// packId — unlike the T1 redraw-variety bug lantern-light.spec.ts's own file note describes, this
+// scenario never raises the lantern, so that bug's mechanism never enters the picture.
+test('measured turn: lantern-light disarm ignores match chips but fires on Seal the Weave (M2)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<Record<string, unknown>>(page, 'save.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+    await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn to open");
+
+    // same safe corridor (c:4-6, r:4) the rest of this file uses — adjacent (distance 1) also
+    // satisfies weave's own range 2 (CombatScene.ts: case 'weave' => manhattan <= 2).
+    await setPos(page, 'wisp-0', 6, 4);
+    await setPos(page, 'keeper', 4, 4);
+
+    await page.keyboard.press('3'); // Weave hotkey (ACTIONS.weave) — always a match encounter
+    await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Weave targeting to open');
+    await canvasClick(page, tileXY(6, 4).x, tileXY(6, 4).y);
+
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+
+    await expect(page.locator('.fw-eyebrow'), 'the weave really opened a match encounter').toContainText('Binding Weave');
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+
+    const lefts = page.locator('.fw-col').nth(0).locator('.fw-chip');
+    const rights = page.locator('.fw-col').nth(1).locator('.fw-chip');
+    const n = await lefts.count();
+    expect(n, 'a real match encounter offers at least one pair').toBeGreaterThan(0);
+
+    // --- pair ONE chip: intermediate (re-pickable) WIP, not a commit — the raise must survive it.
+    await lefts.nth(0).click();
+    await rights.nth(0).click();
+    await expect(
+      page.locator('.fw-lantern-btn'),
+      'M2: pairing a single chip is intermediate — the raise strip stays up',
+    ).toBeVisible();
+
+    // --- commit: pair the rest, then Seal the Weave. Sealing is the real lock-in (it grades the
+    // pairing right here, before Onward even exists), so it must disarm on its own — otherwise a
+    // sealed-and-graded weave could still be dodged via a lingering lantern click.
+    for (let i = 1; i < n; i++) {
+      await lefts.nth(i).click();
+      await rights.nth(i).click();
+    }
+    await page.getByRole('button', { name: 'Seal the Weave' }).click();
+    await expect(
+      page.locator('.fw-lantern-btn'),
+      'sealing the weave commits — the raise strip is gone',
+    ).toHaveCount(0);
+    await expect(page.locator('.fw-verdict')).toBeVisible();
+
+    // normal flow continues unimpeded: Onward closes the overlay like any other encounter.
+    const onward = page.getByRole('button', { name: 'Onward ▸' });
+    await onward.waitFor({ state: 'visible', timeout: 5000 });
+    await onward.click();
+    await page.locator('.fw-overlay').waitFor({ state: 'detached', timeout: 10_000 });
+  } finally {
+    await page.request.put('/api/state/save.json', {
+      data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+    });
+  }
 });
