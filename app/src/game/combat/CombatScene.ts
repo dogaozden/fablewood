@@ -36,6 +36,7 @@ import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } fr
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
+import { mkTurnBudget, spendLeg, spendAction, turnExhausted, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
@@ -193,6 +194,10 @@ export class CombatScene extends Phaser.Scene {
 
   private state: Phase = 'boot';
   private moved = false;
+  /** Ch. VI — spendable movement: move -> act -> move the remainder. `moved` stays alongside
+   *  it (mirrors `budget.legSpent`, flips true the instant the first leg commits) rather than
+   *  being replaced everywhere, so its existing "has moved at all" readers are untouched. */
+  private budget: TurnBudget = mkTurnBudget(0);
   private activeId = '';
   private moveField: MoveField | null = null;
   private reachable = new Map<string, Coord>();
@@ -349,6 +354,7 @@ export class CombatScene extends Phaser.Scene {
     this.orderIndex = -1;
     this.state = 'boot';
     this.moved = false;
+    this.budget = mkTurnBudget(0);
     this.activeId = '';
     this.moveField = null;
     this.reachable.clear();
@@ -902,6 +908,7 @@ export class CombatScene extends Phaser.Scene {
 
   private beginPlayerTurn(unit: UnitState): void {
     this.state = 'playerMove';
+    this.budget = mkTurnBudget(this.moveBudgetFor(unit));
     this.moved = false;
     this.pendingAction = null;
     this.pendingSpell = null;
@@ -927,6 +934,13 @@ export class CombatScene extends Phaser.Scene {
   private toggleCarefulStep(unit: UnitState): void {
     if (this.moved) return;
     this.carefulStepOn = !this.carefulStepOn;
+    // Ch. VI — nothing has been spent yet (the `moved` guard above guarantees it), so a fresh
+    // budget off the new stance's total is always correct here: without this, `this.budget`
+    // stayed pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved)
+    // visible range, then spend the untouched difference again as a "second leg" — quietly
+    // doubling back to a full move split across two legs. This is the same `moveBudgetFor`
+    // this method already recomputes `moveField` from, just also re-anchoring the budget object.
+    this.budget = mkTurnBudget(this.moveBudgetFor(unit));
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
@@ -1052,7 +1066,11 @@ export class CombatScene extends Phaser.Scene {
     this.pendingSpell = null;
     this.targetTiles.clear();
     this.hoverGfx.clear();
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI — `this.reachable`/`this.moveField` already reflect whatever movement is left
+    // (beginPlayerTurn / toggleCarefulStep / movePlayerTo's post-arrival recompute keep them in
+    // sync); backing out of targeting spends nothing, so redrawing is always correct — empty
+    // reachable (budget spent) just draws nothing.
+    this.drawMoveRange();
     this.showMenu(unit);
   }
 
@@ -1233,7 +1251,9 @@ export class CombatScene extends Phaser.Scene {
     this.flyoutAction = null;
     this.hud.hideTierFlyout();
     this.state = 'playerMove';
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI — same "reachable is already in sync, always safe to redraw" reasoning as
+    // cancelTargeting above.
+    this.drawMoveRange();
     this.showMenu(unit);
   }
 
@@ -1281,9 +1301,15 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private movePlayerTo(unit: UnitState, tile: Coord): void {
-    if (this.moved || !this.moveField) return;
+    if (this.budget.left <= 0 || !this.moveField) return;
     const path = pathTo(this.moveField, tile);
     if (!path || path.length < 2) return;
+    // Ch. VI — spend this leg's exact tile-cost before anything else; `moved` still flips
+    // true here too (it mirrors `budget.legSpent` — see the field's own doc comment) so its
+    // other "has moved at all" readers (toggleCarefulStep's stance lock, the demo pilot) are
+    // untouched.
+    const cost = this.moveField.cost.get(key(tile.c, tile.r)) ?? Infinity;
+    this.budget = spendLeg(this.budget, cost);
     this.moved = true;
     this.state = 'resolving';
     this.rangeGfx.clear();
@@ -1294,13 +1320,22 @@ export class CombatScene extends Phaser.Scene {
     unit.c = tile.c; unit.r = tile.r;
     this.resolveOpportunityStrikes(unit, path, this.carefulStepOn);
     if (!unit.alive) {
-      // felled by an opportunity strike mid-move (rare, but the fight may be over)
+      // felled by an opportunity strike mid-move (rare, but the fight may be over) — an
+      // unconditional end regardless of what's left in the budget.
       this.time.delayedCall(360, () => this.endPlayerTurn());
       return;
     }
     this.tweenAlongPath(unit, path, () => {
       if (this.destroyed) return;
       this.state = 'playerMove';
+      // Ch. VI — the :930 in-place idiom (toggleCarefulStep's own recompute), but ranged by
+      // the REMAINING budget from the new position, so a spent-out move correctly reachables
+      // to nothing (drawMoveRange then draws nothing) while a partial spend shows the
+      // remainder — the affordance the "move the remainder" half of the turn depends on.
+      this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+      this.reachable.clear();
+      for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
+      this.drawMoveRange();
       this.showMenu(unit);
       this.hud.showBanner('Moved. Choose an action.', P.parchment);
       if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
@@ -1400,7 +1435,15 @@ export class CombatScene extends Phaser.Scene {
       // pip +pulse (hud.ts) apply unchanged.
       if (unit.team === 'party' && dealt > 0) this.glow = glowGain(this.glow, 'strike');
       this.refreshParty();
-      this.time.delayedCall(440, () => this.endPlayerTurn());
+      this.time.delayedCall(440, () => {
+        this.budget = spendAction(this.budget);
+        if (turnExhausted(this.budget)) {
+          this.endPlayerTurn();
+        } else {
+          this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+          this.returnToActionMenu(unit);
+        }
+      });
       return;
     }
 
@@ -1529,7 +1572,15 @@ export class CombatScene extends Phaser.Scene {
     }
 
     this.refreshParty();
-    this.time.delayedCall(620, () => this.endPlayerTurn());
+    this.time.delayedCall(620, () => {
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+      }
+    });
   }
 
   /**
@@ -1693,7 +1744,15 @@ export class CombatScene extends Phaser.Scene {
 
     if (bannerText) this.hud.showBanner(bannerText, quality > 0 ? ACTIONS[action].tint : P.duskRose);
     this.refreshParty();
-    this.time.delayedCall(620, () => this.endPlayerTurn());
+    this.time.delayedCall(620, () => {
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+      }
+    });
   }
 
   /** Resolves a spell's board geometry (primary/aoe target ids + push direction) from its
@@ -1982,7 +2041,9 @@ export class CombatScene extends Phaser.Scene {
   private returnToActionMenu(unit: UnitState): void {
     if (this.destroyed) return;
     this.state = 'playerMove';
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI — the busiest call site for the "reachable is already in sync" reasoning above:
+    // every gated action that leaves movement banked routes back here.
+    this.drawMoveRange();
     this.showMenu(unit);
   }
 
@@ -2034,7 +2095,15 @@ export class CombatScene extends Phaser.Scene {
         P.lanternGold,
       );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
-      this.time.delayedCall(560, () => this.endPlayerTurn());
+      this.time.delayedCall(560, () => {
+        this.budget = spendAction(this.budget);
+        if (turnExhausted(this.budget)) {
+          this.endPlayerTurn();
+        } else {
+          this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+          this.returnToActionMenu(unit);
+        }
+      });
       return;
     }
 
@@ -2080,7 +2149,15 @@ export class CombatScene extends Phaser.Scene {
     this.refreshParty();
     this.hud.showBanner(res.message, P.moss);
     this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
-    this.time.delayedCall(560, () => this.endPlayerTurn());
+    this.time.delayedCall(560, () => {
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+      }
+    });
   }
 
   // ---- boss phase -------------------------------------------------------
@@ -2572,7 +2649,12 @@ export class CombatScene extends Phaser.Scene {
       // crucible #13 — right-click must be inert during movement (it already is during
       // targeting, one branch down: it cancels there). Without this guard any pointer
       // button on a reachable tile spent the turn's move, same as a deliberate left-click.
-      if (this.state === 'playerMove' && !this.moved && !pt.rightButtonDown() && this.reachable.has(key(tile.c, tile.r))) {
+      // Ch. VI — `this.reachable` alone is the correct movement-affordance check: it's kept
+      // in sync with the remaining budget everywhere it's recomputed (turn start, Careful
+      // Step toggle, movePlayerTo's post-arrival recompute), so a tile only ever appears here
+      // when the Keeper genuinely still has movement to spend on it — no separate `moved`
+      // check needed (an exhausted budget means an empty `reachable`, not a stale one).
+      if (this.state === 'playerMove' && !pt.rightButtonDown() && this.reachable.has(key(tile.c, tile.r))) {
         this.movePlayerTo(unit, tile);
       } else if (this.state === 'playerTarget' && this.pendingAction) {
         if (pt.rightButtonDown()) { this.cancelTargeting(unit); return; }
@@ -2588,7 +2670,7 @@ export class CombatScene extends Phaser.Scene {
       if (!unit || unit.team !== 'party') return;
       const tile = this.screenToTile(pt.x, pt.y);
       if (!tile) { this.hoverGfx.clear(); if (this.state === 'playerTarget') this.drawTargets(); return; }
-      if (this.state === 'playerMove' && !this.moved && this.moveField) {
+      if (this.state === 'playerMove' && this.moveField) {
         this.hoverGfx.clear();
         if (this.reachable.has(key(tile.c, tile.r))) {
           const path = pathTo(this.moveField, tile);
@@ -3257,6 +3339,9 @@ export class CombatScene extends Phaser.Scene {
      *  surface" spirit as everything else in this section. §3.1/§3.2 add the run tallies. */
     rank: number; welded3: number; welded4: number; glow: number;
     reclaimed: number; newWelds: number;
+    /** Ch. VI — the active unit's live turn budget (e2e-only; the scene has no other window
+     *  into spendable-movement state for a test to poll). */
+    budget: TurnBudget;
   } {
     return {
       state: this.state,
@@ -3265,6 +3350,7 @@ export class CombatScene extends Phaser.Scene {
       enemyHp: this.enemyHpSum(),
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
+      budget: this.budget,
       // Wave 4 — this field reports the MASTERY rank (the SRS welds, with ?rank= still absolute
       // over it, exactly the value it carried before levels existed). `this.rank` is now the
       // COMPOSED gate; progressionSnapshot().composedTier reports that half. leveling.spec.ts's
@@ -3342,7 +3428,10 @@ export class CombatScene extends Phaser.Scene {
     // pre-teleport tile) — refresh them so a test can debugSetPos the active unit into a
     // specific pincer/geometry and then click a real move destination relative to its new spot.
     if (id === this.activeId && this.state === 'playerMove') {
-      this.moveField = computeMoveField(u, this.moveBudgetFor(u), this.layout.tiles, this.blockedFor(u.id));
+      // Ch. VI — ranged by the REMAINING budget, not a fresh moveBudgetFor: this call now can
+      // run mid-turn (after a leg is already spent), and moveBudgetFor would hand back the
+      // full fresh total, letting a test click a tile the Keeper can no longer actually afford.
+      this.moveField = computeMoveField(u, this.budget.left, this.layout.tiles, this.blockedFor(u.id));
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();

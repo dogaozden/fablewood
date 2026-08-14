@@ -105,7 +105,7 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
     shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item.',
   },
   wait: {
-    kind: 'wait', label: 'Wait', hotkey: '7', encounter: null, range: 0,
+    kind: 'wait', label: 'End Turn', hotkey: '7', encounter: null, range: 0,
     shape: 'self', tint: 0x8a8078, blurb: 'Hold position, end turn.',
   },
 };
