@@ -37,6 +37,23 @@ async function unitPos(page: Page, id: string): Promise<{ c: number; r: number }
   }, id);
 }
 
+/** Full e2e read of a unit's live hp/statuses (unlike unitPos above, which only needs c/r) —
+ *  reuses CombatScene.unitDebug (e2e-only, unmodified by this task) as-is. Scenario c below
+ *  needs both hp (the absorption delta) and statuses (proving the ward itself, then its
+ *  consumption) from a single call. */
+async function unitState(
+  page: Page,
+  id: string,
+): Promise<{ hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as
+      | { unitDebug?(id: string): { hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null }
+      | undefined;
+    return s?.unitDebug?.(uid) ?? null;
+  }, id);
+}
+
 /** The rendered action-bar buttons' label/hint text (e2e-only CombatScene.actionMenuDebug,
  *  wraps hud.ts's own debug read — unmodified by this task). Index order matches
  *  `Object.keys(ACTIONS)`: strike,smite,weave,sequence,cast,parley,satchel,wait — index 7 is
@@ -299,7 +316,10 @@ test('measured turn: Press On grants +move and spends the action — Strike is n
   // graceful degradation the longer Art labels already show; a prefix match proves the slot,
   // not the exact truncation point (Task 5's territory — see brief).
   expect(menuAfter[7]?.label, 'the Wait/End Turn slot is still present, unmoved by the new button').toMatch(/^End/);
-  expect(menuAfter[8]?.label, 'Press On is the new 9th, rightmost slot').toBe('Press On');
+  // Ch. VI Task 4 — Brace grew the row to 10 buttons, narrowing it further: "Press On" (which
+  // fit exactly at 9) now itself ellipsizes ("Press…"). Same fix as the End Turn line just
+  // above — a prefix match proves the slot survives, not the exact truncation point.
+  expect(menuAfter[8]?.label, 'Press On is still the 9th slot').toMatch(/^Press/);
   expect(menuAfter[8]?.hint, 'Press On itself reads spent too — one action per turn').toContain('spent');
 
   // Fix round 1 (Important 1) — Press On locks the stance: a Careful Step attempt ('c') right
@@ -375,4 +395,78 @@ test('measured turn: a killing blow with movement banked resolves the battle imm
     afterKill.state,
     're-review N1: checkEnd runs BEFORE the steps-remain banner — a killing blow with movement banked must resolve victory immediately, not linger at the action menu',
   ).toBe('over');
+});
+
+// Ch. VI Task 4 — Brace grants a 1-point Warded through the existing status pipeline
+// (status.ts's applyStatus): the next hit against the braced unit lands 1 less and consumes the
+// ward outright (keep-the-larger, not a running subtraction — status.test.ts's own absorption
+// suite already pins that arithmetic; this proves the LIVE wiring, scene → status.ts →
+// computeHit, actually fires). Same Kindle-kill-the-other-two technique as scenario b2 above so
+// exactly one enemy (wisp-1: attack 1, melee, un-flankable with no living ally left to flank
+// from) survives to be the sole, deterministic attacker — a 1-point hit against a 1-point ward
+// is the cleanest possible "reduced by exactly 1": 1 → 0 absorbed, then 0 → 1 full once the
+// ward is gone.
+test('measured turn: Brace raises a ward that softens the next hit by exactly 1, then is spent', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn to open");
+
+  // wisp-0 (hp 2) and wraith-2 (hp 3) die at their OWN turn-start tick, before ever acting —
+  // wisp-1 (hp 2) is left fully untouched as the sole survivor.
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2);
+  await applyStatus(page, 'wraith-2', 'kindled', 1, 3);
+
+  const ready = await passUntilKeeper(page, (s) => s.enemyHp === 2, 'round 2 — wisp-1 alone left, untouched at 2 hp');
+  expect(ready.log.length, 'no player action spent — Kindled did the clearing, not the Keeper').toBe(0);
+
+  // Same safe corridor (c:4-6, r:4) the rest of this file uses — adjacent so wisp-1's turn
+  // attacks without needing to move first (ai.ts's decideEnemy: already in range → hit in place).
+  await setPos(page, 'keeper', 4, 4);
+  await setPos(page, 'wisp-1', 5, 4);
+
+  const before = await unitState(page, 'keeper');
+  expect(before?.statuses.some((s) => s.id === 'warded'), 'no ward before Brace').toBe(false);
+
+  // --- Brace (hotkey '9', ACTIONS.brace).
+  await page.keyboard.press('9');
+  await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'Brace to spend the action');
+  const braced = await snap(page);
+  expect(braced?.log.at(-1)?.action, 'Brace resolved and logged').toBe('brace');
+  expect(braced?.state, "still the Keeper's own turn, back at the action menu (movement was never spent)").toBe('playerMove');
+  expect(braced?.activeId).toBe('keeper');
+
+  const afterBrace = await unitState(page, 'keeper');
+  const ward = afterBrace?.statuses.find((s) => s.id === 'warded');
+  expect(ward?.magnitude, 'Brace grants exactly a 1-point ward').toBe(1);
+  const hpBeforeFirstHit = afterBrace?.hp ?? -1;
+
+  // End the Keeper's turn (nothing else to spend), then Mira's — no ?demo=1 pilot, so both
+  // party turns need an explicit End Turn before the sole enemy's turn plays itself.
+  await page.keyboard.press('7');
+  await waitForSnap(page, (s) => s?.activeId === 'mira' && s?.state === 'playerMove', "Mira's turn to open");
+  await page.keyboard.press('7');
+  await waitForSnap(
+    page,
+    (s) => s?.activeId === 'keeper' && s?.state === 'playerMove',
+    "round 3 — Keeper's turn again after wisp-1's first attack",
+  );
+
+  const afterFirstHit = await unitState(page, 'keeper');
+  expect(afterFirstHit?.hp, 'the ward fully absorbed the 1-damage hit (reduced by exactly 1, to 0 taken)').toBe(hpBeforeFirstHit);
+  expect(afterFirstHit?.statuses.some((s) => s.id === 'warded'), 'the ward is consumed by the absorption, not left standing').toBe(false);
+
+  // --- Round 3: no Brace this time — End Turn straight away so the same wisp-1 attacks again
+  // with nothing left to absorb it.
+  await page.keyboard.press('7');
+  await waitForSnap(page, (s) => s?.activeId === 'mira' && s?.state === 'playerMove', "Mira's second turn to open");
+  await page.keyboard.press('7');
+  await waitForSnap(
+    page,
+    (s) => s?.activeId === 'keeper' && s?.state === 'playerMove',
+    "round 4 — Keeper's turn again after wisp-1's second attack",
+  );
+
+  const afterSecondHit = await unitState(page, 'keeper');
+  expect(afterSecondHit?.hp, 'the second hit lands full — nothing left to absorb it').toBe((afterFirstHit?.hp ?? 0) - 1);
 });

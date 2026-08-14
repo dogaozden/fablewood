@@ -40,6 +40,7 @@ export const ICON_KEYS: Record<string, string> = {
   satchel: 'icon.satchel',
   wait: 'icon.wait',
   press_on: 'icon.press-on',
+  brace: 'icon.brace',
 };
 
 /**
@@ -100,6 +101,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.satchel, ICON, ICON, drawIconSatchel);
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
   bake(scene, ICON_KEYS.press_on, ICON, ICON, drawIconPressOn);
+  bake(scene, ICON_KEYS.brace, ICON, ICON, drawIconBrace);
 
   bake(scene, CHIP_KEYS.kindled, CHIP, CHIP, drawChipKindled);
   bake(scene, CHIP_KEYS.bound, CHIP, CHIP, drawChipBound);
@@ -410,6 +412,28 @@ function drawIconPressOn(g: Phaser.GameObjects.Graphics): void {
   g.lineBetween(17, 8, 28, 18).lineBetween(28, 18, 17, 28);
   g.lineStyle(3, P.lanternGold, 1);
   g.lineBetween(17, 8, 28, 18).lineBetween(28, 18, 17, 28);
+}
+
+/** Brace's HUD icon (Ch. VI Task 4) — a small shield: a hexagonal outline (same
+ *  points-polygon technique as drawIconSmite's bolt) in the deep-water tone, a lit facet
+ *  top-left (the double-tone shading every other icon here uses — Strike's blade,
+ *  Satchel's bag), and a small core rivet — "brace behind a shield", tying the glyph to the
+ *  same shield/absorb blue family as the boss-shield pips and Warded's own HUD chip. */
+function drawIconBrace(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  const shield = [
+    new Phaser.Geom.Point(18, 5),
+    new Phaser.Geom.Point(29, 9),
+    new Phaser.Geom.Point(27, 20),
+    new Phaser.Geom.Point(18, 31),
+    new Phaser.Geom.Point(9, 20),
+    new Phaser.Geom.Point(7, 9),
+  ];
+  g.lineStyle(2, P.outline, 1);
+  g.fillStyle(P.waterDeep, 1).fillPoints(shield, true);
+  g.strokePoints(shield, true);
+  g.fillStyle(P.waterLight, 1).fillTriangle(12, 10, 18, 8, 14, 18); // lit facet
+  g.fillStyle(P.glowCore, 0.9).fillCircle(18, 16, 2.5); // core rivet
 }
 
 function star(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rad: number, color: number): void {

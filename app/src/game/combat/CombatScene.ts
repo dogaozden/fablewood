@@ -977,6 +977,42 @@ export class CombatScene extends Phaser.Scene {
     this.returnToActionMenu(unit);
   }
 
+  /** Ch. VI Task 4 — Brace: spend the turn's ONE action for a 1-point Warded (status.ts) via
+   *  the existing pipeline, rather than an attack — keep-the-larger applyStatus already makes
+   *  Bracing under a bigger active ward a no-op absorb-wise (the ratified law; no special case
+   *  needed here, or anywhere — computeHit's absorption is generic over who granted the ward).
+   *  Sixth gated action handler (Task 4 brief): the SAME spendAction → turnExhausted ?
+   *  endPlayerTurn : checkEnd-first shape Strike/the T1 power moves/Parley/the Satchel heals all
+   *  share, unit.alive guard included — mirrors Strike's shape exactly, even though nothing
+   *  Brace does can fell its own caster. (Press On is the one OTHER self-cast action and
+   *  deliberately skips this shape — see its own doc comment above — because it can never
+   *  affect checkEnd; Brace fills the same action slot Strike/Cast/Parley do, so it gets
+   *  their gate instead.) */
+  private brace(unit: UnitState): void {
+    unit.statuses = applyStatus(unit, 'warded', -1, 1);
+    this.drawHpBar(unit);
+    this.floatText(unit, STATUS_DEFS.warded.label, STATUS_DEFS.warded.tint);
+    this.hud.showBanner('You set your feet — the next blow lands softer.', P.parchment);
+    this.actionLog.push({ action: 'brace', dmg: 0, overlay: false });
+    this.refreshParty();
+    this.time.delayedCall(560, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
+  }
+
   /** §4.4 — free interact: light an adjacent unlit brazier (once per brazier — the tile
    *  becoming 'lantern' is itself the once-only gate). §5.1 Glow source — wires the Phase-1
    *  no-op hook: lighting a brazier grants the party +1 Glow immediately. */
@@ -1056,6 +1092,9 @@ export class CombatScene extends Phaser.Scene {
       // Ch. VI — Press On has no target either (it grants movement, not a strike); always
       // pickable while the action is unspent, same self-cast shape as Satchel above.
       if (action === 'press_on') return { action, enabled: true };
+      // Ch. VI Task 4 — Brace has no target either (a self-buff, not a strike); same self-cast
+      // shape as Satchel/Press On above.
+      if (action === 'brace') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
       return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no foe within reach' };
     });
@@ -1073,6 +1112,8 @@ export class CombatScene extends Phaser.Scene {
     if (action === 'satchel') { void this.openSatchel(unit); return; }
     // Ch. VI — Press On: no targeting phase, resolves immediately like Satchel above.
     if (action === 'press_on') { this.pressOn(unit); return; }
+    // Ch. VI Task 4 — Brace: no targeting phase either, resolves immediately like Press On.
+    if (action === 'brace') { this.brace(unit); return; }
     // §12.2 — Rank≥2 pressing an Art opens the tier flyout instead of casting T1 directly.
     // At Rank 1 this branch never taken: today's exact flow, zero regression.
     if (ART_ACTIONS.has(action) && this.rank >= 2) { this.openTierFlyout(unit, action); return; }
@@ -1137,6 +1178,7 @@ export class CombatScene extends Phaser.Scene {
       case 'satchel':
       case 'wait':
       case 'press_on':
+      case 'brace':
         return [];
       default: {
         // trap 4 — this switch is touched this phase, so it gets an exhaustiveness check

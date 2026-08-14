@@ -154,6 +154,12 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
       // validTargets gate (Ch. VI, same treatment as 'satchel' above) and resolves it via
       // grantPressOn (turnBudget.ts), never this table. Kept only so the switch stays exhaustive.
       return { ...EMPTY, banner: 'The road stretches further.' };
+    case 'brace':
+      // Never actually reached: CombatScene.onPickAction special-cases 'brace' before the
+      // validTargets gate (Ch. VI Task 4, same treatment as 'satchel'/'press_on' above) and
+      // resolves it via applyStatus (status.ts), never this table. Kept only so the switch
+      // stays exhaustive.
+      return { ...EMPTY, banner: 'The ward resolves outside this table.' };
   }
 }
 
