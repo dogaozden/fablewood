@@ -727,6 +727,53 @@ test('a missed night WITH Ward of Focus holds the chain and consumes the ward', 
   }
 });
 
+// Ch. VII Mira's Stall, W6 rebase round (final review M2): an ABNORMAL lastHearthAt is grace,
+// not a break. The break law's `!!lastHearthAt` was true for a garbage stamp and for a
+// future-dated one, so both snapped the chain — inverting the philosophy of the very helper it
+// reuses ("Unparseable stamps never brick the Hearth", rest/embers.ts). The law's own words
+// were "Legacy/absent lastHearthAt = grace"; absent was pinned (hearth-rest.spec.ts), corrupt
+// and future-dated were never considered. Consequence is a destructive write to state/ on
+// evidence we know is bad, which is what promoted this to fix-before-merge. Both abnormal
+// stamps are driven here through the same real Cottage rest the break/ward scenarios use.
+test('an unparseable or future-dated lastHearthAt is grace — the chain never snaps on a bad stamp', async ({ page }) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<Save>(page, 'save.json');
+
+  try {
+    // Same fixture as the break scenario above in every respect EXCEPT the stamp itself, so
+    // the stamp is provably the only variable: a genuine 3-days-ago stamp here DOES snap
+    // (proven directly by 'a missed night with no Ward of Focus snaps the streak to 0').
+    for (const [label, stamp] of [
+      ['unparseable', 'not-a-date-at-all'],
+      ['future-dated', daysAgoIso(-2)], // negative days = two days AHEAD (clock skew / ahead-clock save)
+    ] as const) {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'hamlet', hp: 3, embers: 0, lastHearthAt: stamp, streak: 7, lastPlayed: '' },
+      });
+
+      await page.goto('/?scene=hamlet&seed=7');
+      await waitReady(page, 'hamlet');
+      await waitHamletPlayer(page);
+
+      const warped = await warpHamletTo(page, 'cottage');
+      expect(warped, `${label}: warp hook parked the Keeper at the Cottage`).toBe(true);
+
+      // hearthRestConv's 2 BASE pages — no third page, because no break/ward line is added.
+      const lastLine = await runCottageConversation(page, 2);
+      expect(lastLine.replace(/\s+/g, ' '), `${label}: the break line never appears`).not.toBe(
+        'The vigil lapsed — the chain begins anew.',
+      );
+
+      // The rest itself still happens — grace means "don't punish", not "don't rest".
+      const after = await waitForState<Save>(page, 'save.json', (s) => s?.hp === 16);
+      expect(after?.streak, `${label}: the chain is untouched — a bad stamp is not evidence of a missed night`).toBe(7);
+      expect(after?.lastHearthAt, `${label}: tonight's rest re-stamps, healing the bad value`).not.toBe(stamp);
+    }
+  } finally {
+    await restoreSave(page, beforeSave);
+  }
+});
+
 // ---- Task 6: wave e2e completeness sweep ------------------------------------
 
 // Ch. VII Mira's Stall, Task 6 (wave e2e completeness — replace law, live end-to-end):
