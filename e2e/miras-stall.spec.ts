@@ -23,6 +23,11 @@ type Snap = {
   log: Array<{ action: string; dmg: number; overlay: boolean }>;
   /** Ch. VII Mira's Stall — e2e-only debug read (combatSnapshot's `armedAid` field, Task 2). */
   armedAid: { itemId: string; kind: string } | null;
+  /** Ch. VI — W6's turn budget (combatSnapshot's own field). The rebase round reads
+   *  `actionSpent` in two places: to drive turns like a player, and to pin the Satchel's
+   *  action cost at the budget itself rather than at an actionLog entry that gets pushed
+   *  either way (final review C1). */
+  budget: { total: number; left: number; legSpent: boolean; actionSpent: boolean; pressedOn: boolean };
 } | null;
 
 async function snap(page: Page): Promise<Snap> {
@@ -43,11 +48,23 @@ async function bannerText(page: Page): Promise<string> {
   });
 }
 
-/** Wait for the KEEPER's own playerMove turn specifically. Mira (speed 4, right behind the
- *  Keeper's 5 in this fixture's fixed initiative — initiative.ts sorts by speed desc, party
- *  before enemy on a tie) gets her own manual playerMove turn too, so a plain "any playerMove"
- *  wait (fine for existing single-turn specs) would stop on HER turn the second time this is
- *  called. Waits her out with the Wait hotkey ('7') so only the Keeper's turn is ever returned. */
+/** Wait for the Keeper's own OPEN turn — open meaning the turn's one action is still unspent.
+ *
+ *  Mira (speed 4, right behind the Keeper's 5 in this fixture's fixed initiative —
+ *  initiative.ts sorts by speed desc, party before enemy on a tie) gets her own manual
+ *  playerMove turn too, so a plain "any playerMove" wait (fine for existing single-turn specs)
+ *  would stop on HER turn the second time this is called. End Turn ('7') waits her out.
+ *
+ *  W6 rebase — the same key now also closes a Keeper turn that has already acted. Pre-W6 every
+ *  action ended the turn outright, so "the Keeper is at playerMove" and "the Keeper can act"
+ *  were the same statement. Post-W6 they are not: Ch. VI's move·act·move economy returns the
+ *  actor to its own action menu with banked movement and a "Steps remain" banner, and every
+ *  further action is refused at the source (CombatScene's `if (this.budget.actionSpent)
+ *  return`). Without this, every drive below that acts twice returned instantly on the SAME
+ *  spent turn and then silently stalled — the pane never opening, or the cast key doing
+ *  nothing. A drive that wants another action has to close the turn like a real player would;
+ *  boss-victory.spec.ts:251 set that precedent for W6's own boss drives. The press is
+ *  conditional on actionSpent, so a turn W6's gate already ended is never double-pressed. */
 async function waitForKeeperTurn(page: Page, timeout = 30_000): Promise<Snap> {
   const start = Date.now();
   let s = await snap(page);
@@ -55,8 +72,8 @@ async function waitForKeeperTurn(page: Page, timeout = 30_000): Promise<Snap> {
     if ((await currentScene(page)) !== 'combat') return null; // fight resolved early
     s = await snap(page);
     if (s?.state === 'playerMove') {
-      if (s.activeId === 'keeper') return s;
-      await page.keyboard.press('7'); // Wait out Mira's turn
+      if (s.activeId === 'keeper' && !s.budget?.actionSpent) return s;
+      await page.keyboard.press('7'); // End Turn — waits Mira out, or closes a spent Keeper turn
     }
     await page.waitForTimeout(150);
   }
@@ -964,24 +981,45 @@ test("an armed aid is inert at Death's Door: no strike renders, the arm neither 
   }
 });
 
-// Ch. VII Mira's Stall, Task 6 (wave e2e completeness — W6-rebase pin): the pre-Mira's-Stall
-// heal/glow Satchel branches (satchel.ts's own Phase 1/Phase 2 history) still spend the turn
-// exactly like the new trial-tool arm branch proven above — the SAME actionLog.push({action:
-// 'satchel'}) + 560ms delayedCall(endPlayerTurn) shape (CombatScene.ts's useSatchelItem). W6
-// (the parallel wave) is landing a turn-BUDGET rework (spendAction/steps-remain) that both
-// branches predate — this pins TODAY's action-log shape on purpose, so that rebase converts
-// them deliberately instead of being surprised by an untouched regression corner.
-test('glow and heal Satchel uses still cost the turn (pre-W6 action-log shape)', async ({ page }) => {
-  test.setTimeout(60_000);
+/** All three Satchel branches must now pay Ch. VI's price the SAME way: spend the turn's one
+ *  action, leave banked movement spendable, and hand the actor back its own action menu under
+ *  the "Steps remain" banner. Asserted at the BUDGET, deliberately — the actionLog entry the
+ *  old pins used is pushed BEFORE the 560ms delayedCall on every branch, so it stays green
+ *  whether or not spendAction is ever reached (final review C1: that is exactly how the arm
+ *  branch's missing gate hid). `left > 0` is what proves the action didn't eat the whole turn. */
+async function expectSatchelPaidTheAction(page: Page, leg: string): Promise<void> {
+  const s = await snap(page);
+  expect(s?.log.at(-1)?.action, `${leg}: resolved as a satchel action`).toBe('satchel');
+  expect(s?.budget?.actionSpent, `${leg}: spent the turn's ACTION (Ch. VI's spendAction gate)`).toBe(true);
+  expect(s?.budget?.left ?? 0, `${leg}: movement is NOT forfeited — steps remain spendable`).toBeGreaterThan(0);
+  expect(s?.state, `${leg}: the actor is back at its own action menu, turn still open`).toBe('playerMove');
+  expect(s?.activeId, `${leg}: it is still the Keeper's turn — the action never ended it`).toBe('keeper');
+  expect(await bannerText(page), `${leg}: the steps-remain banner is up`).toBe(
+    'Steps remain — press End Turn when done.',
+  );
+}
+
+// Ch. VII Mira's Stall, Task 6 + the W6 rebase round (final review C1): every Satchel branch —
+// heal and glow (satchel.ts's own Phase 1/Phase 2 history) and the new trial-tool ARM branch —
+// obeys W6's turn budget identically. The arm branch is the one that matters: it was written
+// before W6 existed, ends up inserted BETWEEN the two branches W6 converted, and so composes
+// cleanly and wrongly at the rebase with no conflict marker to prompt anyone. The old version
+// of this pin covered only heal/glow and asserted only the pre-delayedCall actionLog push, so
+// it could not have caught that. This one asserts the budget, on all three.
+test('every Satchel use costs the ACTION, not the turn (heal, glow, and the trial-tool arm)', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.request.put('/api/state/save.json', { data: { hp: 10 } });
   await page.request.put('/api/state/inventory.json', {
-    data: { version: 1, gold: 20, stacks: { 'embermend-draught': 1, 'wick-tallow': 1 } },
+    data: {
+      version: 1, gold: 20,
+      stacks: { 'embermend-draught': 1, 'wick-tallow': 1, 'scriveners-hint': 1 },
+    },
   });
 
   await page.goto('/?scene=combat&seed=7');
   await waitReady(page, 'combat');
 
-  // ---- heal: still spends the turn via the satchel actionLog entry.
+  // ---- heal.
   let s = await waitForKeeperTurn(page);
   expect(s?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
 
@@ -990,12 +1028,11 @@ test('glow and heal Satchel uses still cost the turn (pre-W6 action-log shape)',
   const healRow = page.locator('.inv-row', { hasText: 'Embermend Draught' });
   await healRow.getByRole('button', { name: 'Use' }).click();
   await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
-  await page.waitForTimeout(700); // past useSatchelItem's 560ms delayedCall -> endPlayerTurn
+  await page.waitForTimeout(700); // past useSatchelItem's 560ms delayedCall -> the budget gate
 
-  // W6-rebase: convert to budget-gate shape (spendAction + steps-remain)
-  expect((await snap(page))?.log.at(-1)?.action, 'heal still spends the turn as a satchel action').toBe('satchel');
+  await expectSatchelPaidTheAction(page, 'heal');
 
-  // ---- glow: same actionLog shape, on the Keeper's next open turn.
+  // ---- glow, on the Keeper's next open turn (waitForKeeperTurn ends the spent one).
   s = await waitForKeeperTurn(page);
   expect(s?.state, "the Keeper's second turn opened").toBe('playerMove');
 
@@ -1006,8 +1043,20 @@ test('glow and heal Satchel uses still cost the turn (pre-W6 action-log shape)',
   await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
   await page.waitForTimeout(700);
 
-  // W6-rebase: convert to budget-gate shape (spendAction + steps-remain)
-  expect((await snap(page))?.log.at(-1)?.action, 'glow still spends the turn as a satchel action').toBe('satchel');
+  await expectSatchelPaidTheAction(page, 'glow');
+
+  // ---- the arm branch: the leg the old pin never covered, and the one the rebase would
+  // otherwise have left on the pre-W6 one-liner.
+  s = await waitForKeeperTurn(page);
+  expect(s?.state, "the Keeper's third turn opened").toBe('playerMove');
+
+  await armHint(page);
+  expect((await snap(page))?.armedAid, 'the arm landed — this leg really is the arm branch').toEqual({
+    itemId: 'scriveners-hint', kind: 'reveal_option',
+  });
+  await page.waitForTimeout(500); // past the arm branch's own 560ms delayedCall (armHint waits 250)
+
+  await expectSatchelPaidTheAction(page, 'aid-arm');
 
   await page.screenshot({ path: `${EV}/miras-stall-satchel-cost-pins.png` });
 });

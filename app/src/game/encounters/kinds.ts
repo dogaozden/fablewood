@@ -151,9 +151,12 @@ const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
   const list = el('div', { class: 'fw-opts' });
   options.forEach((label, i) => {
     // Struck option gets its own build (not the shared commit-button path) — it must stay
-    // inert: disabled, no onclick, and NO data-commit. W6's lantern-raise disarm listener
-    // (overlay.ts) only fires on [data-commit] buttons, so withholding the attribute here is
-    // what keeps a struck line from counting as a commit as well as from being clickable.
+    // inert: disabled, no onclick, and NO data-commit. W6 marks every real commit button
+    // data-commit so a click on one disarms the lantern raise (overlay.ts's capture listener
+    // -> lantern-ui.ts's isCommitTarget, which is a `closest('[data-commit]')` test), so
+    // withholding the attribute is what keeps a struck line from counting as a commit as well
+    // as from being clickable. Click path only — isCommitKey is index-blind by construction
+    // (any digit disarms), which is W6's own behavior and not something this build can reach.
     const card = i === struckIndex
       ? el('button', { class: 'fw-opt fw-struck', type: 'button', disabled: true }, [
           el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
