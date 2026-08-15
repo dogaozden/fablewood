@@ -142,8 +142,8 @@ test('Night\'s Ledger at boss victory (run end): title, "vault stands cleared", 
   expect(labels, 'Newly welded row suppressed at zero').not.toContain('Newly welded');
   expect(labels, 'Reclaimed row suppressed at zero').not.toContain('Reclaimed from the Fade');
   // a cleared room bumps the streak, so that row renders as "N nights".
-  const streak = led!.rows.find((r) => r.label === 'Streak');
-  expect(streak, 'Streak row present after a victory').toBeTruthy();
+  const streak = led!.rows.find((r) => r.label === 'Vigil');
+  expect(streak, 'Vigil row present after a victory').toBeTruthy();
   expect(streak!.val).toMatch(/\d+ nights?$/);
 });
 

@@ -15,7 +15,7 @@ import {
   services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
   type Quality, type EnemySpec,
 } from '../contracts';
-import type { Pack } from '../../packs/types';
+import type { Pack, Encounter } from '../../packs/types';
 import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
 import { candidateDungeonFiles, isDungeonSpec } from '../scenes/dungeon/specResolve';
 import {
@@ -36,6 +36,7 @@ import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } fr
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
@@ -47,7 +48,7 @@ import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
 // the task report as a deviation from the codebase's usual services-locator pattern.
 import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
-import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT } from '../lantern';
+import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT, heldLanternLight } from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -64,9 +65,16 @@ import { maxHpForLevel, strikeBonusForLevel, tierForLevel } from '../progression
 import { reclaimedFactIds } from '../../srs/redemption';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
-import { DIFFICULTY_DEFS, difficultyPolicyGlyph } from '../encounters/engine';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph, previewPick } from '../encounters/engine';
+import { FIXTURE_PACK } from '../encounters/fixtures';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
+
+/** M3 fix round 1 — the same guard encounters/register.ts's loadPacks() applies to its own
+ *  getPacks() result, mirrored here rather than imported (register.ts's is file-private). */
+function isPack(p: unknown): p is Pack {
+  return !!p && typeof p === 'object' && Array.isArray((p as Pack).encounters) && !!(p as Pack).meta;
+}
 
 /**
  * Recency memory for dueFactIds() (director: "am I not over-asked the same things
@@ -192,7 +200,11 @@ export class CombatScene extends Phaser.Scene {
   private orderIndex = -1;
 
   private state: Phase = 'boot';
-  private moved = false;
+  /** Ch. VI — spendable movement: move -> act -> move the remainder. `legSpent` (inside the
+   *  budget) is the single source of truth for "has moved this turn" — the stance-lock guard,
+   *  the demo pilot's approach gate, and the keydown 'c' handler all read it directly (fix
+   *  round 2, T2 review M3: the old `moved` mirror field was collapsed into this). */
+  private budget: TurnBudget = mkTurnBudget(0);
   private activeId = '';
   private moveField: MoveField | null = null;
   private reachable = new Map<string, Coord>();
@@ -348,7 +360,7 @@ export class CombatScene extends Phaser.Scene {
     this.order = [];
     this.orderIndex = -1;
     this.state = 'boot';
-    this.moved = false;
+    this.budget = mkTurnBudget(0);
     this.activeId = '';
     this.moveField = null;
     this.reachable.clear();
@@ -902,15 +914,20 @@ export class CombatScene extends Phaser.Scene {
 
   private beginPlayerTurn(unit: UnitState): void {
     this.state = 'playerMove';
-    this.moved = false;
+    // Final review C1 — `carefulStepOn` is scene-wide (not per-unit) and `endPlayerTurn` never
+    // clears it, so it must be reset here BEFORE either `moveBudgetFor` call below, not after:
+    // reading it stale for the budget while the move field (built from the same method) reads
+    // it fresh left a turn silently halved while the highlighted range promised the full one.
+    this.carefulStepOn = false;
+    this.budget = mkTurnBudget(this.moveBudgetFor(unit));
     this.pendingAction = null;
     this.pendingSpell = null;
     this.overglowOn = false;
-    this.carefulStepOn = false;
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — the HUD's Move N/M readout starts each turn in sync.
     this.showMenu(unit);
     this.hud.showBanner(`${unit.name}'s turn — move, then act.`, P.parchment);
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
@@ -925,16 +942,96 @@ export class CombatScene extends Phaser.Scene {
   /** §4.2 — 'c' toggles Careful Step while choosing a move: half move (floor, min 1), no
    *  opportunity strikes provoked. Recomputes the move field/range in place. */
   private toggleCarefulStep(unit: UnitState): void {
-    if (this.moved) return;
+    if (stanceLocked(this.budget)) return;
     this.carefulStepOn = !this.carefulStepOn;
+    // Ch. VI — `stanceLocked` above only proves no LEG has been spent and Press On hasn't fired;
+    // it says nothing about the action having been spent some OTHER way (a Strike/Cast/Satchel
+    // before ever moving). A bare `mkTurnBudget(...)` here would silently wipe actionSpent back
+    // to false (fixed round 1, I1) — re-anchoring total/left off the new stance while spreading
+    // the old flags back over the result preserves all three: legSpent/pressedOn (always false
+    // here anyway, since the guard above already refused otherwise — stated for symmetry) and,
+    // critically, actionSpent. Without the total/left re-anchor at all, `this.budget` stayed
+    // pinned to the PRE-toggle total and a Careful-Step turn could spend its (halved) visible
+    // range, then spend the untouched difference again as a "second leg" — quietly doubling back
+    // to a full move split across two legs. This is the same `moveBudgetFor` this method already
+    // recomputes `moveField` from, just also re-anchoring the budget object.
+    // Fix round 1 (Important 1) — Press On now also locks the stance (pressedOn, checked by
+    // stanceLocked above), so this re-anchor can no longer run on a budget carrying an unpriced
+    // Press On bonus: pressedOn would have refused the guard first. Before this fix, Press On set
+    // only actionSpent, which the OLD guard never checked — the toggle stayed live, and this same
+    // re-anchor line silently discarded the granted bonus (moveBudgetFor has zero awareness of
+    // `this.budget.total`, only of the unit's raw stats + current stance).
+    this.budget = {
+      ...mkTurnBudget(this.moveBudgetFor(unit)),
+      legSpent: this.budget.legSpent,
+      actionSpent: this.budget.actionSpent,
+      pressedOn: this.budget.pressedOn,
+    };
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — the toggle re-anchored total/left; keep Move N/M in sync.
     this.hud.showBanner(
       this.carefulStepOn ? 'Careful Step: half move, no opportunity strikes.' : 'Careful Step off.',
       this.carefulStepOn ? P.waterLight : P.parchment,
     );
+  }
+
+  /** Ch. VI — Press On: forgo the action for +effectiveMove, composed as ONE halving over the
+   *  COMBINED (raw, un-halved) total under Careful Step (final review C2 — the chapter's named
+   *  identity "Careful Step + Press On = normal distance" must hold at every effectiveMove,
+   *  including odd ones under Dimmed; see the turnBudget.test.ts compose-law pin). `this.budget
+   *  .total` always equals `moveBudgetFor(unit)` at this point (nothing else touches `total`
+   *  except a toggle, which re-syncs it) — the bonus granted is the gap between the correct
+   *  combined target and whatever's already there, so `grantPressOn` still just adds a number.
+   *  Reuses returnToActionMenu's own "recompute the move field off budget.left, then reshow the
+   *  menu" idiom — Press On spends the action exactly like the five gated action handlers, just
+   *  with no delayedCall presentation beat (nothing here can fell anyone, so there's no checkEnd
+   *  to run first). */
+  private pressOn(unit: UnitState): void {
+    const eff = effectiveMove(unit.move, unit.statuses);
+    const combined = this.carefulStepOn ? carefulStepMove(eff + eff) : eff + eff;
+    const bonus = combined - this.budget.total;
+    this.budget = grantPressOn(this.budget, bonus);
+    this.hud.showBanner('You press on — the road stretches further.', P.lanternGold);
+    this.returnToActionMenu(unit);
+  }
+
+  /** Ch. VI Task 4 — Brace: spend the turn's ONE action for a 1-point Warded (status.ts) via
+   *  the existing pipeline, rather than an attack — keep-the-larger applyStatus already makes
+   *  Bracing under a bigger active ward a no-op absorb-wise (the ratified law; no special case
+   *  needed here, or anywhere — computeHit's absorption is generic over who granted the ward).
+   *  Sixth gated action handler (Task 4 brief): the SAME spendAction → turnExhausted ?
+   *  endPlayerTurn : checkEnd-first shape Strike/the T1 power moves/Parley/the Satchel heals all
+   *  share, unit.alive guard included — mirrors Strike's shape exactly, even though nothing
+   *  Brace does can fell its own caster. (Press On is the one OTHER self-cast action and
+   *  deliberately skips this shape — see its own doc comment above — because it can never
+   *  affect checkEnd; Brace fills the same action slot Strike/Cast/Parley do, so it gets
+   *  their gate instead.) */
+  private brace(unit: UnitState): void {
+    unit.statuses = applyStatus(unit, 'warded', -1, 1);
+    this.drawHpBar(unit);
+    this.floatText(unit, STATUS_DEFS.warded.label, STATUS_DEFS.warded.tint);
+    this.hud.showBanner('You set your feet — the next blow lands softer.', P.parchment);
+    this.actionLog.push({ action: 'brace', dmg: 0, overlay: false });
+    this.refreshParty();
+    this.time.delayedCall(560, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   /** §4.4 — free interact: light an adjacent unlit brazier (once per brazier — the tile
@@ -957,18 +1054,25 @@ export class CombatScene extends Phaser.Scene {
    *  A pilot preference (set via setPilotPreference, e2e-only) forces one action kind. */
   private autoStep(unit: UnitState): void {
     if (this.destroyed || this.state === 'over' || this.state === 'deathsdoor' || unit.id !== this.activeId) return;
-    const order: ActionKind[] = this.debugPrefer
-      ? [this.debugPrefer]
-      : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
-    for (const a of order) {
-      const targets = this.validTargets(unit, a);
-      if (targets.length) {
-        const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
-        this.state = 'playerTarget';
-        this.pendingAction = a;
-        this.pendingSpell = null; // autopilot always drives the T1 anchor action, never a flyout tier
-        void this.runPlayerAction(unit, a, { c: tgt.c, r: tgt.r });
-        return;
+    // Ch. VI — autoStep calls runPlayerAction directly, bypassing onPickAction's own
+    // budget.actionSpent gate entirely; without this check the pilot could re-act indefinitely
+    // once re-invoked after a "steps remain" turn (the action loop below would keep finding the
+    // same in-range target every time). Skipping straight to the approach/give-up logic once the
+    // action is spent mirrors what a real player does next: move the remainder, or End Turn.
+    if (!this.budget.actionSpent) {
+      const order: ActionKind[] = this.debugPrefer
+        ? [this.debugPrefer]
+        : (['cast', 'sequence', 'weave', 'smite', 'strike', 'parley'] as ActionKind[]);
+      for (const a of order) {
+        const targets = this.validTargets(unit, a);
+        if (targets.length) {
+          const tgt = targets.sort((x, y) => manhattan(unit, x) - manhattan(unit, y))[0];
+          this.state = 'playerTarget';
+          this.pendingAction = a;
+          this.pendingSpell = null; // autopilot always drives the T1 anchor action, never a flyout tier
+          void this.runPlayerAction(unit, a, { c: tgt.c, r: tgt.r });
+          return;
+        }
       }
     }
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
@@ -980,7 +1084,7 @@ export class CombatScene extends Phaser.Scene {
     const eligible = (e: UnitState): boolean => (this.debugPrefer === 'parley' ? !!e.parley : true);
     const pool = enemies.filter(eligible);
     const approachPool = pool.length ? pool : enemies;
-    if (approachPool.length && !this.moved && this.moveField) {
+    if (approachPool.length && !this.budget.legSpent && this.moveField) {
       const near = approachPool.reduce((b, e) => (manhattan(unit, e) < manhattan(unit, b) ? e : b), approachPool[0]);
       let best: Coord | null = null;
       let bestD = manhattan(unit, near);
@@ -996,9 +1100,22 @@ export class CombatScene extends Phaser.Scene {
 
   private showMenu(unit: UnitState): void {
     const items = (Object.keys(ACTIONS) as ActionKind[]).map((action) => {
-      // Self-cast, no targeting phase (inventory-handoff §10): always pickable, like Wait —
-      // an empty satchel is handled inside the panel (a friendly line), not by disabling this.
-      if (action === 'wait' || action === 'satchel') return { action, enabled: true };
+      // Wait/End Turn is always pickable, spent action or not.
+      if (action === 'wait') return { action, enabled: true };
+      // Ch. VI — the turn's one action (Strike/Cast/Satchel/Brace) is spent; only Wait/End Turn
+      // remains, even though movement may still be banked and spendable. Checked before the
+      // satchel/target-availability branches below so it wins over both.
+      if (this.budget.actionSpent) return { action, enabled: false, reason: 'spent' };
+      // Self-cast, no targeting phase (inventory-handoff §10): always pickable while the action
+      // is unspent — an empty satchel is handled inside the panel (a friendly line), not by
+      // disabling this.
+      if (action === 'satchel') return { action, enabled: true };
+      // Ch. VI — Press On has no target either (it grants movement, not a strike); always
+      // pickable while the action is unspent, same self-cast shape as Satchel above.
+      if (action === 'press_on') return { action, enabled: true };
+      // Ch. VI Task 4 — Brace has no target either (a self-buff, not a strike); same self-cast
+      // shape as Satchel/Press On above.
+      if (action === 'brace') return { action, enabled: true };
       const targets = this.validTargets(unit, action);
       return { action, enabled: targets.length > 0, reason: targets.length ? undefined : 'no foe within reach' };
     });
@@ -1009,8 +1126,18 @@ export class CombatScene extends Phaser.Scene {
   private onPickAction(unit: UnitState, action: ActionKind): void {
     if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
     if (unit.id !== this.activeId) return;
-    if (action === 'wait') { this.hud.showBanner('Holding position.', P.stoneGrey); this.endPlayerTurn(); return; }
+    // Final review M1 — T5's Wait→"End Turn" relabel covered the button's label and blurb, not
+    // this banner; the pilot's own fallback (autoStep, below) correctly keeps "Holding
+    // position." — that line is still true for the demo pilot's own no-target wait.
+    if (action === 'wait') { this.hud.showBanner('Done — the round moves on.', P.stoneGrey); this.endPlayerTurn(); return; }
+    // Ch. VI — the SAME gate showMenu's `enabled` computation applies, re-checked here since a
+    // keydown fires regardless of what's currently rendered and must not bypass a greyed button.
+    if (this.budget.actionSpent) return;
     if (action === 'satchel') { void this.openSatchel(unit); return; }
+    // Ch. VI — Press On: no targeting phase, resolves immediately like Satchel above.
+    if (action === 'press_on') { this.pressOn(unit); return; }
+    // Ch. VI Task 4 — Brace: no targeting phase either, resolves immediately like Press On.
+    if (action === 'brace') { this.brace(unit); return; }
     // §12.2 — Rank≥2 pressing an Art opens the tier flyout instead of casting T1 directly.
     // At Rank 1 this branch never taken: today's exact flow, zero regression.
     if (ART_ACTIONS.has(action) && this.rank >= 2) { this.openTierFlyout(unit, action); return; }
@@ -1052,7 +1179,11 @@ export class CombatScene extends Phaser.Scene {
     this.pendingSpell = null;
     this.targetTiles.clear();
     this.hoverGfx.clear();
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI — `this.reachable`/`this.moveField` already reflect whatever movement is left
+    // (beginPlayerTurn / toggleCarefulStep / movePlayerTo's post-arrival recompute keep them in
+    // sync); backing out of targeting spends nothing, so redrawing is always correct — empty
+    // reachable (budget spent) just draws nothing.
+    this.drawMoveRange();
     this.showMenu(unit);
   }
 
@@ -1070,6 +1201,8 @@ export class CombatScene extends Phaser.Scene {
         return enemies.filter((e) => hasLineOfFire(unit, e, ACTIONS.sequence.range, this.layout.tiles));
       case 'satchel':
       case 'wait':
+      case 'press_on':
+      case 'brace':
         return [];
       default: {
         // trap 4 — this switch is touched this phase, so it gets an exhaustiveness check
@@ -1233,7 +1366,9 @@ export class CombatScene extends Phaser.Scene {
     this.flyoutAction = null;
     this.hud.hideTierFlyout();
     this.state = 'playerMove';
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI — same "reachable is already in sync, always safe to redraw" reasoning as
+    // cancelTargeting above.
+    this.drawMoveRange();
     this.showMenu(unit);
   }
 
@@ -1281,10 +1416,14 @@ export class CombatScene extends Phaser.Scene {
   }
 
   private movePlayerTo(unit: UnitState, tile: Coord): void {
-    if (this.moved || !this.moveField) return;
+    if (this.budget.left <= 0 || !this.moveField) return;
     const path = pathTo(this.moveField, tile);
     if (!path || path.length < 2) return;
-    this.moved = true;
+    // Ch. VI — spend this leg's exact tile-cost before anything else; `legSpent` (set inside
+    // spendLeg) is what locks the Careful Step stance and gates the demo pilot's approach step
+    // — see toggleCarefulStep/autoStep.
+    const cost = this.moveField.cost.get(key(tile.c, tile.r)) ?? Infinity;
+    this.budget = spendLeg(this.budget, cost);
     this.state = 'resolving';
     this.rangeGfx.clear();
     this.hoverGfx.clear();
@@ -1294,13 +1433,23 @@ export class CombatScene extends Phaser.Scene {
     unit.c = tile.c; unit.r = tile.r;
     this.resolveOpportunityStrikes(unit, path, this.carefulStepOn);
     if (!unit.alive) {
-      // felled by an opportunity strike mid-move (rare, but the fight may be over)
+      // felled by an opportunity strike mid-move (rare, but the fight may be over) — an
+      // unconditional end regardless of what's left in the budget.
       this.time.delayedCall(360, () => this.endPlayerTurn());
       return;
     }
     this.tweenAlongPath(unit, path, () => {
       if (this.destroyed) return;
       this.state = 'playerMove';
+      // Ch. VI — the :930 in-place idiom (toggleCarefulStep's own recompute), but ranged by
+      // the REMAINING budget from the new position, so a spent-out move correctly reachables
+      // to nothing (drawMoveRange then draws nothing) while a partial spend shows the
+      // remainder — the affordance the "move the remainder" half of the turn depends on.
+      this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+      this.reachable.clear();
+      for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
+      this.drawMoveRange();
+      this.refreshParty(); // Ch. VI I1 — the leg just spent; keep Move N/M in sync.
       this.showMenu(unit);
       this.hud.showBanner('Moved. Choose an action.', P.parchment);
       if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
@@ -1400,7 +1549,35 @@ export class CombatScene extends Phaser.Scene {
       // pip +pulse (hud.ts) apply unchanged.
       if (unit.team === 'party' && dealt > 0) this.glow = glowGain(this.glow, 'strike');
       this.refreshParty();
-      this.time.delayedCall(440, () => this.endPlayerTurn());
+      this.time.delayedCall(440, () => {
+        // Ch. VI — the Warden's Objection riposte (inside meleeHit, above) can fell the actor
+        // with movement still banked; an unconditional end here, same as the OA-felled early-out
+        // in movePlayerTo, so checkEnd()/Death's Door still runs instead of returning a dead
+        // unit to its own action menu.
+        if (!unit.alive) { this.endPlayerTurn(); return; }
+        this.budget = spendAction(this.budget);
+        if (turnExhausted(this.budget)) {
+          this.endPlayerTurn();
+        } else {
+          // Ch. VI re-review N1 — a killing blow can leave movement banked (turnExhausted
+          // stays false: left>0), but the fight itself is already over; checking here, BEFORE
+          // the steps-remain banner, resolves victory/defeat immediately instead of leaving a
+          // "Steps remain" menu open over an empty board until End Turn is pressed. Mirrors
+          // endPlayerTurn's own checkEnd handling exactly (retreat → the door, not a bare
+          // resolveBattle — Death's Door still gets its say).
+          const end = this.checkEnd();
+          if (end === 'retreat') { this.enterDeathsDoor(); return; }
+          if (end) { this.resolveBattle(end); return; }
+          this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+          this.returnToActionMenu(unit);
+          // Ch. VI — re-invoke the pilot: the "steps remain" branch otherwise re-invokes
+          // nothing, so a demo turn that acted without moving first (target already in range at
+          // turn start) would freeze at the action menu forever. autoStep itself now refuses to
+          // re-act once budget.actionSpent is true, so this only lets it move the remainder or
+          // fall through to its own endPlayerTurn() — the pilot's version of End Turn.
+          if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+        }
+      });
       return;
     }
 
@@ -1431,9 +1608,9 @@ export class CombatScene extends Phaser.Scene {
 
     if (action === 'cast') this.hud.setDeliberating(true);
     // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
-    // catch below (which would fabricate a graded result for a question never shown).
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // catch below (which would fabricate a graded result for a question never shown). C6 —
+    // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
+    const held = heldLanternLight();
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1445,7 +1622,20 @@ export class CombatScene extends Phaser.Scene {
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
         // own drawn pool minus what was shown; the census never moves (no new draw).
-        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        let plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+          // encounter fallback the narrowed factIds never touch, or — fix round 1 — a due-queue
+          // hit that only resolves cross-pack): preview the would-be re-present BEFORE spending,
+          // and fall back to fate-holds if nothing would change.
+          const { packs, encountersOf } = await this.previewPackPool();
+          const wouldBe = previewPick(
+            { context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1 },
+            packs,
+            encountersOf,
+          );
+          if (wouldBe === result.encounterId) plan = { consume: false, factIds };
+        }
         if (plan.consume) {
           await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
           this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
@@ -1529,7 +1719,27 @@ export class CombatScene extends Phaser.Scene {
     }
 
     this.refreshParty();
-    this.time.delayedCall(620, () => this.endPlayerTurn());
+    this.time.delayedCall(620, () => {
+      // Ch. VI — applyOutcome above can damage the ACTOR itself (o.fade/o.partyHit both prefer
+      // the caster, o.selfChip always targets it); an unconditional end here, same as the
+      // OA-felled early-out in movePlayerTo, so a self-felling cast still reaches checkEnd()/
+      // Death's Door instead of returning a dead unit to its own action menu.
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment.
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   /**
@@ -1573,9 +1783,9 @@ export class CombatScene extends Phaser.Scene {
 
     if (artKind === 'free_recall') this.hud.setDeliberating(true);
     // A save-service fault must degrade to "no lantern held," never fall into the runEncounter
-    // catch below (which would fabricate a graded result for a question never shown).
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // catch below (which would fabricate a graded result for a question never shown). C6 —
+    // extracted to lantern.ts's heldLanternLight, shared verbatim by all five spend sites.
+    const held = heldLanternLight();
     // Ch. IV — one round, one seed: the re-presented encounter reuses the round's seed.
     const roundSeed = this.encSeed++;
     let result: EncounterResult;
@@ -1588,7 +1798,23 @@ export class CombatScene extends Phaser.Scene {
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
         // own drawn pool minus what was shown; the census never moves (no new draw).
-        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        let plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+          // encounter fallback the narrowed factIds never touch, or — fix round 1 — a due-queue
+          // hit that only resolves cross-pack): preview the would-be re-present BEFORE spending,
+          // and fall back to fate-holds if nothing would change.
+          const { packs, encountersOf } = await this.previewPackPool();
+          const wouldBe = previewPick(
+            {
+              context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
+              seed: roundSeed, flair: spell.label, spellTier: spell.tier,
+            },
+            packs,
+            encountersOf,
+          );
+          if (wouldBe === result.encounterId) plan = { consume: false, factIds };
+        }
         if (plan.consume) {
           await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
           this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
@@ -1693,7 +1919,30 @@ export class CombatScene extends Phaser.Scene {
 
     if (bannerText) this.hud.showBanner(bannerText, quality > 0 ? ACTIONS[action].tint : P.duskRose);
     this.refreshParty();
-    this.time.delayedCall(620, () => this.endPlayerTurn());
+    this.time.delayedCall(620, () => {
+      // Ch. VI — applySpellOps's 'fade' op above routes through the SAME damageParty(amount,
+      // caster) choke point o.fade does on the T1 path (spells.ts emits `fade` on a whiffed q0
+      // for several T2/T3 Arts), so a T2/T3 miss can fell the caster exactly like a T1 one. Not
+      // named alongside :1462/:1610 in the review that requested this fix, but it's the same
+      // mechanism through a parallel path — same unconditional-end treatment.
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        // Ch. VI — same pilot re-invoke as the Strike gate above; see its comment. (T2/T3 is
+        // never actually reached by the demo pilot today — it always drives the T1 anchor — but
+        // gating this consistently with the other four sites avoids a silent asymmetry.)
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   /** Resolves a spell's board geometry (primary/aoe target ids + push direction) from its
@@ -1982,7 +2231,17 @@ export class CombatScene extends Phaser.Scene {
   private returnToActionMenu(unit: UnitState): void {
     if (this.destroyed) return;
     this.state = 'playerMove';
-    if (!this.moved) this.drawMoveRange();
+    // Ch. VI, fixed round 1 (I2) — rebuild from CURRENT position/occupancy, not just repaint the
+    // old set: an action can kill or push a unit (applyOutcome/applySpellOps), and this is the
+    // only one of the "reachable is already in sync" sites that follows an ACTION rather than a
+    // no-op cancel — a killed enemy's tile stayed permanently unreachable, and a tile a push just
+    // occupied stayed clickable, without this. Same three-line idiom as movePlayerTo's
+    // post-arrival recompute and toggleCarefulStep's own.
+    this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+    this.reachable.clear();
+    for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
+    this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — covers Press On, the six gated handlers, and Satchel's early-returns.
     this.showMenu(unit);
   }
 
@@ -2034,7 +2293,24 @@ export class CombatScene extends Phaser.Scene {
         P.lanternGold,
       );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
-      this.time.delayedCall(560, () => this.endPlayerTurn());
+      this.time.delayedCall(560, () => {
+        // Satchel can't fell its own actor (no I3-style self-damage path here), so no
+        // unit.alive check is needed — only the C1/C2 gate + pilot re-invoke.
+        this.budget = spendAction(this.budget);
+        if (turnExhausted(this.budget)) {
+          this.endPlayerTurn();
+        } else {
+          // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+          // comment. Satchel deals no damage itself, but symmetry with the other four gated
+          // sites is worth more than the (today, always-null) check it costs here.
+          const end = this.checkEnd();
+          if (end === 'retreat') { this.enterDeathsDoor(); return; }
+          if (end) { this.resolveBattle(end); return; }
+          this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+          this.returnToActionMenu(unit);
+          if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+        }
+      });
       return;
     }
 
@@ -2080,7 +2356,21 @@ export class CombatScene extends Phaser.Scene {
     this.refreshParty();
     this.hud.showBanner(res.message, P.moss);
     this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
-    this.time.delayedCall(560, () => this.endPlayerTurn());
+    this.time.delayedCall(560, () => {
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        // Ch. VI re-review N1 — same checkEnd-first guard as the Strike gate above; see its
+        // comment.
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   // ---- boss phase -------------------------------------------------------
@@ -2572,7 +2862,12 @@ export class CombatScene extends Phaser.Scene {
       // crucible #13 — right-click must be inert during movement (it already is during
       // targeting, one branch down: it cancels there). Without this guard any pointer
       // button on a reachable tile spent the turn's move, same as a deliberate left-click.
-      if (this.state === 'playerMove' && !this.moved && !pt.rightButtonDown() && this.reachable.has(key(tile.c, tile.r))) {
+      // Ch. VI — `this.reachable` alone is the correct movement-affordance check: it's kept
+      // in sync with the remaining budget everywhere it's recomputed (turn start, Careful
+      // Step toggle, movePlayerTo's post-arrival recompute), so a tile only ever appears here
+      // when the Keeper genuinely still has movement to spend on it — no separate `moved`
+      // check needed (an exhausted budget means an empty `reachable`, not a stale one).
+      if (this.state === 'playerMove' && !pt.rightButtonDown() && this.reachable.has(key(tile.c, tile.r))) {
         this.movePlayerTo(unit, tile);
       } else if (this.state === 'playerTarget' && this.pendingAction) {
         if (pt.rightButtonDown()) { this.cancelTargeting(unit); return; }
@@ -2588,7 +2883,7 @@ export class CombatScene extends Phaser.Scene {
       if (!unit || unit.team !== 'party') return;
       const tile = this.screenToTile(pt.x, pt.y);
       if (!tile) { this.hoverGfx.clear(); if (this.state === 'playerTarget') this.drawTargets(); return; }
-      if (this.state === 'playerMove' && !this.moved && this.moveField) {
+      if (this.state === 'playerMove' && this.moveField) {
         this.hoverGfx.clear();
         if (this.reachable.has(key(tile.c, tile.r))) {
           const path = pathTo(this.moveField, tile);
@@ -2635,7 +2930,7 @@ export class CombatScene extends Phaser.Scene {
       }
       if (e.key === 'Escape' && this.state === 'playerTarget') { this.cancelTargeting(unit); return; }
       if (e.key === 'e' && this.state === 'playerMove') { this.tryLightBrazier(unit); return; }
-      if (e.key === 'c' && this.state === 'playerMove' && !this.moved) { this.toggleCarefulStep(unit); return; }
+      if (e.key === 'c' && this.state === 'playerMove' && !stanceLocked(this.budget)) { this.toggleCarefulStep(unit); return; }
       if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
       const action = (Object.keys(ACTIONS) as ActionKind[]).find((a) => ACTIONS[a].hotkey === e.key);
       if (action) this.onPickAction(unit, action);
@@ -2718,6 +3013,29 @@ export class CombatScene extends Phaser.Scene {
     let due: string[] = [];
     try { due = services.srs.dueQueue(this.launch.packId, arr); } catch { due = []; }
     return due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
+  }
+
+  /** M3 — packs + (fix round 1) cross-pack encountersOf for previewPick's would-be resolution
+   *  check, mirroring encounters/register.ts's runEncounter resolution exactly: the same
+   *  packless→FIXTURE_PACK fallback (now isPack-guarded, matching loadPacks() rather than a
+   *  bare cast), AND the same crossPack gate resolveCrossPack() uses. Without this, a
+   *  same-pack-only preview can predict "different encounter" for a due-queue hit that only
+   *  resolves through a foreign pack, when the real (cross-pack) resolution would actually
+   *  re-present the SAME one — a wasted spend, the exact failure M3 exists to prevent
+   *  (task-7-review.md §5(a)). getPacks() is the bridge fetch (bridge/client); indexReady()/
+   *  isEmpty()/encountersOf() are plain index reads — the draw census tracks only due()/fresh()
+   *  (Global Constraint 3), and isEmpty() is already called elsewhere in this scene (loadContent
+   *  → combatDrawReady) without being treated as a draw. */
+  private async previewPackPool(): Promise<{ packs: Pack[]; encountersOf?: (factId: string) => Encounter[] }> {
+    const { packs: entries } = await getPacks();
+    const installed = entries.map((p) => p.pack).filter(isPack);
+    const packs = installed.length ? installed : [FIXTURE_PACK];
+    let crossPack = false;
+    try {
+      await services.draw.indexReady();
+      crossPack = !services.draw.isEmpty();
+    } catch { /* index down — the single-pack preview above is still honest */ }
+    return { packs, encountersOf: crossPack ? services.draw.encountersOf : undefined };
   }
 
   /** §4 suspension filter, tolerant of a stub/offline amendments service. */
@@ -2841,7 +3159,7 @@ export class CombatScene extends Phaser.Scene {
 
     if (outcome === 'victory') {
       this.hud.showToast('The foe falls, Keeper.', P.lanternGold);
-      this.hud.showBanner('Loot secured. Hearth streak climbs.', P.moss);
+      this.hud.showBanner('Loot secured. Vigil climbs.', P.moss);
       // crucible #5 — the streak bump used to persist here immediately (fire-and-forget,
       // independent of hp/loot), while hp/loot only ever settle later when the return
       // scene resumes and recovers the pending outcome (game-event + registry PENDING_KEY
@@ -2967,9 +3285,9 @@ export class CombatScene extends Phaser.Scene {
     // No fact exists anywhere (packless/fixture edge). Never trap the player behind a question
     // that cannot be asked — an unanswerable door stabilizes, which is the old retreat.
     if (!id) { this.stabilizeAtDoor(); return; }
-    // Ch. IV — guarded read (T4 review ruling): a save fault degrades to "no lantern".
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+    // Ch. IV — guarded read (T4 review ruling; C6 — extracted to lantern.ts's
+    // heldLanternLight): a save fault degrades to "no lantern".
+    const held = heldLanternLight();
     let result: EncounterResult;
     // Final-review A3 — hoisted so the catch below can see whichever fact was actually shown:
     // once the redraw branch runs, the player was asked about `alt`, not `id`.
@@ -2988,7 +3306,15 @@ export class CombatScene extends Phaser.Scene {
         // it the salted redraw can spend the light on the identical question.
         alt = await this.ddDraw(roundSeed + LANTERN_REDRAW_SALT, [...result.redraw.shownFactIds, id]);
         if (this.destroyed || !this.dd) return;
-        if (alt) await services.save.save({ lanternLight: false });
+        // M4 — the party panel's lantern glyph (updateParty/refreshParty) stays visible
+        // through the whole door (reviveAtDoor already repaints it on the way out); unlike
+        // the two cast sites, nothing else in this round's remaining control flow calls
+        // refreshParty before the door might close, so a spend here would otherwise leave
+        // the glyph showing lit until some unrelated later refresh happened to fire.
+        if (alt) {
+          await services.save.save({ lanternLight: false });
+          this.refreshParty();
+        }
         result = await services.runEncounter({
           context: 'drill', kinds: DD_KINDS, factIds: [alt ?? id], packId: this.launch.packId,
           seed: roundSeed, flair: DEATHS_DOOR_TITLE,
@@ -3137,6 +3463,11 @@ export class CombatScene extends Phaser.Scene {
       streak,
       glow: this.glow.pips,
       lanternLight,
+      // Final review I1 — the active unit's own turn budget (whatever it currently is; blank
+      // outside a player turn is not worth special-casing, same "cheap, always-on" spirit as
+      // Vigil/Solace beside it).
+      moveLeft: this.budget.left,
+      moveTotal: this.budget.total,
     });
   }
 
@@ -3257,6 +3588,12 @@ export class CombatScene extends Phaser.Scene {
      *  surface" spirit as everything else in this section. §3.1/§3.2 add the run tallies. */
     rank: number; welded3: number; welded4: number; glow: number;
     reclaimed: number; newWelds: number;
+    /** Ch. VI — the active unit's live turn budget (e2e-only; the scene has no other window
+     *  into spendable-movement state for a test to poll). */
+    budget: TurnBudget;
+    /** Ch. VI — direct read of the Careful Step stance flag (e2e-only; before this, a test
+     *  could only infer it indirectly through budget arithmetic). */
+    carefulStepOn: boolean;
   } {
     return {
       state: this.state,
@@ -3265,6 +3602,8 @@ export class CombatScene extends Phaser.Scene {
       enemyHp: this.enemyHpSum(),
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
+      budget: this.budget,
+      carefulStepOn: this.carefulStepOn,
       // Wave 4 — this field reports the MASTERY rank (the SRS welds, with ?rank= still absolute
       // over it, exactly the value it carried before levels existed). `this.rank` is now the
       // COMPOSED gate; progressionSnapshot().composedTier reports that half. leveling.spec.ts's
@@ -3342,7 +3681,10 @@ export class CombatScene extends Phaser.Scene {
     // pre-teleport tile) — refresh them so a test can debugSetPos the active unit into a
     // specific pincer/geometry and then click a real move destination relative to its new spot.
     if (id === this.activeId && this.state === 'playerMove') {
-      this.moveField = computeMoveField(u, this.moveBudgetFor(u), this.layout.tiles, this.blockedFor(u.id));
+      // Ch. VI — ranged by the REMAINING budget, not a fresh moveBudgetFor: this call now can
+      // run mid-turn (after a leg is already spent), and moveBudgetFor would hand back the
+      // full fresh total, letting a test click a tile the Keeper can no longer actually afford.
+      this.moveField = computeMoveField(u, this.budget.left, this.layout.tiles, this.blockedFor(u.id));
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();

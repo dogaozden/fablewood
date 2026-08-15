@@ -42,7 +42,10 @@ import {
 } from './content';
 import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
-import { planRedraw, FATE_HOLDS_LINE } from '../../lantern';
+import { planRedraw, FATE_HOLDS_LINE, heldLanternLight } from '../../lantern';
+import { previewPick } from '../../encounters/engine';
+import { FIXTURE_PACK } from '../../encounters/fixtures';
+import type { Pack, Encounter } from '../../../packs/types';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
 import { grantXp } from '../../progression/grant';
@@ -51,6 +54,12 @@ import { maxHpForLevel, emberMaxForLevel } from '../../progression/xp';
 
 type Facing = 'up' | 'down' | 'left' | 'right';
 type Key = Phaser.Input.Keyboard.Key;
+
+/** M3 fix round 1 — the same guard encounters/register.ts's loadPacks() applies to its own
+ *  getPacks() result, mirrored here rather than imported (register.ts's is file-private). */
+function isPack(p: unknown): p is Pack {
+  return !!p && typeof p === 'object' && Array.isArray((p as Pack).encounters) && !!(p as Pack).meta;
+}
 
 const SPEED = 78; // world px / second
 const HW = 5;
@@ -888,6 +897,29 @@ export class HamletScene extends Phaser.Scene {
     }
   }
 
+  /** M3 — packs + (fix round 1) cross-pack encountersOf for previewPick's would-be resolution
+   *  check, mirroring encounters/register.ts's runEncounter resolution exactly: the same
+   *  packless→FIXTURE_PACK fallback (now isPack-guarded, matching loadPacks() rather than a
+   *  bare cast), AND the same crossPack gate resolveCrossPack() uses. Without this, a
+   *  same-pack-only preview can predict "different encounter" for a due-queue hit that only
+   *  resolves through a foreign pack, when the real (cross-pack) resolution would actually
+   *  re-present the SAME one — a wasted spend, the exact failure M3 exists to prevent
+   *  (task-7-review.md §5(a)). getPacks() is the bridge fetch (bridge/client); indexReady()/
+   *  isEmpty()/encountersOf() are plain index reads — the draw census tracks only due()/fresh()
+   *  (Global Constraint 3), and isEmpty() is already called elsewhere in this scene (doWellspring
+   *  → services.draw.isEmpty(), pre-existing) without being treated as a draw. */
+  private async previewPackPool(): Promise<{ packs: Pack[]; encountersOf?: (factId: string) => Encounter[] }> {
+    const { packs: entries } = await getPacks();
+    const installed = entries.map((p) => p.pack).filter(isPack);
+    const packs = installed.length ? installed : [FIXTURE_PACK];
+    let crossPack = false;
+    try {
+      await services.draw.indexReady();
+      crossPack = !services.draw.isEmpty();
+    } catch { /* index down — the single-pack preview above is still honest */ }
+    return { packs, encountersOf: crossPack ? services.draw.encountersOf : undefined };
+  }
+
   private async doWellspring(): Promise<void> {
     this.wellspringSurfaced = [];
     const drawReady = await wellspringDrawReady();
@@ -981,10 +1013,10 @@ export class HamletScene extends Phaser.Scene {
         // a prior Wellspring visit this session) behind fresh alternatives, so a
         // stale snapshot can't just re-ask what an earlier pass already covered.
         const factIds = partitionByRecency(ordered, wellspringRecentFactIds);
-        // Ch. IV — guarded read (T4 review ruling): a save fault means "no lantern",
-        // it must never surface as a thrown round.
-        let held = false;
-        try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
+        // Ch. IV — guarded read (T4 review ruling; C6 — extracted to lantern.ts's
+        // heldLanternLight): a save fault means "no lantern", it must never surface as a
+        // thrown round.
+        const held = heldLanternLight();
         let res = await services.runEncounter({
           context: 'drill',
           packId: this.packId ?? '', // @deprecated (EncounterRequest) — resolution is per-fact once drawReady
@@ -994,7 +1026,21 @@ export class HamletScene extends Phaser.Scene {
         });
         if (res.redraw) {
           // Ch. IV — re-present from this round's own pool minus the shown facts (census law).
-          const plan = planRedraw(res.redraw.shownFactIds, factIds);
+          let plan = planRedraw(res.redraw.shownFactIds, factIds);
+          if (plan.consume) {
+            // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+            // encounter fallback the narrowed factIds never touch, or — fix round 1 — a due-queue
+            // hit that only resolves cross-pack, which Wellspring's own global draw makes
+            // especially live here): preview the would-be re-present BEFORE spending, and fall
+            // back to fate-holds if nothing would change.
+            const { packs, encountersOf } = await this.previewPackPool();
+            const wouldBe = previewPick(
+              { context: 'drill', packId: this.packId ?? '', seed: roundSeed, factIds: plan.factIds },
+              packs,
+              encountersOf,
+            );
+            if (wouldBe === res.encounterId) plan = { consume: false, factIds };
+          }
           if (plan.consume) await services.save.save({ lanternLight: false });
           res = await services.runEncounter({
             context: 'drill',

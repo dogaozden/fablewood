@@ -233,6 +233,20 @@ async function driveCastOnWarden(page: Page): Promise<void> {
     // 'resolving' for as long as its own Parley overlay is open (deadlocking that predicate).
     // Whatever comes next (a Parley overlay, or ordinary turns) waits on its own condition.
     await page.locator('.fw-textarea').waitFor({ state: 'detached', timeout: 20_000 });
+
+    // Step 0c (T6 boss-cluster bisect): debugSetPos never spends the movement leg, so post-T2
+    // (move·act·move, End Turn) the turn stays open ("Steps remain") after this single Cast —
+    // advanceTurn() (the only place that consumes pendingBossPhase and opens the next Parley)
+    // never runs otherwise. Press End Turn like a real player standing still with movement left
+    // over would (boss-cluster-diagnosis.md) — never touches debugSetPos itself. The scene
+    // briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
+    // (CombatScene.ts's Phase type) — wait it out before deciding whether the turn is open.
+    const afterCast = await waitForCombat(page, (s) => s?.state !== 'resolving',
+      'the post-Cast state settled (left "resolving")', 5_000);
+    if (afterCast?.state === 'playerMove') {
+      await page.keyboard.press('7'); // End Turn
+      await page.waitForTimeout(400);
+    }
     return;
   }
   throw new Error('driveCastOnWarden: could not land a Cast on the Warden after 8 attempts');

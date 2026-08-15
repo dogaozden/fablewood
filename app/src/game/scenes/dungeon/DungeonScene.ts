@@ -20,6 +20,7 @@ import {
   type FactLite,
 } from '../../contracts';
 import { embersOf, TRIM_HEAL_CORRECT, TRIM_HEAL_MISS } from '../../rest/embers';
+import { heldLanternLight } from '../../lantern';
 import { seededShuffle } from '../../recency';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
@@ -630,10 +631,9 @@ export class DungeonScene extends Phaser.Scene {
    *  own auto-threading rule). Consume-before-benefit; the no-trinket refund lives at
    *  the call sites (trim's spend-first-refund idiom). */
   private async offerLantern(troveName: string): Promise<Edge> {
-    // Guarded read (T4 review ruling): a save fault means "no lantern", never a thrown loot grant.
-    let held = false;
-    try { held = services.save.get()?.lanternLight === true; } catch { /* offline → no lantern */ }
-    if (!held) return 'none';
+    // Guarded read (T4 review ruling; C6 — extracted to lantern.ts's heldLanternLight): a
+    // save fault means "no lantern", never a thrown loot grant.
+    if (!heldLanternLight()) return 'none';
     const choice = this.auto ? 'raise' : await this.view.showLanternChoice(troveName);
     if (choice !== 'raise') return 'none';
     await services.save.save({ lanternLight: false });

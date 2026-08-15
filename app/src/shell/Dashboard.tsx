@@ -290,7 +290,7 @@ export function Dashboard({ onSetOut }: Props) {
                 </div>
 
                 <div className="dash-card">
-                  <p className="dash-eyebrow">Hearth streak</p>
+                  <p className="dash-eyebrow">Vigil</p>
                   <div className="dash-stat">
                     {m.hearthStreak}
                     <span className="unit">{m.hearthStreak === 1 ? 'night' : 'nights'}</span>

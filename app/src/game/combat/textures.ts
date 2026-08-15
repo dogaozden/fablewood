@@ -39,6 +39,8 @@ export const ICON_KEYS: Record<string, string> = {
   parley: 'icon.parley',
   satchel: 'icon.satchel',
   wait: 'icon.wait',
+  press_on: 'icon.press-on',
+  brace: 'icon.brace',
 };
 
 /**
@@ -98,6 +100,8 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.parley, ICON, ICON, drawIconParley);
   bake(scene, ICON_KEYS.satchel, ICON, ICON, drawIconSatchel);
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
+  bake(scene, ICON_KEYS.press_on, ICON, ICON, drawIconPressOn);
+  bake(scene, ICON_KEYS.brace, ICON, ICON, drawIconBrace);
 
   bake(scene, CHIP_KEYS.kindled, CHIP, CHIP, drawChipKindled);
   bake(scene, CHIP_KEYS.bound, CHIP, CHIP, drawChipBound);
@@ -393,6 +397,43 @@ function drawIconWait(g: Phaser.GameObjects.Graphics): void {
   g.fillTriangle(10, 8, 26, 8, 18, 18).fillTriangle(18, 18, 10, 28, 26, 28);
   g.lineBetween(10, 8, 26, 8).lineBetween(10, 28, 26, 28);
   g.fillStyle(P.lanternGold, 1).fillTriangle(14, 11, 22, 11, 18, 17); // sand
+}
+
+/** Press On's HUD icon (Ch. VI action economy) — a forward double-chevron: "press onward, the
+ *  road stretches further" (the button's own pathStone tint, then the banner's lantern-gold —
+ *  ties both colors into the glyph itself, same double-stroke technique as drawIconStrike). */
+function drawIconPressOn(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  g.lineStyle(4, P.outline, 1);
+  g.lineBetween(6, 8, 17, 18).lineBetween(17, 18, 6, 28);
+  g.lineStyle(3, P.pathStone, 1);
+  g.lineBetween(6, 8, 17, 18).lineBetween(17, 18, 6, 28);
+  g.lineStyle(4, P.outline, 1);
+  g.lineBetween(17, 8, 28, 18).lineBetween(28, 18, 17, 28);
+  g.lineStyle(3, P.lanternGold, 1);
+  g.lineBetween(17, 8, 28, 18).lineBetween(28, 18, 17, 28);
+}
+
+/** Brace's HUD icon (Ch. VI Task 4) — a small shield: a hexagonal outline (same
+ *  points-polygon technique as drawIconSmite's bolt) in the deep-water tone, a lit facet
+ *  top-left (the double-tone shading every other icon here uses — Strike's blade,
+ *  Satchel's bag), and a small core rivet — "brace behind a shield", tying the glyph to the
+ *  same shield/absorb blue family as the boss-shield pips and Warded's own HUD chip. */
+function drawIconBrace(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  const shield = [
+    new Phaser.Geom.Point(18, 5),
+    new Phaser.Geom.Point(29, 9),
+    new Phaser.Geom.Point(27, 20),
+    new Phaser.Geom.Point(18, 31),
+    new Phaser.Geom.Point(9, 20),
+    new Phaser.Geom.Point(7, 9),
+  ];
+  g.lineStyle(2, P.outline, 1);
+  g.fillStyle(P.waterDeep, 1).fillPoints(shield, true);
+  g.strokePoints(shield, true);
+  g.fillStyle(P.waterLight, 1).fillTriangle(12, 10, 18, 8, 14, 18); // lit facet
+  g.fillStyle(P.glowCore, 0.9).fillCircle(18, 16, 2.5); // core rivet
 }
 
 function star(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rad: number, color: number): void {

@@ -80,8 +80,9 @@ test.describe('Dashboard + Settings', () => {
     await expect(castingCard).toContainText('7 casts graded');
     await expect(castingCard).toContainText('71% pass rate (last 7)');
 
-    // Hearth streak (existing, unrelated milestone counter) + last-played still work.
-    await expect(page.locator('.dash-card', { hasText: 'Hearth streak' }).locator('.dash-stat')).toContainText('5');
+    // Vigil (existing, unrelated milestone counter — W6 rename off "Hearth streak") +
+    // last-played still work.
+    await expect(page.locator('.dash-card', { hasText: 'Vigil' }).locator('.dash-stat')).toContainText('5');
     await expect(page.locator('.dash-card', { hasText: 'Last Ledger entry' })).toContainText('min ago');
 
     // Weakest bindings: the two facts whose LATEST answer was a miss, most-recent

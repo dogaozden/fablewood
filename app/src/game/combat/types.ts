@@ -14,7 +14,7 @@ export type TileType = 'floor' | 'wall' | 'gold' | 'lantern' | 'brazier' | 'mist
 export type Team = 'party' | 'enemy';
 export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
 
-export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'satchel' | 'wait';
+export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'satchel' | 'wait' | 'press_on' | 'brace';
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
 export interface Coord {
@@ -105,8 +105,31 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
     shape: 'self', tint: 0x8c5c34, blurb: 'Reach for a carried item.',
   },
   wait: {
-    kind: 'wait', label: 'Wait', hotkey: '7', encounter: null, range: 0,
-    shape: 'self', tint: 0x8a8078, blurb: 'Hold position, end turn.',
+    kind: 'wait', label: 'End Turn', hotkey: '7', encounter: null, range: 0,
+    shape: 'self', tint: 0x8a8078, blurb: 'Done for now — let the round pass.',
+  },
+  // Ch. VI action economy — forgoes the turn's action for +moveBudgetFor(u) (stance-aware:
+  // halved under Careful Step, same as the turn-start grant). No tile to choose (shape:'self',
+  // like Satchel/Wait) — CombatScene.onPickAction special-cases it before the targeting gate.
+  // Appended last (not before 'wait') so the existing hotkeys 1-7 and their Object.keys(ACTIONS)
+  // indices are untouched; press_on is purely additive at index 8.
+  press_on: {
+    kind: 'press_on', label: 'Press On', hotkey: '8', encounter: null, range: 0,
+    shape: 'self', tint: 0xc6a476, blurb: 'Forgo the action — push further this turn.',
+  },
+  // Ch. VI Task 4 — Brace: spends the turn's ONE action (not a move) for a 1-point Warded via
+  // the existing status pipeline (status.ts's applyStatus/keep-the-larger law handles a
+  // re-Brace under a bigger active ward as a no-op absorb-wise — no special case here). No tile
+  // to choose (shape:'self', like Satchel/Wait/Press On) — CombatScene.onPickAction
+  // special-cases it before the targeting gate. tint 0x9ebad4 = P.waterLight, the same
+  // shield/absorb blue this codebase already uses for boss-shield pips and the
+  // 'shielded'/'−shield' floats (CombatScene.ts) and for Warded's own HP-bar underline/HUD-chip
+  // tint (status.ts) — distinct from all nine other action tints, deliberately not lanternGold
+  // (Strike's). Appended last (same reasoning as press_on above) so hotkeys 1-8 and every
+  // existing Object.keys(ACTIONS) index stay untouched; brace is purely additive at index 9.
+  brace: {
+    kind: 'brace', label: 'Brace', hotkey: '9', encounter: null, range: 0,
+    shape: 'self', tint: 0x9ebad4, blurb: 'Raise a one-point ward — no attack.',
   },
 };
 

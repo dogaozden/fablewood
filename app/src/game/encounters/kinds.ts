@@ -61,6 +61,7 @@ function continueButton(resolve: Resolve, result: EncounterResult): HTMLButtonEl
     class: 'fw-btn fw-btn-primary',
     type: 'button',
     text: 'Onward ▸',
+    'data-commit': 'true',
     onclick: () => resolve(result),
   });
 }
@@ -144,7 +145,7 @@ const renderMcq: KindRenderer = (o, enc, facts, _ctx, resolve) => {
 
   const list = el('div', { class: 'fw-opts' });
   options.forEach((label, i) => {
-    const card = el('button', { class: 'fw-opt', type: 'button', onclick: () => choose(i) }, [
+    const card = el('button', { class: 'fw-opt', type: 'button', 'data-commit': 'true', onclick: () => choose(i) }, [
       el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
       el('span', { class: 'fw-optlabel', text: label }),
     ]);
@@ -172,7 +173,7 @@ const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
     placeholder: 'Cast the answer from memory…',
   });
   o.body.append(ta);
-  const cast = el('button', { class: 'fw-btn fw-btn-primary', type: 'button', text: 'Cast' });
+  const cast = el('button', { class: 'fw-btn fw-btn-primary', type: 'button', text: 'Cast', 'data-commit': 'true' });
   o.footer.replaceChildren(
     el('span', { class: 'fw-hint', text: ACTIONS.free_recall.hint }),
     el('span', { class: 'fw-spacer' }),
@@ -300,7 +301,7 @@ const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
 
   const list = el('div', { class: 'fw-opts' });
   branches.forEach((b, i) => {
-    const card = el('button', { class: 'fw-opt', type: 'button', onclick: () => choose(i) }, [
+    const card = el('button', { class: 'fw-opt', type: 'button', 'data-commit': 'true', onclick: () => choose(i) }, [
       el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
       el('span', { class: 'fw-optlabel', text: b.label }),
     ]);
@@ -345,6 +346,7 @@ const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
     class: 'fw-btn fw-btn-primary',
     type: 'button',
     text: 'Seal the Weave',
+    'data-commit': 'true',
     disabled: true,
   });
 
@@ -660,7 +662,7 @@ const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
 
   render();
   o.body.append(list);
-  const seal = el('button', { class: 'fw-btn fw-btn-primary', type: 'button', text: 'Seal the Sequence', onclick: submit });
+  const seal = el('button', { class: 'fw-btn fw-btn-primary', type: 'button', text: 'Seal the Sequence', 'data-commit': 'true', onclick: submit });
   o.footer.replaceChildren(
     el('span', { class: 'fw-hint', text: ACTIONS.order.hint }),
     el('span', { class: 'fw-spacer' }),

@@ -20,7 +20,7 @@ import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
-import { createLanternGate, isCommitKey, redrawSentinel } from './lantern-ui';
+import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel } from './lantern-ui';
 import { LEVEL_UP_TITLE, LEVEL_UP_SIGNOFF } from '../progression/ceremony';
 
 export interface EncounterCtx {
@@ -272,7 +272,7 @@ export function presentEncounter(
         'click',
         (e) => {
           const t = e.target as HTMLElement | null;
-          if (t?.closest('button') && !t.closest('.fw-lantern')) disarm();
+          if (t && isCommitTarget(t)) disarm();
         },
         { capture: true },
       );
@@ -396,7 +396,7 @@ export function presentNightLedger(data: NightLedgerData, opts: { auto?: boolean
     if (data.welds > 0) rows.push({ label: 'Newly welded', value: String(data.welds) });
     if (data.reclaimed > 0) rows.push({ label: 'Reclaimed from the Fade', value: String(data.reclaimed), accent: true });
     if (data.gold > 0) rows.push({ label: 'Gold', value: `+${data.gold}` });
-    if (data.streak > 0) rows.push({ label: 'Streak', value: data.streak === 1 ? '1 night' : `${data.streak} nights` });
+    if (data.streak > 0) rows.push({ label: 'Vigil', value: data.streak === 1 ? '1 night' : `${data.streak} nights` });
     // Death's Door wipe (Task 6) — zero-suppressed like every row above: absent when nothing
     // was eligible to take (keepsakeId null is a real, reportable "nothing carried" outcome,
     // not "this wasn't a wipe" — see CombatScene's wipeAtDoor).

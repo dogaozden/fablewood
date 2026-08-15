@@ -26,6 +26,14 @@ export function isCommitKey(key: string): boolean {
   return key === 'Enter' || /^[0-9]$/.test(key);
 }
 
+/** True for a click target that COMMITS an answer (kinds.ts marks those buttons
+ *  `data-commit="true"`) — never for an intermediate control (match's chips, order's ▲▼
+ *  nudges) and never for the raise button itself. Committing disarms the lantern — a click
+ *  that only rearranges the encounter's WIP state must leave the raise alive. */
+export function isCommitTarget(el: { closest(sel: string): unknown }): boolean {
+  return Boolean(el.closest('[data-commit]')) && !el.closest('.fw-lantern');
+}
+
 /** One gate per presentation. settle() is the single-resolution latch for EVERY finish
  *  path (answer, ESC-abort, lantern); disarm()/mayRaise() govern the lantern only. */
 export interface LanternGate {

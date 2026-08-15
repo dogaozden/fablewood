@@ -330,6 +330,10 @@ test('crucible #3: a mid-battle Satchel heal does not double-subtract predamage 
       60_000,
       150,
     );
+    // Step 0 (T2 re-review): pollUntil returns its LAST value on timeout instead of throwing,
+    // so a stalled fight would otherwise pass this line silently (it already did once, pre-T2
+    // fix, as a 4x slowdown) — assert the poll actually reached 'over', not just gave up.
+    expect(resolved?.state, 'the poll actually resolved to over, not a stall-timeout').toBe('over');
     const liveHpAtResolution = resolved?.partyHp ?? null;
     expect(liveHpAtResolution, 'captured the live pool at the moment of resolution').not.toBeNull();
 
@@ -372,7 +376,10 @@ test('crucible #5: a reload right after Victory must not keep the streak while l
     // convention uses — page.reload() is never used anywhere in this suite; a fresh
     // goto() is) as fast as this loop can detect it, well inside the 1600ms window
     // CombatScene holds before it ever calls scene.start() on the return scene.
-    await pollUntil(() => snap(page), (v) => v?.state === 'over', 60_000, 60);
+    const resolved = await pollUntil(() => snap(page), (v) => v?.state === 'over', 60_000, 60);
+    // Step 0 (T2 re-review): same vacuous-poll hardening as crucible #3 above — pollUntil
+    // returns its last value on timeout instead of throwing, so assert it actually got there.
+    expect(resolved?.state, 'the poll actually resolved to over before the reload').toBe('over');
     await page.goto('/?seed=7');
     await waitReady(page);
 
