@@ -723,3 +723,44 @@ test("bestiary scenario d: an Unwritten enemy's own first act deals +1 and revea
     "round 2: wisp-0's SECOND act is plain base — the +1 does not repeat",
   ).toBe(1);
 });
+
+// ---------------------------------------------------------------------------------------
+// Scenario d, Fix round 2 (T5 review finding): the OA-vs-Unwritten interaction needs no AI
+// choice from the striker to test — opportunityStrikers (ai.ts) is a purely reactive/positional
+// check fired by the MOVER, not a decision the Unwritten unit makes. A stationary Unwritten
+// enemy adjacent to a tile the Keeper walks away from is enough, today, with the same debug
+// hooks scenario d already uses plus one ordinary click-driven move — the reviewer's own proven
+// probe recipe and geometry, reused verbatim here (Keeper 10→8, wisp-0's Unwritten consumed).
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario d: an Unwritten enemy\'s opportunity strike also carries +1 and consumes it — the ambush writes the striker', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6);
+  await setPos(page, 'wraith-2', 8, 6);
+  await setPos(page, 'keeper', 5, 1);
+  await setPos(page, 'wisp-0', 6, 1);
+  await applyStatus(page, 'wisp-0', 'unwritten', -1, 0);
+
+  const keeperBefore = await unitState(page, 'keeper');
+  expect(keeperBefore?.hp, 'sanity: full hp before the OA').toBe(10);
+
+  await canvasClick(page, tileXY(4, 1).x, tileXY(4, 1).y); // walk away — vacates (5,1), adjacent to wisp-0
+  const reached = await passUntilUnitAt(page, 'keeper', 4, 1);
+  expect(reached, 'the Keeper reached the retreat tile').toBe(true);
+  await page.waitForTimeout(250); // let the (expected) OA resolution settle before reading hp
+
+  const keeperAfter = await unitState(page, 'keeper');
+  expect(keeperAfter?.hp, "the Unwritten striker's OA landed base(1) + the +1 opening tempo").toBe(8);
+
+  const wisp0After = await unitState(page, 'wisp-0');
+  expect(wisp0After?.statuses.some((st) => st.id === 'unwritten'), 'the ambush wrote the striker — Unwritten is consumed').toBe(false);
+
+  // "Then targetable": re-pin adjacency (the Keeper's own setPos must come last, scenario c's
+  // rule) and confirm the reveal actually reopened Strike targeting, not just cleared the flag.
+  await setPos(page, 'keeper', 5, 1);
+  const strikeTargets = await validTargets(page, 'strike');
+  expect(strikeTargets, 'revealed by its own ambush — Strike-targetable now').toContain('wisp-0');
+});
