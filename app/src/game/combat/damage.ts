@@ -160,6 +160,13 @@ export function resolveAction(action: ActionKind, quality: Quality, opts: Resolv
       // resolves it via applyStatus (status.ts), never this table. Kept only so the switch
       // stays exhaustive.
       return { ...EMPTY, banner: 'The ward resolves outside this table.' };
+    case 'shove':
+      // Never actually reached: unlike 'brace'/'press_on'/'satchel' above, Shove IS targeted
+      // (like Strike) and does go through runPlayerAction — but its OWN branch there
+      // (CombatScene.shove()) resolves the push directly via pushUnit/applyStatus, never this
+      // table (Ch. VIII Task 3: no encounter, no Art — there is no quality to grade). Kept only
+      // so the switch stays exhaustive.
+      return { ...EMPTY, banner: 'The shove resolves outside this table.' };
   }
 }
 

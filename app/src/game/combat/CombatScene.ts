@@ -33,7 +33,7 @@ import {
   shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
 } from './boss';
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
-import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
+import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, STATUS_DEFS, type StatusId } from './status';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
@@ -275,6 +275,11 @@ export class CombatScene extends Phaser.Scene {
    *  unit's own next turn lands mid the FOLLOWING round, after that round's earlier actors
    *  already moved, so a bulk clear at round-wrap would re-arm its latch one slot too early). */
   private midRiseIds = new Set<string>();
+  /** Ch. VIII Task 3 — e2e-only override: unit ids Shove should treat as toppleable regardless
+   *  of their real archetype stat (units.ts ENEMY_STATS — none of the four shipped archetypes
+   *  are toppleable yet; Task 6's Husk lands the real toppleable:true entry). Consulted by
+   *  isToppleable, populated only via the debugForceToppleable hook below. */
+  private debugToppleableIds = new Set<string>();
   /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
   private hoveredStatusUnitId: string | null = null;
 
@@ -422,6 +427,7 @@ export class CombatScene extends Phaser.Scene {
     this.carefulStepOn = false;
     this.tolledMoveBase = null;
     this.midRiseIds.clear();
+    this.debugToppleableIds.clear();
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
@@ -1255,6 +1261,25 @@ export class CombatScene extends Phaser.Scene {
     this.showMenu(unit);
   }
 
+  /** Ch. VIII — can a LANDED Shove knock `target` Toppled: either its archetype is really
+   *  toppleable (units.ts ENEMY_STATS — none of the four shipped archetypes are yet) or it's
+   *  been marked via the e2e-only debugForceToppleable seam (Task 3's stand-in for Task 6's
+   *  Husk, which lands the real toppleable:true entry). `target.kind` narrows to EnemyArchetype
+   *  once 'keeper'/'mira' are excluded — safe to index ENEMY_STATS with directly after that. */
+  private isToppleable(target: UnitState): boolean {
+    if (this.debugToppleableIds.has(target.id)) return true;
+    return target.kind !== 'keeper' && target.kind !== 'mira' && ENEMY_STATS[target.kind].toppleable;
+  }
+
+  /** Ch. VIII — Unwritten cannot be TARGETED by Strikes (and Shove) while it holds; spells and
+   *  area effects reach it fine (the chapter's own distinction) — so this predicate belongs ONLY
+   *  on Strike/Shove's own validTargets branches, never weave/sequence/cast/smite/parley. Task 5
+   *  (the Lurker, Unwritten's own bestiary entry) hasn't landed yet; it should reuse this SAME
+   *  method by name when it adds the matching filter to Strike's own case below. */
+  private isStrikeTargetable(target: UnitState): boolean {
+    return !hasStatus(target.statuses, 'unwritten');
+  }
+
   private validTargets(unit: UnitState, action: ActionKind): UnitState[] {
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
     switch (action) {
@@ -1267,6 +1292,9 @@ export class CombatScene extends Phaser.Scene {
         // §4.4 — mist (and walls) block Ritecraft lines the same way they block LoF;
         // hasLineOfFire already encodes same-row/col + range + the intervening-tile check.
         return enemies.filter((e) => hasLineOfFire(unit, e, ACTIONS.sequence.range, this.layout.tiles));
+      // Ch. VIII Task 3 — Shove: adjacent only (range 1, same reach as Strike), Unwritten-excluded
+      // (isStrikeTargetable, above — the chapter names Strikes AND Shove explicitly).
+      case 'shove': return enemies.filter((e) => manhattan(unit, e) <= 1 && this.isStrikeTargetable(e));
       case 'satchel':
       case 'wait':
       case 'press_on':
@@ -1648,6 +1676,10 @@ export class CombatScene extends Phaser.Scene {
       });
       return;
     }
+
+    // Ch. VIII Task 3 — Shove: targeted like Strike above (adjacent enemy, resolved once a
+    // target tile is picked), but never damage — resolves via its own gated handler.
+    if (action === 'shove') { this.shove(unit, target, tile); return; }
 
     // §12.2 — a T2/T3 spell chosen via the flyout resolves through the SpellDef/BoardOp
     // pipeline (castGatedSpell) instead of the T1 resolveAction/applyOutcome chain below,
@@ -2268,8 +2300,19 @@ export class CombatScene extends Phaser.Scene {
   /** §4.3 forced movement, applied to a spell's push (Cinder-Rebuke/Processional): same
    *  forceMove + bump-damage rules as the construct's Vault-Slam and the Warden's Writ of
    *  Seizure (enemyStrike below). `spell` carries the §9.2 shield gate for the bump damage —
-   *  null when the push came from an enemy kit rather than a cast. */
-  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, spell: SpellDef | null): void {
+   *  null when the push came from an enemy kit rather than a cast. Returns whether the push
+   *  LANDED (moved), so a caller can act on it (Ch. VIII Task 3 — Shove knocking a toppleable
+   *  target Toppled only on a landed push; the existing spell-push call site below ignores it,
+   *  same as it always ignored this method's prior `void` return).
+   *
+   *  Ch. VIII Task 3 — `opts.bump` (default true) parameterizes the shipped bump-damage branch:
+   *  Shove passes `{ bump: false }` so the bump is suppressed ALWAYS, even on a blocked push (the
+   *  chapter's own wording); the existing Cinder-Rebuke/Processional call site below passes no
+   *  opts, so it keeps its bump exactly as before — this default preserves every enemy push too,
+   *  should one ever route through this method instead of enemyStrike's own separate inline
+   *  forceMove call. */
+  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, spell: SpellDef | null, opts: { bump?: boolean } = {}): boolean {
+    const { bump = true } = opts;
     const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
     const res = forceMove(target, dir, board);
     if (res.moved) {
@@ -2280,10 +2323,10 @@ export class CombatScene extends Phaser.Scene {
         v.container.setDepth(10 + target.r);
         this.tweens.add({ targets: v.container, x: p.x, y: p.y, duration: 140 });
       }
-      return;
+      return true;
     }
-    if (!res.bump) return;
-    if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
+    if (!bump || !res.bump) return false;
+    if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return false; }
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
@@ -2293,6 +2336,48 @@ export class CombatScene extends Phaser.Scene {
       this.damageUnit(target, result.hpDamage, P.berry);
       this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
     }
+    return false;
+  }
+
+  /** Ch. VIII Task 3 — Shove: a free-lane push beside Strike/Brace, never damage. TARGETED like
+   *  Strike (called from runPlayerAction once a target tile is picked, unlike self-cast
+   *  Brace/Press On), so its own completion gate mirrors Brace's canonical shape exactly
+   *  (effect → feedback → delayedCall → alive-guard → spendAction → turnExhausted ?
+   *  endPlayerTurn : checkEnd-first + steps-remain + returnToActionMenu). Pushes 1 tile away;
+   *  blocked (wall/edge/occupied) = no move and the bump is suppressed ALWAYS (pushUnit's new
+   *  `{ bump: false }` — Cinder-Rebuke/Processional's own push and every enemy heave keep their
+   *  bump, unaffected). A LANDED push against a toppleable entry (isToppleable, above) also
+   *  knocks it Toppled. No contested checks, ever — costs the action either way (Ch. VI: "you
+   *  committed the shoulder"). */
+  private shove(unit: UnitState, target: UnitState | null, tile: Coord): void {
+    if (target) {
+      const dir = this.dirTo(unit, tile);
+      if (dir) {
+        const landed = this.pushUnit(unit, target, dir, null, { bump: false });
+        if (landed && target.alive && this.isToppleable(target)) {
+          target.statuses = applyStatus(target, 'toppled', 1, 1);
+          this.drawHpBar(target);
+          this.floatText(target, STATUS_DEFS.toppled.label, STATUS_DEFS.toppled.tint);
+        }
+      }
+    }
+    this.hud.showBanner('You put your shoulder in — the board shifts.', P.parchment);
+    this.actionLog.push({ action: 'shove', dmg: 0, overlay: false });
+    this.refreshParty();
+    this.time.delayedCall(440, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   /** Injunction-bad's enemy mend — a simple, un-gated heal-up (no SRS/death implications). */
@@ -3930,6 +4015,13 @@ export class CombatScene extends Phaser.Scene {
     if (!u) return;
     u.statuses = applyStatus(u, statusId, turns, magnitude);
     this.drawHpBar(u);
+  }
+
+  /** Debug: mark a unit toppleable for Shove regardless of its real archetype stat (e2e-only —
+   *  Task 3's stand-in for Task 6's Husk, the same "test seam, not production data" spirit as
+   *  debugApplyStatus/debugSetPos above; consulted by isToppleable). */
+  debugForceToppleable(id: string): void {
+    this.debugToppleableIds.add(id);
   }
 
   /** Debug: teleport a living unit (e2e-only test setup — e.g. arranging a wall-adjacent

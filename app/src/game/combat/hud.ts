@@ -226,7 +226,10 @@ export class CombatHud {
     // labels must still render WHOLE (no "End Tu…"), so the label font itself shrinks a
     // notch once bw can no longer spare 13px's worth of room, same spirit as bw's own
     // shrink-to-fit above. Hints (below) stay free to ellipsize — that's still acceptable.
-    const labelSize = bw >= 130 ? 13 : bw >= 100 ? 12 : 11;
+    // Wave 8 Task 3 — the row grew again, 10 to 11 (Shove): "End Turn" (the longest label)
+    // stopped fitting whole at bw=82's own 11px floor, so a fourth bracket shrinks it once
+    // more once bw drops below the 10-button row's own 91px.
+    const labelSize = bw >= 130 ? 13 : bw >= 100 ? 12 : bw >= 90 ? 11 : 9;
     const total = items.length * bw + (items.length - 1) * gap;
     let x = W / 2 - total / 2;
     for (const item of items) {

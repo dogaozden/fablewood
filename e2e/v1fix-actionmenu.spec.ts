@@ -53,10 +53,11 @@ function fitsButton(widthPx: number, buttonWidth: number): boolean {
 async function checkMenuFits(page: Page): Promise<MenuItem[]> {
   const items = await actionMenuDebug(page);
   // Step 0b (T5 discovery): T3/T4 grew the row from 8 to 10 (Careful Step/Press On, then
-  // Brace) — pin the count AND the three new labels by exact text, so this stays a
-  // composition guard (proof the whole row rendered) instead of a bare, meaningless number.
-  expect(items.length, 'all 10 ActionKinds render as buttons (post-Brace row)').toBe(10);
-  for (const label of ['End Turn', 'Press On', 'Brace']) {
+  // Brace); Wave 8 Task 3 grew it again, 10 to 11 (Shove) — pin the count AND the new labels by
+  // exact text, so this stays a composition guard (proof the whole row rendered) instead of a
+  // bare, meaningless number.
+  expect(items.length, 'all 11 ActionKinds render as buttons (post-Shove row)').toBe(11);
+  for (const label of ['End Turn', 'Press On', 'Brace', 'Shove']) {
     expect(items.some((i) => i.label === label), `"${label}" renders among the action buttons`).toBe(true);
   }
   for (const item of items) {

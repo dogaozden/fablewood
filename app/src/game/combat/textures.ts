@@ -41,6 +41,7 @@ export const ICON_KEYS: Record<string, string> = {
   wait: 'icon.wait',
   press_on: 'icon.press-on',
   brace: 'icon.brace',
+  shove: 'icon.shove',
 };
 
 /**
@@ -102,6 +103,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
   bake(scene, ICON_KEYS.press_on, ICON, ICON, drawIconPressOn);
   bake(scene, ICON_KEYS.brace, ICON, ICON, drawIconBrace);
+  bake(scene, ICON_KEYS.shove, ICON, ICON, drawIconShove);
 
   bake(scene, CHIP_KEYS.kindled, CHIP, CHIP, drawChipKindled);
   bake(scene, CHIP_KEYS.bound, CHIP, CHIP, drawChipBound);
@@ -434,6 +436,31 @@ function drawIconBrace(g: Phaser.GameObjects.Graphics): void {
   g.strokePoints(shield, true);
   g.fillStyle(P.waterLight, 1).fillTriangle(12, 10, 18, 8, 14, 18); // lit facet
   g.fillStyle(P.glowCore, 0.9).fillCircle(18, 16, 2.5); // core rivet
+}
+
+/** Shove's HUD icon (Ch. VIII Task 3) — a driving wedge (the shoulder) striking a displaced
+ *  block (the target), with two short motion-lines trailing behind it: physical impact and
+ *  displacement, deliberately distinct from Press On's forward double-chevron (that reads as
+ *  travel, not a hit) and from Strike's diagonal blade. Same outline-then-tint double-stroke
+ *  technique as drawIconPressOn/drawIconBrace. */
+function drawIconShove(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  // trailing motion-lines behind the displaced block
+  g.lineStyle(3, P.stoneGrey, 0.8);
+  g.lineBetween(8, 14, 14, 14).lineBetween(6, 22, 12, 22);
+  // the displaced block (the shoved target), pushed toward the right edge
+  g.lineStyle(2, P.outline, 1).fillStyle(P.timberLight, 1);
+  g.fillRoundedRect(21, 9, 11, 18, 3).strokeRoundedRect(21, 9, 11, 18, 3);
+  g.fillStyle(P.parchment, 0.5).fillRect(22, 11, 3, 14); // lit facing edge
+  // the driving wedge (the shove itself), striking the block's left face
+  const wedge = [
+    new Phaser.Geom.Point(4, 18),
+    new Phaser.Geom.Point(19, 11),
+    new Phaser.Geom.Point(19, 25),
+  ];
+  g.lineStyle(2, P.outline, 1);
+  g.fillStyle(P.timber, 1).fillPoints(wedge, true);
+  g.strokePoints(wedge, true);
 }
 
 function star(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rad: number, color: number): void {
