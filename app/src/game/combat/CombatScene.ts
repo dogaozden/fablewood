@@ -24,7 +24,7 @@ import {
 } from './types';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles,
-  forceMove, blocksSight, hasLineOfFire, type Layout, type MoveField, type ForceMoveBoard,
+  forceMove, blocksSight, hasLineOfFire, filterDauntedField, type Layout, type MoveField, type ForceMoveBoard,
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction, isFlanked, applyAmendedMercy, stripPartyHarmOps, AMENDED_MERCY_LINE } from './damage';
@@ -992,7 +992,7 @@ export class CombatScene extends Phaser.Scene {
     this.pendingAction = null;
     this.pendingSpell = null;
     this.overglowOn = false;
-    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.moveBudgetFor(unit));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -1038,7 +1038,7 @@ export class CombatScene extends Phaser.Scene {
       actionSpent: this.budget.actionSpent,
       pressedOn: this.budget.pressedOn,
     };
-    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.moveBudgetFor(unit));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -1278,6 +1278,39 @@ export class CombatScene extends Phaser.Scene {
    *  method by name when it adds the matching filter to Strike's own case below. */
   private isStrikeTargetable(target: UnitState): boolean {
     return !hasStatus(target.statuses, 'unwritten');
+  }
+
+  /** Ch. VIII Task 4 — if `unit` is actively Daunted (carries the status AND its source is
+   *  still alive-on-board), the source's CURRENT tile; else null. The one scene-side seam
+   *  both consumers below read: neither status.ts's computeHit nor grid.ts's filterDauntedField
+   *  has board access to answer "is the source still standing" itself. A dead source's stale
+   *  StatusInstance is left in place (inert, not cleared) — this is a LIVE read of `unit.alive`
+   *  on the source every time, so the −1 fold and the move-field filter both lift the instant
+   *  the source falls (damageUnit's `alive = false`, or syncBoss's own — no separate sweep
+   *  needed, and no seam can forget to clear it since there's nothing cached to forget). */
+  private dauntedSourceCoord(unit: UnitState): Coord | null {
+    const inst = unit.statuses.find((s) => s.id === 'daunted');
+    if (!inst?.sourceId) return null;
+    const src = this.unitById(inst.sourceId);
+    return src?.alive ? { c: src.c, r: src.r } : null;
+  }
+
+  /** Ch. VIII Task 4 — computeHit's `attackerDauntedSourceAlive` input: true only while `unit`
+   *  is held by an active Daunted. */
+  private dauntedSourceAlive(unit: UnitState): boolean {
+    return this.dauntedSourceCoord(unit) !== null;
+  }
+
+  /** Ch. VIII Task 4 — every PARTY move-field site routes through this instead of calling
+   *  computeMoveField directly: when `unit` is actively Daunted, the raw field is further
+   *  filtered (grid.ts's filterDauntedField, excluding tiles closer to the source than `unit`'s
+   *  own current tile) before becoming `this.moveField`/`this.reachable`. Same budget/blockedFor
+   *  arguments as before at every call site — this composes with W6's budget.left recompute
+   *  idiom rather than replacing it. */
+  private partyMoveField(unit: UnitState, budget: number): MoveField {
+    const field = computeMoveField(unit, budget, this.layout.tiles, this.blockedFor(unit.id));
+    const src = this.dauntedSourceCoord(unit);
+    return src ? filterDauntedField(field, unit, src, this.layout.tiles) : field;
   }
 
   private validTargets(unit: UnitState, action: ActionKind): UnitState[] {
@@ -1541,7 +1574,7 @@ export class CombatScene extends Phaser.Scene {
       // the REMAINING budget from the new position, so a spent-out move correctly reachables
       // to nothing (drawMoveRange then draws nothing) while a partial spend shows the
       // remainder — the affordance the "move the remainder" half of the turn depends on.
-      this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+      this.moveField = this.partyMoveField(unit, this.budget.left);
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();
@@ -1583,6 +1616,7 @@ export class CombatScene extends Phaser.Scene {
           base: 1 + (striker.team === 'party' ? this.strikeBonus : 0),
           attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
+          attackerDauntedSourceAlive: this.dauntedSourceAlive(striker),
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
@@ -2265,6 +2299,7 @@ export class CombatScene extends Phaser.Scene {
         const result = computeHit({
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
           flank: false, overglow: false, weld: false, rider: false,
+          attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
         });
         target.statuses = result.targetStatuses;
         if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
@@ -2330,6 +2365,7 @@ export class CombatScene extends Phaser.Scene {
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) {
@@ -2458,6 +2494,7 @@ export class CombatScene extends Phaser.Scene {
     const result = computeHit({
       base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
@@ -2529,7 +2566,7 @@ export class CombatScene extends Phaser.Scene {
     // no-op cancel — a killed enemy's tile stayed permanently unreachable, and a tile a push just
     // occupied stayed clickable, without this. Same three-line idiom as movePlayerTo's
     // post-arrival recompute and toggleCarefulStep's own.
-    this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.budget.left);
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -2842,7 +2879,13 @@ export class CombatScene extends Phaser.Scene {
     // now honored on the enemy side too).
     const effMove = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     const selfForAi = effMove === unit.move ? unit : { ...unit, move: effMove };
-    const intent = decideEnemy(selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id));
+    // Ch. VIII Task 4 — enemy-side extension (party-side is the requirement): non-null only
+    // when THIS enemy is itself actively Daunted (no in-game caster grants that yet — nothing
+    // but the debug/e2e seam can produce it this wave — but the seam was free, so it's wired).
+    const intent = decideEnemy(
+      selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id), [],
+      this.dauntedSourceCoord(unit),
+    );
 
     const doAttack = () => {
       if (this.destroyed) return;
@@ -3033,6 +3076,7 @@ export class CombatScene extends Phaser.Scene {
       attackerStatuses: attacker.statuses,
       targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
     });
     target.statuses = result.targetStatuses;
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {
@@ -4009,12 +4053,24 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** Debug: apply a status directly, bypassing spellcasting (e2e-only — Phase 2 wires real
-   *  casts; this exercises Phase 1's board mechanics, e.g. Bound blocking a move, without it). */
-  debugApplyStatus(id: string, statusId: StatusId, turns: number, magnitude = 1): void {
+   *  casts; this exercises Phase 1's board mechanics, e.g. Bound blocking a move, without it).
+   *  Ch. VIII Task 4 — `sourceId` is additive-optional, threaded straight through to
+   *  applyStatus's own param of the same name (the only status that reads it is Daunted; every
+   *  other caller already omits it, unaffected). Stands in for the Pall's real touch (T6) the
+   *  same way debugForceToppleable stood in for the Husk's real toppleable:true. */
+  debugApplyStatus(id: string, statusId: StatusId, turns: number, magnitude = 1, sourceId?: string): void {
     const u = this.unitById(id);
     if (!u) return;
-    u.statuses = applyStatus(u, statusId, turns, magnitude);
+    u.statuses = applyStatus(u, statusId, turns, magnitude, sourceId);
     this.drawHpBar(u);
+  }
+
+  /** Debug: the ACTIVE unit's current move-field reachable tiles (e2e-only — Ch. VIII Task 4:
+   *  the only way a test can observe the Daunted move-field filter's effect on `this.reachable`
+   *  without fighting pixel-perfect click geometry for every excluded tile). Same read-only
+   *  debug-surface spirit as orderDebug/layoutDebug beside it. */
+  reachableDebug(): Coord[] {
+    return [...this.reachable.values()];
   }
 
   /** Debug: mark a unit toppleable for Shove regardless of its real archetype stat (e2e-only —
@@ -4044,7 +4100,7 @@ export class CombatScene extends Phaser.Scene {
       // Ch. VI — ranged by the REMAINING budget, not a fresh moveBudgetFor: this call now can
       // run mid-turn (after a leg is already spent), and moveBudgetFor would hand back the
       // full fresh total, letting a test click a tile the Keeper can no longer actually afford.
-      this.moveField = computeMoveField(u, this.budget.left, this.layout.tiles, this.blockedFor(u.id));
+      this.moveField = this.partyMoveField(u, this.budget.left);
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();

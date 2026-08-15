@@ -177,6 +177,41 @@ export function computeMoveField(
   return { cost, prev };
 }
 
+/**
+ * Ch. VIII Daunted — filters a move field down to tiles whose path distance to `source` is
+ * >= `start`'s own path distance to `source` (equal/farther kept, closer excluded), per the
+ * chapter's "cannot willingly END a move closer... than it began." Runs a second, budget-
+ * unbounded Dijkstra from `source` (ignoring live-unit occupancy — this measures dungeon
+ * geometry, not who happens to be standing where this instant) to score every tile, then
+ * drops any `field` entry that scores closer than `start`.
+ *
+ * Only `cost` is filtered — `prev` is carried over UNTOUCHED. `pathTo` only consults `cost`
+ * for its TARGET tile (the thing being validated as a legal place to stop); it walks `prev`
+ * freely for everything in between. So a kept, farther tile reachable only by passing through
+ * an excluded, closer one still paths correctly — the law forbids ENDING closer, not crossing
+ * through a closer tile en route.
+ *
+ * Applying this is entirely the caller's call: skip it whenever the mover isn't actively
+ * Daunted by a living source (CombatScene's dauntedSourceCoord decides that, since it needs
+ * board access this pure function doesn't have). Forced movement (pushUnit/forceMove) never
+ * calls this at all — it bypasses by construction, not by any check here.
+ */
+export function filterDauntedField(field: MoveField, start: Coord, source: Coord, tiles: TileGrid): MoveField {
+  const h = tiles.length;
+  const w = tiles[0]?.length ?? 0;
+  const sourceField = computeMoveField(source, w * h, tiles, new Set());
+  const startDist = sourceField.cost.get(key(start.c, start.r));
+  if (startDist === undefined) return { cost: new Map(field.cost), prev: new Map(field.prev) };
+
+  const cost = new Map<string, number>();
+  for (const [k, c] of field.cost) {
+    const dist = sourceField.cost.get(k);
+    if (dist !== undefined && dist < startDist) continue; // closer to source than start — excluded
+    cost.set(k, c);
+  }
+  return { cost, prev: new Map(field.prev) };
+}
+
 /** Reachable tiles (excludes the start tile itself). */
 export function reachableTiles(field: MoveField, start: Coord): Coord[] {
   const out: Coord[] = [];

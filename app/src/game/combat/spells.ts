@@ -406,6 +406,8 @@ function primaryAmount(base: number, opts: ResolveSpellOpts, welded: boolean): n
     overglow: !!opts.overglow,
     weld: welded,
     rider: !!opts.rider,
+    // Ch. VIII — moot with attackerStatuses empty (no 'daunted' to gate); false is the inert value.
+    attackerDauntedSourceAlive: false,
   });
   return hpDamage + (opts.miraBonus ?? 0);
 }

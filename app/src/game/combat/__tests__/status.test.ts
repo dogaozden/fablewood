@@ -222,7 +222,10 @@ describe('effectiveMove — bound-still-acts & dimmed floor (§3)', () => {
 });
 
 describe('computeHit — the one pipeline (§3 rule 4)', () => {
-  const noMods = { attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false };
+  const noMods = {
+    attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+    flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+  };
 
   it('base only, no modifiers', () => {
     expect(computeHit({ base: 3, ...noMods })).toMatchObject({ hpDamage: 3, absorbed: 0 });
@@ -410,9 +413,71 @@ describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
         base: 1,
         attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
         targetStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }],
-        flank: false, overglow: false, weld: false, rider: false,
+        flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
       });
       expect(res.hpDamage).toBe(2); // base 1 + emboldened 1; daunted/sourceId untouched — no pipeline change this task
+    });
+  });
+});
+
+describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
+  describe('computeHit — the −1 fold, active only while the source stands (mirrors weakened)', () => {
+    const base2 = {
+      base: 2, targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false,
+    };
+    const dauntedStatus = (magnitude = 1): StatusInstance[] => [{ id: 'daunted', turnsLeft: -1, magnitude, sourceId: 'pall-1' }];
+
+    it('source alive-on-board: deals −1', () => {
+      const res = computeHit({ ...base2, attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(1);
+    });
+
+    it('source NOT alive: no penalty, even though the status is still sitting on the attacker', () => {
+      const res = computeHit({ ...base2, attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: false });
+      expect(res.hpDamage).toBe(2);
+    });
+
+    it('attackerDauntedSourceAlive:true is a no-op when the attacker does not carry daunted at all', () => {
+      const res = computeHit({ ...base2, attackerStatuses: [], attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(2);
+    });
+
+    it('floors at 0, never negative — same floor rule as weakened', () => {
+      const res = computeHit({
+        base: 1, targetStatuses: [], flank: false, overglow: false, weld: false, rider: false,
+        attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true,
+      });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('stacks with weakened — both are −1 folds, applied together', () => {
+      const res = computeHit({
+        ...base2,
+        attackerStatuses: [...dauntedStatus(), { id: 'weakened', turnsLeft: 1, magnitude: 1 }],
+        attackerDauntedSourceAlive: true,
+      });
+      expect(res.hpDamage).toBe(0); // 2 - 1 (daunted) - 1 (weakened) = 0
+    });
+
+    it('reads magnitude via statusMagnitude exactly like weakened — not a hardcoded −1 literal', () => {
+      const res = computeHit({ ...base2, base: 3, attackerStatuses: dauntedStatus(2), attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(1); // 3 - 2
+    });
+  });
+
+  describe('sourceId — repeated touches from the SAME source (T6 Pall sanity-check)', () => {
+    it('re-touching with an identical sourceId is a no-op for sourceId while turns/magnitude still keep-the-larger', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 1, 'pall-1') }; // the Pall touches again, same instance
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 1, sourceId: 'pall-1' }]);
+
+      // A bigger re-touch (e.g. a stronger variant landing later) still keeps-the-larger on
+      // turns/magnitude, and sourceId — explicitly re-passed as the SAME id — stays put; this
+      // composes correctly because "overwrite" with an identical value is indistinguishable
+      // from "no-op" for sourceId specifically, while magnitude still refreshes to the max.
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 3, 'pall-1') };
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 3, sourceId: 'pall-1' }]);
     });
   });
 });

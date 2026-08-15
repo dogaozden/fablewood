@@ -45,14 +45,29 @@ async function unitPos(page: Page, id: string): Promise<{ c: number; r: number }
 async function unitState(
   page: Page,
   id: string,
-): Promise<{ hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null> {
+): Promise<{ hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null> {
   return page.evaluate((uid) => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
     const s = g?.scene?.getScene?.('combat') as
-      | { unitDebug?(id: string): { hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null }
+      | { unitDebug?(id: string): { hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null }
       | undefined;
     return s?.unitDebug?.(uid) ?? null;
   }, id);
+}
+
+/** Ch. VIII Task 4 — the ACTIVE unit's live move-field reachable tiles (CombatScene.
+ *  reachableDebug, new this task): the only way to observe the Daunted move-field filter's
+ *  effect without fighting pixel-perfect click geometry for every excluded tile. */
+async function reachable(page: Page): Promise<Array<{ c: number; r: number }>> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { reachableDebug?(): Array<{ c: number; r: number }> } | undefined;
+    return s?.reachableDebug?.() ?? [];
+  });
+}
+
+function hasTile(tiles: Array<{ c: number; r: number }>, c: number, r: number): boolean {
+  return tiles.some((t) => t.c === c && t.r === r);
 }
 
 async function setPos(page: Page, id: string, c: number, r: number): Promise<void> {
@@ -66,18 +81,23 @@ async function setPos(page: Page, id: string, c: number, r: number): Promise<voi
   );
 }
 
-/** Apply a status directly (e2e-only CombatScene.debugApplyStatus — unmodified by this task;
- *  Task 1's own idiom for toppled's conventionally-meaningless turnsLeft: 1, magnitude: 1). */
-async function applyStatus(page: Page, id: string, statusId: string, turns = 1, magnitude = 1): Promise<void> {
+/** Apply a status directly (e2e-only CombatScene.debugApplyStatus). Task 1's own idiom for
+ *  toppled's conventionally-meaningless turnsLeft: 1, magnitude: 1. Ch. VIII Task 4 —
+ *  `sourceId` is additive-optional (only Daunted reads it), threaded through to
+ *  debugApplyStatus's own new param of the same name — this task's stand-in for the Pall's
+ *  real touch (T6), the same spirit as forceToppleable standing in for the Husk. */
+async function applyStatus(
+  page: Page, id: string, statusId: string, turns = 1, magnitude = 1, sourceId?: string,
+): Promise<void> {
   await page.evaluate(
-    ({ id, statusId, turns, magnitude }) => {
+    ({ id, statusId, turns, magnitude, sourceId }) => {
       const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
       const s = g?.scene?.getScene?.('combat') as
-        | { debugApplyStatus?(id: string, statusId: string, turns: number, magnitude?: number): void }
+        | { debugApplyStatus?(id: string, statusId: string, turns: number, magnitude?: number, sourceId?: string): void }
         | undefined;
-      s?.debugApplyStatus?.(id, statusId, turns, magnitude);
+      s?.debugApplyStatus?.(id, statusId, turns, magnitude, sourceId);
     },
-    { id, statusId, turns, magnitude },
+    { id, statusId, turns, magnitude, sourceId },
   );
 }
 
@@ -428,4 +448,126 @@ test('bestiary scenario b: a landed Shove knocks Toppled, and a non-first unit\'
   await page.waitForTimeout(250);
   const keeperHpAfterR3 = await unitState(page, 'keeper');
   expect(keeperHpAfterR3?.hp, "round 3: wisp-0's latch has re-armed — the Keeper takes the opportunity strike").toBe((keeperHpBeforeR3?.hp ?? 0) - 1);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario c (Task 4 — Daunted): wisp-0 stands in for the Pall (via debugApplyStatus's new
+// sourceId param, the same "debug seam stands in for the later real archetype" spirit as
+// Task 3's debugForceToppleable standing in for the Husk). Geometry: row 1 is a fully-floor
+// row across cols 1-10 (task-2-report.md's own fixture dump, reused verbatim by scenario b) —
+// Keeper(5,1), source wisp-0(2,1) three tiles west, damage-target wraith-2(5,2) adjacent
+// south (off the row-1 corridor entirely, so it never blocks the east-west move-field check).
+// wisp-1 and (between turns) wraith-2 are exiled far east so their own AI turns can't wander
+// into the staged geometry or land a hit that would Dimmed the Keeper and desync the move
+// budget the tile math below assumes.
+//
+// Three turns: (1) an undaunted control Strike records the baseline damage; (2) Daunted
+// applied (sourceId=wisp-0) proves the move field excludes the two tiles strictly closer to
+// wisp-0 than the Keeper's own tile while keeping the equal/farther ones, AND the SAME Strike
+// now deals exactly 1 less than the control — then wisp-0 is fixtured to die at ITS OWN next
+// turn-start tick (scenario a's own lethal-Kindled technique, the only clean way to fell a
+// unit without the Keeper's own attack ALSO being the thing under test); (3) on the Keeper's
+// very next turn, with wisp-0 confirmed dead, the excluded tiles are reachable again and the
+// Strike deals full (control-equal) damage again — proving the lift is a live read of
+// `alive`, not a decayed counter that would need an extra turn to catch up.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario c: Daunted — the move field excludes closer tiles, damage is −1, and a felled source lifts both immediately', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6); // exiled — out of reach all test long
+  // Mira's default fixture spawn is (3,1) — squarely inside the row-1 corridor this scenario
+  // measures reachability along. She never moves for the rest of this test (this file's own
+  // passUntilKeeper idiom just presses her End Turn hotkey immediately, every round), so one
+  // reposition here is enough — no need to re-stage her at every later restage block.
+  await setPos(page, 'mira', 1, 6);
+  await setPos(page, 'wraith-2', 5, 2); // adjacent south of the Keeper — the damage-target/control
+  await setPos(page, 'wisp-0', 2, 1); // the Daunted source stand-in, 3 tiles west along row 1
+  await setPos(page, 'keeper', 5, 1);
+
+  const fresh = await snap(page);
+  expect(fresh?.budget.total, "sanity: the Keeper's fresh, un-tolled move budget").toBe(4);
+
+  // --- Turn 1: undaunted control Strike on wraith-2.
+  await page.keyboard.press('1'); // Strike hotkey
+  await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
+  await canvasClick(page, tileXY(5, 2).x, tileXY(5, 2).y);
+  const afterControl = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the control Strike to resolve');
+  const controlDealt = afterControl.log.at(-1)?.dmg ?? -1;
+  expect(controlDealt, 'sanity: the undaunted control Strike deals the plain base (no flank/level bonus in this fixture)').toBe(1);
+
+  // Exile wraith-2 off row 1 entirely before ending the turn: (10,1) (scenario a/b's own exile
+  // spot) shares the Keeper's ROW, and wraith's range(3)+move(3) easily closes that gap and
+  // fires down the row — this fixture needs a spot with neither shared row NOR shared column
+  // within reach, so its own AI turn this round can't get a shot off, Dimmed the Keeper, and
+  // desync the move-budget math below.
+  await setPos(page, 'wraith-2', 8, 6);
+  await page.keyboard.press('7'); // End turn 1.
+
+  // --- Turn 2: apply Daunted (sourceId=wisp-0, still alive), re-stage, and prove both effects.
+  const turn2 = await passUntilKeeper(page);
+  expect(turn2.activeId).toBe('keeper');
+  expect(turn2.budget.total, 'sanity: no Dimmed picked up in the interim — still the raw base').toBe(4);
+
+  // debugSetPos only refreshes the move field when repositioning the ACTIVE unit, off
+  // whatever occupancy exists AT THAT MOMENT — so the Keeper's own setPos must come LAST,
+  // after wisp-0/wraith-2 are already at their final spots, or the refresh reads stale
+  // (pre-restage) blocking data.
+  await setPos(page, 'wisp-0', 2, 1);
+  await setPos(page, 'wraith-2', 5, 2);
+  await setPos(page, 'keeper', 5, 1);
+
+  const beforeDaunt = await reachable(page);
+  expect(hasTile(beforeDaunt, 3, 1), 'sanity: (3,1) is reachable before Daunted applies').toBe(true);
+  expect(hasTile(beforeDaunt, 4, 1), 'sanity: (4,1) is reachable before Daunted applies').toBe(true);
+
+  await applyStatus(page, 'keeper', 'daunted', -1, 1, 'wisp-0'); // battle-long, magnitude 1 (the −1 law)
+
+  // debugApplyStatus doesn't itself touch position/move state, so re-set the Keeper's own tile
+  // to force the exact same "reposition the active unit" refresh debugSetPos already uses —
+  // the move field must reflect the freshly-applied Daunted on its very next recompute.
+  await setPos(page, 'keeper', 5, 1);
+  const afterDaunt = await reachable(page);
+  expect(hasTile(afterDaunt, 3, 1), '(3,1) is 1 tile closer to wisp-0(2,1) than the Keeper(5,1) — excluded').toBe(false);
+  expect(hasTile(afterDaunt, 4, 1), '(4,1) is 2 tiles closer to wisp-0 than the Keeper — excluded').toBe(false);
+  expect(hasTile(afterDaunt, 6, 1), '(6,1) is FARTHER from wisp-0 than the Keeper — kept').toBe(true);
+  expect(hasTile(afterDaunt, 9, 1), '(9,1) is farther still — kept').toBe(true);
+
+  await page.keyboard.press('1'); // Strike hotkey
+  await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
+  await canvasClick(page, tileXY(5, 2).x, tileXY(5, 2).y);
+  const afterDauntedStrike = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the Daunted Strike to resolve');
+  const dauntedDealt = afterDauntedStrike.log.at(-1)?.dmg ?? -1;
+  expect(dauntedDealt, "Daunted deals exactly 1 LESS than the undaunted control — the chapter's −1 law").toBe(controlDealt - 1);
+
+  // Fixture wisp-0 to die at ITS OWN next turn-start tick (scenario a's own lethal-Kindled
+  // technique) — the cleanest way to fell the source without the Keeper's own (now-weakened)
+  // Strike being the thing that has to do it.
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2); // wisp-0's hp is 2 — this kills it outright
+
+  await setPos(page, 'wraith-2', 8, 6); // exile again (off row AND column — see turn 1's own note)
+  await page.keyboard.press('7'); // End turn 2.
+
+  // --- Turn 3: wisp-0 is dead — both effects must already be gone, with no extra turn's delay.
+  const turn3 = await passUntilKeeper(page);
+  expect(turn3.activeId).toBe('keeper');
+
+  const wisp0Dead = await unitState(page, 'wisp-0');
+  expect(wisp0Dead?.alive, "sanity: wisp-0 fell at its own turn-start tick, before ever acting").toBe(false);
+
+  await setPos(page, 'wraith-2', 5, 2);
+  await setPos(page, 'keeper', 5, 1); // re-set to force the move-field refresh, same as turn 2
+
+  const afterFall = await reachable(page);
+  expect(hasTile(afterFall, 3, 1), 'the source is gone — (3,1) is reachable again, same turn its death is first observed').toBe(true);
+  expect(hasTile(afterFall, 4, 1), '(4,1) likewise reachable again').toBe(true);
+
+  await page.keyboard.press('1'); // Strike hotkey
+  await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
+  await canvasClick(page, tileXY(5, 2).x, tileXY(5, 2).y);
+  const afterRestoredStrike = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the restored Strike to resolve');
+  const restoredDealt = afterRestoredStrike.log.at(-1)?.dmg ?? -1;
+  expect(restoredDealt, 'full damage is restored — identical to the original undaunted control').toBe(controlDealt);
 });

@@ -8,7 +8,7 @@
  * animates and applies it.
  */
 import { manhattan, key, type Coord, type Team, type UnitState } from './types';
-import { computeMoveField, reachableTiles, hasLineOfFire, type TileGrid } from './grid';
+import { computeMoveField, reachableTiles, hasLineOfFire, filterDauntedField, type TileGrid } from './grid';
 import { isFlanked } from './damage';
 import { hasStatus } from './status';
 
@@ -56,6 +56,12 @@ export function decideEnemy(
   tiles: TileGrid,
   occupied: Set<string>, // keys of every OTHER living unit
   allies: UnitState[] = [], // other living units on self's team — flank/interpose directives (§8)
+  // Ch. VIII Task 4 — non-null only when `self` is actively Daunted by a still-living source
+  // (the scene resolves that; this pure function just gets a coordinate or nothing). Filters
+  // the move field BEFORE `options` is built, so no scoring branch below needs to know Daunted
+  // exists at all — it only ever sees an already-legal candidate set. Optional with a null
+  // default, same "every pre-existing call site keeps compiling" idiom as `allies` above.
+  dauntedSourceCoord: Coord | null = null,
 ): AiIntent {
   const foes = party.filter((p) => p.alive);
   if (!foes.length) return { moveTo: null, attackTargetId: null, carefulStep: false };
@@ -80,7 +86,8 @@ export function decideEnemy(
   if (here) return { moveTo: null, attackTargetId: here.id, carefulStep: false };
 
   const field = computeMoveField(self, moveBudget, tiles, occupied);
-  const options = [self, ...reachableTiles(field, self)];
+  const dauntedField = dauntedSourceCoord ? filterDauntedField(field, self, dauntedSourceCoord, tiles) : field;
+  const options = [self, ...reachableTiles(dauntedField, self)];
 
   // Nearest foe by Manhattan (cheap, good enough on a 12×8 board).
   const nearest = foes.reduce((best, f) =>

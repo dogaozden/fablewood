@@ -204,6 +204,11 @@ export interface ComputeHitInput {
   /** difficulty-rewards.md §4 — the reward rider; 0-plumbed until a pack's
    *  difficultyClassified flag flips true (a later phase, not this one). */
   rider: boolean;
+  /** Ch. VIII — is the attacker's Daunted source (if it carries the status at all) still
+   *  alive-on-board? This module has no board access, so the caller (CombatScene) resolves
+   *  the one bit it can't derive itself and hands back the answer; irrelevant whenever
+   *  attackerStatuses carries no 'daunted' entry. */
+  attackerDauntedSourceAlive: boolean;
 }
 
 export interface ComputeHitResult {
@@ -217,16 +222,26 @@ export interface ComputeHitResult {
 
 /**
  * The ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack:
- *   base + emboldened(+1) − weakened(−1) + flank(+1) + overglow(+1) + weld(+1) + rider(+1)
- *   → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
+ *   base + emboldened(+1) − weakened(−1) − daunted(−1, source-alive-gated) + flank(+1)
+ *   + overglow(+1) + weld(+1) + rider(+1) → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
  * Inked amplifies only a real (nonzero, post-floor) hit — a 0 stays 0.
+ *
+ * Ch. VIII — daunted folds exactly like weakened (statusMagnitude off the attacker), gated by
+ * the caller-supplied `attackerDauntedSourceAlive` since this pure module can't check the
+ * board itself: the source falling flips that flag on the caller's very next read, so the
+ * penalty lifts the same beat the source falls, with no separate decay/clear needed here.
  */
 export function computeHit(input: ComputeHitInput): ComputeHitResult {
-  const { base, attackerStatuses, targetStatuses, flank, overglow, weld, rider } = input;
+  const { base, attackerStatuses, targetStatuses, flank, overglow, weld, rider, attackerDauntedSourceAlive } = input;
+
+  const dauntedPenalty = hasStatus(attackerStatuses, 'daunted') && attackerDauntedSourceAlive
+    ? statusMagnitude(attackerStatuses, 'daunted')
+    : 0;
 
   let dmg = base
     + statusMagnitude(attackerStatuses, 'emboldened')
     - statusMagnitude(attackerStatuses, 'weakened')
+    - dauntedPenalty
     + (flank ? 1 : 0)
     + (overglow ? 1 : 0)
     + (weld ? 1 : 0)
