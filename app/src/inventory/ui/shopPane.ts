@@ -1,7 +1,8 @@
 /**
- * Mira's Ledger (inventory-handoff §7): buy the 6 consumable/tool items, sell
- * owned trinkets. Same DOM-overlay contract as inventoryPane.ts — see ./dom.ts's
- * openPane doc for the mandatory caller-side keyboard-quiet wrap.
+ * Mira's Ledger (inventory-handoff §7): buy the eight wares (3 draughts + 2 glow + 3
+ * tools — catalog.ts's shopStock), sell owned trinkets. Same DOM-overlay contract as
+ * inventoryPane.ts — see ./dom.ts's openPane doc for the mandatory caller-side
+ * keyboard-quiet wrap.
  */
 import { services } from '../../game/contracts';
 import { CATALOG, RARITY_META, shopStock, type ItemDef } from '../catalog';
@@ -26,7 +27,7 @@ export function effectLabel(item: ItemDef): string {
     case 'retry_cast':
       return 'Retry a failed cast in a trial';
     case 'streak_shield':
-      return 'Holds your hearth streak through a stumble in a trial';
+      return 'Holds your Vigil through a stumble in a trial';
     case 'none':
       return '';
   }

@@ -176,7 +176,11 @@ const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
       choose(n - 1);
     }
   });
-  requestAnimationFrame(() => cards[0]?.focus());
+  // Ch. VII final review — focus the first ENABLED card, not blindly cards[0]. struckIndex is
+  // 0 whenever the first option isn't the answer (roughly three hinted casts in four), and a
+  // disabled button's .focus() is a no-op, which cost the options list its focus ring and its
+  // Tab entry point. Number keys were never affected (overlay.ts binds the bus to root).
+  requestAnimationFrame(() => cards.find((c) => !c.disabled)?.focus());
 };
 
 // --- free_recall · Cast From Memory -----------------------------------------

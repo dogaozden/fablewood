@@ -94,7 +94,7 @@ export const CATALOG: readonly ItemDef[] = [
   item('second-wind-seal', 'Second Wind Seal', 'uncommon', 'tool', { kind: 'retry_cast' }, 50,
     'Break the wax and try the cast again.'),
   item('ward-of-focus', 'Ward of Focus', 'rare', 'tool', { kind: 'streak_shield' }, 85,
-    'Holds your streak unbroken through one stumble.'),
+    'Holds your Vigil unbroken through one stumble.'),
   // -- trinkets (loot; their only purpose is selling to Mira) --
   item('faded-coin-cache', 'Faded Coin-Cache', 'common', 'trinket', { kind: 'none' }, 15,
     'A knot of tarnished coppers from a forgotten till.'),

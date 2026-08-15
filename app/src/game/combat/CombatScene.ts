@@ -1673,12 +1673,22 @@ export class CombatScene extends Phaser.Scene {
     // re-presented with the SAME strikeOneFalse flag riding it (the strike itself persists
     // through a redraw), so this one spot — after both the direct and redrawn paths have
     // funneled back together — is the single terminal point that means "genuinely answered."
-    // Removal at fire time, per the arming law (combat/aids.ts).
+    // Removal at fire time, per the arming law (combat/aids.ts) — but the deduct is WRAPPED,
+    // the same idiom the glow branch uses at the sibling call in useSatchelItem. removeItem
+    // genuinely rejects: store.remove -> mutate returns the unguarded promise (inventory/
+    // store.ts), so a bridge getState/putState fault propagates straight out here. Unwrapped,
+    // that throw lands BEFORE record() below and becomes an unhandled rejection (every entry
+    // point is a fire-and-forget `void this.runPlayerAction(...)`) — a question the player
+    // genuinely saw and genuinely answered would leave no SRS record, and the battle would
+    // strand at state='resolving'. The binding law is absolute: no aid alters, softens, or
+    // SKIPS an SRS record. Swallowing is the right behavior for the aid itself — the strike
+    // already rendered, so the fire cannot be undone; a failed deduct costs the player nothing
+    // worse than a free hint. Fire semantics stand either way: the arm is cleared above.
     if (hint) {
       const fired = aidFires(this.armedAid, 'reveal_option');
       if (fired) {
         this.armedAid = null;
-        await services.inventory.removeItem(fired.itemId, 1);
+        try { await services.inventory.removeItem(fired.itemId, 1); } catch { /* deduct failed; the strike stands, the arm stays cleared */ }
       }
     }
     // §5.1 Glow source 4 (trap 14): snapshot due-ness BEFORE record() mutates the queue.
@@ -1730,7 +1740,12 @@ export class CombatScene extends Phaser.Scene {
       const fired = aidFires(this.armedAid, 'retry_cast');
       if (fired) {
         this.armedAid = null;
-        await services.inventory.removeItem(fired.itemId, 1);
+        // Wrapped for the same reason as the Hint's deduct above, one step less severe: this
+        // one sits AFTER record(), so an unwrapped throw would cost the battle (unhandled
+        // rejection -> stranded state='resolving') without costing the Ledger. The try two
+        // lines below already guards runEncounter for exactly that soft-lock; it stopped one
+        // line short of the call that shares the exposure.
+        try { await services.inventory.removeItem(fired.itemId, 1); } catch { /* deduct failed; the retry is still owed */ }
         // Ch. IV one-round-one-seed law: reuse roundSeed — the forced encounterId below makes
         // the draw moot anyway (same fact/question re-presented), so the seed can't actually
         // change what's drawn; reused to keep the law's letter, not because it does anything.
@@ -1745,7 +1760,7 @@ export class CombatScene extends Phaser.Scene {
           // kinds.ts:220's `ctx.judge(...)` is unwrapped, so a judge fault on the retry's
           // free_recall/scenario_branch throws straight out of runEncounter — and a judge
           // fault is exactly what would have driven a free_recall cast into the offline-catch
-          // below in the first place, so this is a likely path here, not an exotic one. It is
+          // above in the first place, so this is a likely path here, not an exotic one. It is
           // NOT loadPacks (register.ts's own .catch(() => []) already makes that leg unable to
           // throw) and NOT an unresolvable local-* encounterId (engine.ts's pick() silently
           // falls through to a fresh draw on a miss rather than throwing — see the residual
@@ -1760,7 +1775,7 @@ export class CombatScene extends Phaser.Scene {
           // accepted for the Hint's own offline-catch path.
           //
           // Known, accepted residual (I1): if the ORIGINAL cast itself came from the
-          // offline-catch fallback below (quality 0.5 < 1 still fires the Seal) and the fault
+          // offline-catch fallback above (quality 0.5 < 1 still fires the Seal) and the fault
           // has since cleared, this retry's forced encounterId is equally unresolvable but
           // fails SILENTLY into a fresh due-first draw (same engine.ts fallthrough) instead of
           // throwing here — the Seal can re-present a DIFFERENT question under the "returns to
@@ -1929,12 +1944,13 @@ export class CombatScene extends Phaser.Scene {
       result = { encounterId: `local-${spell.id}`, kind: artKind, factIds: factIds.slice(0, 1), quality: 0.5, detail: 'offline' };
     }
     // Ch. VII Mira's Stall — fire only on the answered pass (mirrors the T1 site in
-    // runPlayerAction above — see its comment for why this one spot is the right one).
+    // runPlayerAction above — see its comment for why this one spot is the right one, and for
+    // why the deduct is wrapped: this one sits before record() too).
     if (hint) {
       const fired = aidFires(this.armedAid, 'reveal_option');
       if (fired) {
         this.armedAid = null;
-        await services.inventory.removeItem(fired.itemId, 1);
+        try { await services.inventory.removeItem(fired.itemId, 1); } catch { /* deduct failed; the strike stands, the arm stays cleared */ }
       }
     }
     // §5.5 the weld edge: capture every involved fact's box BEFORE record() mutates it (trap
@@ -1966,7 +1982,12 @@ export class CombatScene extends Phaser.Scene {
       const fired = aidFires(this.armedAid, 'retry_cast');
       if (fired) {
         this.armedAid = null;
-        await services.inventory.removeItem(fired.itemId, 1);
+        // Wrapped for the same reason as the Hint's deduct above, one step less severe: this
+        // one sits AFTER record(), so an unwrapped throw would cost the battle (unhandled
+        // rejection -> stranded state='resolving') without costing the Ledger. The try two
+        // lines below already guards runEncounter for exactly that soft-lock; it stopped one
+        // line short of the call that shares the exposure.
+        try { await services.inventory.removeItem(fired.itemId, 1); } catch { /* deduct failed; the retry is still owed */ }
         try {
           const retry = await services.runEncounter({
             context, kinds: [artKind], factIds, packId: this.launch.packId, seed: roundSeed,

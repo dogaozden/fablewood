@@ -851,9 +851,21 @@ export class HamletScene extends Phaser.Scene {
       // wasn't YESTERDAY either means at least one full night was skipped. Absent
       // lastHearthAt (never rested) is legacy grace, not a break — short-circuits below
       // before canRestTonight is even asked about yesterday.
+      //
+      // Final review M2 — an ABNORMAL stamp is grace too, not a break. `!!lastHearthAt` is
+      // true for garbage, and canRestTonight deliberately returns true for an unparseable
+      // stamp ("Unparseable stamps never brick the Hearth" — rest/embers.ts), so the naive
+      // read inverted that helper's own philosophy and snapped the chain on a corrupt value.
+      // A future-dated stamp (clock skew, or a save written while the system clock ran ahead)
+      // is neither today nor yesterday and broke identically. Both now require the same thing
+      // a real break does: a stamp we can actually believe. Only a VALID, non-future stamp
+      // with a genuine skipped night breaks the chain — the alternative is a destructive
+      // write to state/ on evidence we know is bad.
+      const stamp = lastHearthAt ? new Date(lastHearthAt) : null;
+      const believable = stamp !== null && !isNaN(stamp.getTime()) && stamp.getTime() <= now.getTime();
       const yesterday = new Date(now);
       yesterday.setDate(now.getDate() - 1);
-      const broken = !!lastHearthAt && canRestTonight(lastHearthAt, yesterday);
+      const broken = believable && canRestTonight(lastHearthAt, yesterday);
       let vigil: 'broken' | 'warded' | undefined;
       let brokenStreak: number | undefined;
       if (broken) {
