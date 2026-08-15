@@ -30,10 +30,10 @@ export function berryConv(due: number, streak: number): Conversation {
 
   if (streak > 0) {
     pages.push(
-      `Your hearthfire stands ${plural(streak, 'night')} tall now. The whole Acorn feels it when a Keeper keeps their streak.`,
+      `Your hearthfire stands ${plural(streak, 'night')} tall now. The whole Acorn feels it when a Keeper keeps their Vigil.`,
     );
   } else {
-    pages.push('Kindle a streak out there and watch this old hearth blaze. I do love a good blaze.');
+    pages.push('Kindle a Vigil out there and watch this old hearth blaze. I do love a good blaze.');
   }
 
   return { speaker: 'Berry Bramblemaid', pages, portrait: 'portrait.berry' };
@@ -154,7 +154,7 @@ export function wellspringOutro(streak: number): Conversation {
   return {
     speaker: 'The Wellspring',
     pages: [
-      `The waters still. Your streak stands ${plural(streak, 'night')} tall, and a small bounty glimmers in the shallows.`,
+      `The waters still. Your hearth still burns ${plural(streak, 'night')} tall, and a small bounty glimmers in the shallows.`,
     ],
   };
 }

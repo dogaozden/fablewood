@@ -914,15 +914,20 @@ export class CombatScene extends Phaser.Scene {
 
   private beginPlayerTurn(unit: UnitState): void {
     this.state = 'playerMove';
+    // Final review C1 — `carefulStepOn` is scene-wide (not per-unit) and `endPlayerTurn` never
+    // clears it, so it must be reset here BEFORE either `moveBudgetFor` call below, not after:
+    // reading it stale for the budget while the move field (built from the same method) reads
+    // it fresh left a turn silently halved while the highlighted range promised the full one.
+    this.carefulStepOn = false;
     this.budget = mkTurnBudget(this.moveBudgetFor(unit));
     this.pendingAction = null;
     this.pendingSpell = null;
     this.overglowOn = false;
-    this.carefulStepOn = false;
     this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — the HUD's Move N/M readout starts each turn in sync.
     this.showMenu(unit);
     this.hud.showBanner(`${unit.name}'s turn — move, then act.`, P.parchment);
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
@@ -966,20 +971,29 @@ export class CombatScene extends Phaser.Scene {
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — the toggle re-anchored total/left; keep Move N/M in sync.
     this.hud.showBanner(
       this.carefulStepOn ? 'Careful Step: half move, no opportunity strikes.' : 'Careful Step off.',
       this.carefulStepOn ? P.waterLight : P.parchment,
     );
   }
 
-  /** Ch. VI — Press On: forgo the action for +moveBudgetFor(u) (stance-aware — halved under
-   *  Careful Step, same grant the turn started with, so two halves recombine toward the full
-   *  base move; see the turnBudget.test.ts compose-law pin). Reuses returnToActionMenu's own
-   *  "recompute the move field off budget.left, then reshow the menu" idiom — Press On spends
-   *  the action exactly like the five gated action handlers, just with no delayedCall
-   *  presentation beat (nothing here can fell anyone, so there's no checkEnd to run first). */
+  /** Ch. VI — Press On: forgo the action for +effectiveMove, composed as ONE halving over the
+   *  COMBINED (raw, un-halved) total under Careful Step (final review C2 — the chapter's named
+   *  identity "Careful Step + Press On = normal distance" must hold at every effectiveMove,
+   *  including odd ones under Dimmed; see the turnBudget.test.ts compose-law pin). `this.budget
+   *  .total` always equals `moveBudgetFor(unit)` at this point (nothing else touches `total`
+   *  except a toggle, which re-syncs it) — the bonus granted is the gap between the correct
+   *  combined target and whatever's already there, so `grantPressOn` still just adds a number.
+   *  Reuses returnToActionMenu's own "recompute the move field off budget.left, then reshow the
+   *  menu" idiom — Press On spends the action exactly like the five gated action handlers, just
+   *  with no delayedCall presentation beat (nothing here can fell anyone, so there's no checkEnd
+   *  to run first). */
   private pressOn(unit: UnitState): void {
-    this.budget = grantPressOn(this.budget, this.moveBudgetFor(unit));
+    const eff = effectiveMove(unit.move, unit.statuses);
+    const combined = this.carefulStepOn ? carefulStepMove(eff + eff) : eff + eff;
+    const bonus = combined - this.budget.total;
+    this.budget = grantPressOn(this.budget, bonus);
     this.hud.showBanner('You press on — the road stretches further.', P.lanternGold);
     this.returnToActionMenu(unit);
   }
@@ -1112,7 +1126,10 @@ export class CombatScene extends Phaser.Scene {
   private onPickAction(unit: UnitState, action: ActionKind): void {
     if (this.state !== 'playerMove' && this.state !== 'playerTarget') return;
     if (unit.id !== this.activeId) return;
-    if (action === 'wait') { this.hud.showBanner('Holding position.', P.stoneGrey); this.endPlayerTurn(); return; }
+    // Final review M1 — T5's Wait→"End Turn" relabel covered the button's label and blurb, not
+    // this banner; the pilot's own fallback (autoStep, below) correctly keeps "Holding
+    // position." — that line is still true for the demo pilot's own no-target wait.
+    if (action === 'wait') { this.hud.showBanner('Done — the round moves on.', P.stoneGrey); this.endPlayerTurn(); return; }
     // Ch. VI — the SAME gate showMenu's `enabled` computation applies, re-checked here since a
     // keydown fires regardless of what's currently rendered and must not bypass a greyed button.
     if (this.budget.actionSpent) return;
@@ -1432,6 +1449,7 @@ export class CombatScene extends Phaser.Scene {
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();
+      this.refreshParty(); // Ch. VI I1 — the leg just spent; keep Move N/M in sync.
       this.showMenu(unit);
       this.hud.showBanner('Moved. Choose an action.', P.parchment);
       if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
@@ -2223,6 +2241,7 @@ export class CombatScene extends Phaser.Scene {
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
+    this.refreshParty(); // Ch. VI I1 — covers Press On, the six gated handlers, and Satchel's early-returns.
     this.showMenu(unit);
   }
 
@@ -3444,6 +3463,11 @@ export class CombatScene extends Phaser.Scene {
       streak,
       glow: this.glow.pips,
       lanternLight,
+      // Final review I1 — the active unit's own turn budget (whatever it currently is; blank
+      // outside a player turn is not worth special-casing, same "cheap, always-on" spirit as
+      // Vigil/Solace beside it).
+      moveLeft: this.budget.left,
+      moveTotal: this.budget.total,
     });
   }
 
@@ -3567,6 +3591,9 @@ export class CombatScene extends Phaser.Scene {
     /** Ch. VI — the active unit's live turn budget (e2e-only; the scene has no other window
      *  into spendable-movement state for a test to poll). */
     budget: TurnBudget;
+    /** Ch. VI — direct read of the Careful Step stance flag (e2e-only; before this, a test
+     *  could only infer it indirectly through budget arithmetic). */
+    carefulStepOn: boolean;
   } {
     return {
       state: this.state,
@@ -3576,6 +3603,7 @@ export class CombatScene extends Phaser.Scene {
       partyHp: this.units.filter((u) => u.team === 'party').reduce((s, u) => s + Math.max(0, u.hp), 0),
       log: this.actionLog.slice(),
       budget: this.budget,
+      carefulStepOn: this.carefulStepOn,
       // Wave 4 — this field reports the MASTERY rank (the SRS welds, with ?rank= still absolute
       // over it, exactly the value it carried before levels existed). `this.rank` is now the
       // COMPOSED gate; progressionSnapshot().composedTier reports that half. leveling.spec.ts's

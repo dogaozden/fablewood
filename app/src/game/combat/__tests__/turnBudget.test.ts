@@ -102,32 +102,57 @@ describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remaind
   });
 });
 
-describe('Ch. VI compose law — Careful Step total + Press On bonus, ONE halving per grant', () => {
-  // Task 3: CombatScene's Press On dispatch is `grantPressOn(this.budget, this.moveBudgetFor(u))`
-  // — moveBudgetFor re-reads the CURRENT Careful Step stance and, when on, halves via
-  // carefulStepMove exactly like the turn-start `mkTurnBudget(this.moveBudgetFor(u))` grant did.
-  // "ONE halving" means each grant is halved independently and the two are then SUMMED — never
-  // the other way around (summing the two un-halved bases first, then halving once).
-  it('a Careful Step turn-start total and a same-stance Press On bonus are each halved independently, not re-normalized as a single halving of their combined base', () => {
-    const base = 5; // odd — the two composition orders below only diverge for an odd base
-    const turnStart = mkTurnBudget(carefulStepMove(base)); // turn start under Careful Step: floor(5/2)=2
-    const withPressOn = grantPressOn(turnStart, carefulStepMove(base)); // Press On bonus: ALSO carefulStepMove(base)
-    expect(turnStart.total).toBe(2);
-    expect(withPressOn.total).toBe(4); // 2 + 2 — two independent single-halvings, summed
-    // The anti-pattern this pins against: halving the COMBINED (doubled) base ONCE instead of
-    // halving each grant on its own. For an odd base these genuinely disagree (4 vs 5) — proof
-    // the composition must halve per-grant.
-    expect(carefulStepMove(base + base)).toBe(5);
-    expect(withPressOn.total).not.toBe(carefulStepMove(base + base));
+describe('Ch. VI compose law — Careful Step + Press On, ONE halving over the COMBINED total (final review C2)', () => {
+  // Final-review C2 (controller-adjudicated; plan amended on master c1df4c9) OVERTURNS Task 3's
+  // original reading, pinned just above this describe block's old form (see git history — that
+  // test asserted "each grant halved independently, then summed" and explicitly guarded AGAINST
+  // this exact formula). The ratified chapter names an identity: "Careful Step + Press On =
+  // normal distance." That identity only holds if the COMBINED raw (un-halved) base is halved
+  // ONCE — halving each grant independently and summing loses a tile whenever effectiveMove is
+  // odd (both formulas agree when it's even, which is why the bug shipped unnoticed: Keeper's
+  // un-Dimmed move is 4). Live case (final-review C1's own example): a wraith's Dimmed(1) drops
+  // effectiveMove from 4 to 3.
+  it('a Careful Step turn-start total and a same-stance Press On bonus compose as ONE halving over their combined raw effectiveMove', () => {
+    const eff = 3; // odd, and the exact live Dimmed value the review named
+    const turnStart = mkTurnBudget(carefulStepMove(eff)); // turn start under Careful Step: floor(3/2)=1
+    const combined = carefulStepMove(eff + eff); // the LAW: one halving over the combined base: floor(6/2)=3
+    expect(turnStart.total).toBe(1);
+    expect(combined, "the chapter's identity — Careful Step + Press On lands back on normal (un-halved) distance").toBe(eff);
+
+    // This is the exact bonus CombatScene.pressOn() must grant: the gap between the combined
+    // (correct) total and whatever the budget already carries.
+    const bonus = combined - turnStart.total; // 3 - 1 = 2
+    const withPressOn = grantPressOn(turnStart, bonus);
+    expect(withPressOn.total).toBe(3);
+
+    // The anti-pattern this now guards against: Task 3's original formula — two INDEPENDENT
+    // single-halvings, summed (`grantPressOn(turnStart, carefulStepMove(eff))`). For this odd
+    // base the two readings genuinely disagree (3 vs 2) — proof the composition must halve the
+    // combined base, not each grant on its own.
+    const overturnedAntiPattern = grantPressOn(turnStart, carefulStepMove(eff));
+    expect(overturnedAntiPattern.total).toBe(2);
+    expect(withPressOn.total).not.toBe(overturnedAntiPattern.total);
   });
 
-  it('Press On consumes the action and extends both total and left off whatever the budget already had (move-after-act law still holds under Careful Step)', () => {
-    const base = 5;
-    const afterLeg = spendLeg(mkTurnBudget(carefulStepMove(base)), 1); // total=2, left=1, legSpent=true
-    const b = grantPressOn(afterLeg, carefulStepMove(base)); // +2 bonus
-    expect(b.total).toBe(4);
-    expect(b.left).toBe(3); // 1 remaining + 2 bonus, not refilled to the new total
+  it('an even effectiveMove: both composition orders happen to agree — why C2 shipped unnoticed', () => {
+    const eff = 4; // Keeper's un-Dimmed base move
+    const combined = carefulStepMove(eff + eff); // floor(8/2) = 4
+    const independentHalvingsSummed = carefulStepMove(eff) + carefulStepMove(eff); // 2 + 2 = 4
+    expect(combined).toBe(4);
+    expect(independentHalvingsSummed).toBe(4);
+    expect(combined).toBe(independentHalvingsSummed); // no divergence when eff is even
+  });
+
+  it('Press On still consumes the action and extends both total and left off whatever the budget already had (move-after-act law still holds under Careful Step)', () => {
+    const eff = 3;
+    const turnStart = mkTurnBudget(carefulStepMove(eff)); // total=1
+    const afterLeg = spendLeg(turnStart, 1); // left floors to 0 (only 1 tile was ever there), legSpent=true
+    const combined = carefulStepMove(eff + eff); // 3
+    const bonus = combined - afterLeg.total; // total is untouched by spendLeg: 3 - 1 = 2
+    const b = grantPressOn(afterLeg, bonus);
+    expect(b.total).toBe(3);
+    expect(b.left).toBe(2); // 0 remaining + 2 bonus, not refilled to the new total
     expect(b.actionSpent).toBe(true);
-    expect(turnExhausted(b)).toBe(false); // action spent, but 3 tiles are still banked
+    expect(turnExhausted(b)).toBe(false); // action spent, but 2 tiles are still banked
   });
 });

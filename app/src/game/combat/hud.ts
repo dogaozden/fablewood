@@ -37,6 +37,10 @@ export interface PartyStatus {
   /** Ch. IV — Lantern-light held (Concordance): the HUD glyph beside the streak count is
    *  lit when true, guttered when false. Additive to the existing status shape. */
   lanternLight: boolean;
+  /** Final review I1 — Ch. VI's ratified HUD readout ("the HUD shows the remainder ('Move
+   *  3/5') beside the action menu"): the ACTIVE unit's own turn budget. */
+  moveLeft: number;
+  moveTotal: number;
 }
 
 /** §12.2 — one row of the tier flyout. */
@@ -292,6 +296,8 @@ export class CombatHud {
     if (keeper) lines.push(`Keeper  ${bar(keeper)} ${keeper.hp}/${keeper.maxHp}`);
     if (mira) lines.push(`Mira    ${bar(mira)} ${mira.hp}/${mira.maxHp}`);
     lines.push(status.miraBonusActive ? 'Mira: fighting fiercer (mastery)' : 'Mira: no bonus yet');
+    // Final review I1 — chapter's exact quoted format: "Move 3/5" (remainder/total, no colon).
+    lines.push(`Move ${status.moveLeft}/${status.moveTotal}`);
     lines.push(`Vigil: ${status.streak}`);
     lines.push(`Solace: ${status.graceAvailable ? 'ready' : 'spent'}`);
     this.panelText.setText(lines.join('\n'));

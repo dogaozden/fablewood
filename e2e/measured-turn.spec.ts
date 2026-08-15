@@ -14,6 +14,7 @@ type Snap = {
   activeId: string;
   log: Array<{ action: string; dmg: number; overlay: boolean }>;
   budget: Budget;
+  carefulStepOn: boolean;
 } | null;
 
 /** Read the combat scene's DEV debug snapshot (mirrors combat.spec.ts's own snap()). */
@@ -65,6 +66,18 @@ async function actionMenuDebug(page: Page): Promise<Array<{ label: string; hint:
       | { actionMenuDebug?(): Array<{ label: string; hint: string }> }
       | undefined;
     return s?.actionMenuDebug?.() ?? [];
+  });
+}
+
+/** The party panel's rendered raw text (e2e-only CombatScene.hudPartyText, wrapping
+ *  CombatHud.partyPanelText — unmodified by this task; same debug surface crucible #10's own
+ *  drift specs already use). Final review I1 — the chapter's "Move N/M" remainder readout
+ *  lives here. */
+async function partyPanelText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { hudPartyText?(): string } | undefined;
+    return s?.hudPartyText?.() ?? '';
   });
 }
 
@@ -211,6 +224,12 @@ test('measured turn: move, Strike, the turn stays open, move again, then End Tur
   const leftAfterMove1 = afterMove1.budget.left;
   expect(leftAfterMove1, 'budget remains after a partial move').toBeGreaterThan(0);
 
+  // Final review I1 — the chapter's ratified HUD readout ("the HUD shows the remainder
+  // ('Move 3/5') beside the action menu") lives in the party panel text.
+  expect(await partyPanelText(page), 'the party panel shows the move remainder in the chapter\'s "Move N/M" format').toContain(
+    `Move ${leftAfterMove1}/${afterMove1.budget.total}`,
+  );
+
   // --- Strike wisp-0 (now adjacent at (6,4)).
   await page.keyboard.press('1'); // Strike hotkey (ACTIONS.strike)
   await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
@@ -267,14 +286,27 @@ test('measured turn: move, Strike, the turn stays open, move again, then End Tur
 // review asked for the lock predicate to be `budget.legSpent` directly instead of a second
 // mirrored field. Proves the guard survives that collapse: once a leg is spent, a second toggle
 // attempt is a silent no-op — no stance flip, no budget re-anchor (which would otherwise
-// un-halve the total and silently refund the already-spent leg).
+// un-halve the total and silently refund the already-spent leg). Extended (final review) with a
+// turn-boundary check (C1) and a live Careful-Step-under-Dimmed Press On check (C2) — both need
+// a second turn/round, hence the longer timeout and the passUntilKeeper round-cycle below.
 test('measured turn: Careful Step locks after the first leg — a second toggle is rejected', async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   await page.goto('/?scene=combat&seed=7');
   await waitReady(page, 'combat');
   await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn to open");
 
-  await setPos(page, 'wisp-0', 6, 4);
+  // The extension below (final review C1/C2) needs a clean turn boundary with nothing else able
+  // to touch Keeper's or Mira's statuses — a live enemy landing an unrelated hit (e.g. a
+  // wraith's own Dimmed) would contaminate the effectiveMove-driven assertions below with a
+  // confound that has nothing to do with either bug. wisp-0 and wraith-2 (the ranged threat) die
+  // at their OWN turn-start tick, before ever acting (same lethal-Kindled technique scenario b2
+  // uses); wisp-1 is exiled to the far corner (checkEnd needs at least one living enemy, or the
+  // battle resolves outright mid-test) — melee-only (range 1) and 9+ tiles away, it cannot close
+  // the distance in the one enemy turn this scenario spans.
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2);
+  await applyStatus(page, 'wraith-2', 'kindled', 1, 3);
+  await setPos(page, 'wisp-1', 11, 7);
+
   await setPos(page, 'keeper', 4, 4);
   const fresh = await snap(page);
   expect(fresh?.budget.total, "Keeper's fresh, un-halved move budget").toBe(4);
@@ -301,6 +333,53 @@ test('measured turn: Careful Step locks after the first leg — a second toggle 
   expect(rejected?.budget.total, 'a rejected toggle must not re-anchor the total back up').toBe(2);
   expect(rejected?.budget.left, 'a rejected toggle must not touch the remaining movement either').toBe(1);
   expect(rejected?.budget.legSpent, 'still locked').toBe(true);
+
+  // Final review C1 — `carefulStepOn` is a single SCENE-WIDE flag, not per-unit, and
+  // beginPlayerTurn built the budget (moveBudgetFor, reading carefulStepOn) BEFORE clearing it.
+  // So the leak isn't "the same unit's next turn" — it's the very NEXT beginPlayerTurn call,
+  // whoever that belongs to. That's Mira's turn here (enemy turns never call beginPlayerTurn, so
+  // they can't clear or launder the stale flag): checking Keeper's own following turn would be
+  // a weaker proof, since Mira's turn in between ALSO reads-then-clears the same flag as an
+  // unwitting side effect, silently healing the bug before Keeper ever sees it again. Mira's
+  // base move (4, same as Keeper's) makes this a byte-identical assertion.
+  await page.keyboard.press('7'); // End Turn
+  const mirasTurn = await waitForSnap(page, (s) => s?.activeId === 'mira' && s?.state === 'playerMove', "Mira's turn to open");
+  expect(mirasTurn.budget.total, "C1: Mira's turn must NOT inherit the previous turn's halved stance").toBe(4);
+  expect(mirasTurn.budget.left, 'left must match the full total, not a stale halved one').toBe(4);
+
+  // Advance through Mira's turn and the sole (exiled, harmless) survivor's turn until the
+  // Keeper's own turn opens again, for the C2 check below.
+  await page.keyboard.press('7');
+  const round2 = await passUntilKeeper(page, () => true, "round 2 — the Keeper's own turn again");
+  expect(round2.budget.total, "round 2 also opens un-halved (carefulStepOn was cleared by Mira's turn above)").toBe(4);
+  expect(round2.carefulStepOn, 'and the stance flag itself reads false, not just the derived total').toBe(false);
+  // Let the round-cycle's own keydown traffic (passUntilKeeper's polled '7' presses) fully drain
+  // before sending more input — Phaser's keyboard plugin can otherwise coalesce/replay a rapid
+  // trailing keypress against a still-settling prior one (an input-timing artifact, not a game
+  // bug: confirmed by direct experiment — instrumenting the keydown handler showed a genuine
+  // extra 'c' keydown appearing on its own after the real one, with no source in this test).
+  await page.waitForTimeout(400);
+
+  // Final review C2 — Press On under Careful Step must halve the COMBINED total ONCE, not halve
+  // each grant independently and sum. Live case straight from the review: a wraith's Dimmed(1)
+  // drops Keeper's effectiveMove from 4 to 3 (status.ts's floor). The chapter's own identity
+  // ("Careful Step + Press On = normal distance") demands the dimmed Keeper land back on 3 — not
+  // the 2 the old per-grant-halving formula produced.
+  await applyStatus(page, 'keeper', 'dimmed', 1, 1);
+  await page.keyboard.press('c'); // Careful Step on — carefulStepMove(3) = 1
+  const dimmedCS = await waitForSnap(page, (s) => (s?.budget.total ?? -1) === 1, 'Careful Step to halve the dimmed effectiveMove (3) down to 1');
+  expect(dimmedCS.budget.legSpent, 'toggling alone spends no leg').toBe(false);
+  expect(dimmedCS.carefulStepOn, 'the stance flag itself is on, not just the derived total').toBe(true);
+  await page.waitForTimeout(400); // let this keydown fully settle before the next one
+
+  await page.keyboard.press('8'); // Press On
+  const dimmedPressOn = await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'Press On to fire');
+  expect(dimmedPressOn.carefulStepOn, 'Press On must not have seen the stance flip back off').toBe(true);
+  expect(
+    dimmedPressOn.budget.total,
+    'C2: one halving over the COMBINED total (3+3=6, halved once = 3 — the chapter\'s "normal distance") — NOT two independent halvings summed (1+1=2)',
+  ).toBe(3);
+  expect(dimmedPressOn.budget.left, 'left matches the corrected total').toBe(3);
 });
 
 // Ch. VI Task 3, scenario b (part 2) — Press On (hotkey '8') forgoes the action for
