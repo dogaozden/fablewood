@@ -42,15 +42,23 @@ async function waitForKeeperTurn(page: Page, timeout = 20_000): Promise<Snap> {
 }
 
 /** The exact inner-width budget hud.ts's fix clamps text to: label/hint both start at local x
- *  `-bw/2+40` and stop 6px short of the button's right edge (`bw/2-6`) — availW = bw-46.
+ *  `-bw/2+36` and stop 4px short of the button's right edge (`bw/2-4`) — availW = bw-40
+ *  (hud.ts:245-248's "Task 5" icon/text-split tightening for the 10-button row; this pin was
+ *  `-bw/2+40`/`bw/2-6`/bw-46 before that and went stale the same way the 8-button count did).
  *  A small epsilon tolerates Phaser's own sub-pixel text-metric rounding. */
 function fitsButton(widthPx: number, buttonWidth: number): boolean {
-  return widthPx <= buttonWidth - 46 + 0.5;
+  return widthPx <= buttonWidth - 40 + 0.5;
 }
 
 async function checkMenuFits(page: Page): Promise<MenuItem[]> {
   const items = await actionMenuDebug(page);
-  expect(items.length, 'all 8 ActionKinds render as buttons (post-Satchel row)').toBe(8);
+  // Step 0b (T5 discovery): T3/T4 grew the row from 8 to 10 (Careful Step/Press On, then
+  // Brace) — pin the count AND the three new labels by exact text, so this stays a
+  // composition guard (proof the whole row rendered) instead of a bare, meaningless number.
+  expect(items.length, 'all 10 ActionKinds render as buttons (post-Brace row)').toBe(10);
+  for (const label of ['End Turn', 'Press On', 'Brace']) {
+    expect(items.some((i) => i.label === label), `"${label}" renders among the action buttons`).toBe(true);
+  }
   for (const item of items) {
     expect(fitsButton(item.labelWidth, item.buttonWidth), `label "${item.label}" (${item.labelWidth}px) must fit its ${item.buttonWidth}px button`).toBe(true);
     expect(fitsButton(item.hintWidth, item.buttonWidth), `hint "${item.hint}" (${item.hintWidth}px) must fit its ${item.buttonWidth}px button`).toBe(true);
