@@ -65,7 +65,8 @@ import { maxHpForLevel, strikeBonusForLevel, tierForLevel } from '../progression
 import { reclaimedFactIds } from '../../srs/redemption';
 import { mulberry32, layoutSeed } from './rng';
 import { partitionByRecency, seededShuffle } from '../recency';
-import { DIFFICULTY_DEFS, difficultyPolicyGlyph } from '../encounters/engine';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph, previewPick } from '../encounters/engine';
+import { FIXTURE_PACK } from '../encounters/fixtures';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
 
@@ -1597,7 +1598,17 @@ export class CombatScene extends Phaser.Scene {
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
         // own drawn pool minus what was shown; the census never moves (no new draw).
-        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        let plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+          // encounter fallback the narrowed factIds never touch): preview the would-be
+          // re-present BEFORE spending, and fall back to fate-holds if nothing would change.
+          const wouldBe = previewPick(
+            { context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1 },
+            await this.previewPackPool(),
+          );
+          if (wouldBe === result.encounterId) plan = { consume: false, factIds };
+        }
         if (plan.consume) {
           await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
           this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
@@ -1760,7 +1771,20 @@ export class CombatScene extends Phaser.Scene {
       if (result.redraw) {
         // Sentinel: nothing was judged (Global Constraint 5) — re-present from the round's
         // own drawn pool minus what was shown; the census never moves (no new draw).
-        const plan = planRedraw(result.redraw.shownFactIds, factIds);
+        let plan = planRedraw(result.redraw.shownFactIds, factIds);
+        if (plan.consume) {
+          // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+          // encounter fallback the narrowed factIds never touch): preview the would-be
+          // re-present BEFORE spending, and fall back to fate-holds if nothing would change.
+          const wouldBe = previewPick(
+            {
+              context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
+              seed: roundSeed, flair: spell.label, spellTier: spell.tier,
+            },
+            await this.previewPackPool(),
+          );
+          if (wouldBe === result.encounterId) plan = { consume: false, factIds };
+        }
         if (plan.consume) {
           await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
           this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
@@ -2958,6 +2982,15 @@ export class CombatScene extends Phaser.Scene {
     let due: string[] = [];
     try { due = services.srs.dueQueue(this.launch.packId, arr); } catch { due = []; }
     return due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
+  }
+
+  /** M3 — packs for previewPick's would-be resolution check, mirroring encounters/register.ts's
+   *  own packless→FIXTURE_PACK fallback exactly, so the preview resolves against the SAME pool
+   *  a real re-present runEncounter call would. getPacks() is the bridge fetch (bridge/client),
+   *  not services.draw — the guard stays outside the draw census (Global Constraint 3). */
+  private async previewPackPool(): Promise<Pack[]> {
+    const { packs } = await getPacks();
+    return packs.length ? packs.map((p) => p.pack as Pack) : [FIXTURE_PACK];
   }
 
   /** §4 suspension filter, tolerant of a stub/offline amendments service. */

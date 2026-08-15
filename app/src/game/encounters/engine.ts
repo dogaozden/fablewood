@@ -142,6 +142,23 @@ export function pick(
   return all[0];
 }
 
+/**
+ * Ch. VI M3 — the re-present guard's pure core: what WOULD pick() choose for a would-be
+ * re-present request, without drawing (reuses pick()'s own resolution verbatim; zero
+ * draw-census impact — Global Constraint 3, "previewPick is a pure engine export, NOT a
+ * draw"). Callers compare the returned id to the original result's encounterId: equal means
+ * the remainder would only re-surface the SAME encounter (e.g. a single-encounter fallback
+ * the narrowed factIds never touch), so the caller should take the fate-holds path instead of
+ * spending the lantern on a redraw that would change nothing.
+ */
+export function previewPick(
+  req: EncounterRequest,
+  packs: Pack[],
+  encountersOf?: (factId: string) => Encounter[],
+): string | null {
+  return pick(req, packs, encountersOf)?.id ?? null;
+}
+
 // --- reskin ------------------------------------------------------------------
 
 /** Replace {{var}} tokens in a single string. Unknown vars are left verbatim. */

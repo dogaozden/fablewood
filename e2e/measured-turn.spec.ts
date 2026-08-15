@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, canvasClick, readState } from './helpers';
+import { waitReady, canvasClick, readState, waitForState } from './helpers';
 
 /** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 (the formula every combat spec uses). */
 const CELL = 48;
@@ -156,6 +156,25 @@ async function passUntilKeeper(
     await page.waitForTimeout(150);
   }
   throw new Error(`measured-turn: timed out waiting for "${label}"; last snapshot=${JSON.stringify(last)}`);
+}
+
+/** The real (non-fixture) room's layout is generated per seed/room id — unlike the packless
+ *  fixture's proven-safe (5,3)/(6,3), it can't be hardcoded. Scan for a horizontally-adjacent
+ *  non-wall pair instead (lantern-light.spec.ts's own brazier-adjacency idiom, ported verbatim —
+ *  own-file convention). Scenario e below is the only one in this file that needs a real launch. */
+async function findAdjacentFloorPair(page: Page): Promise<[{ c: number; r: number }, { c: number; r: number }]> {
+  const layout = await page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { layoutDebug?(): { tiles: string[][] } } | undefined;
+    return s?.layoutDebug?.() ?? null;
+  });
+  const tiles = layout?.tiles ?? [];
+  for (let r = 0; r < tiles.length; r++) {
+    for (let c = 0; c < (tiles[r]?.length ?? 0) - 1; c++) {
+      if (tiles[r][c] !== 'wall' && tiles[r][c + 1] !== 'wall') return [{ c, r }, { c: c + 1, r }];
+    }
+  }
+  throw new Error('no adjacent floor pair found in the room layout');
 }
 
 // Ch. VI, "move -> act -> move the remainder": one resolved action no longer ends the Keeper's
@@ -545,5 +564,157 @@ test('measured turn: lantern-light disarm ignores match chips but fires on Seal 
     await page.request.put('/api/state/save.json', {
       data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
     });
+  }
+});
+
+// W5-backlog M3, scenario (e) — the previewPick re-present guard (engine.ts). planRedraw's own
+// check ("any fact ids left in the pool after removing the shown one?") is naive: it says
+// consume whenever the remainder is non-empty, even when EVERY remaining fact would still
+// resolve back to the identical fallback encounter (pick()'s candidates[0] — position-
+// independent of which fact ids are passed). previewPick reuses pick()'s own resolution to
+// catch that case and route to fate-holds instead of spending the light for nothing.
+//
+// Root-cause note (mirrors lantern-light.spec.ts's own file note for the identical reason): the
+// packless `?scene=combat` launch always forces FIXTURE_PACK_ID, which combatDrawReady()
+// deliberately reads as drawGlobal=false with an empty fact pool (no installed pack matches
+// 'dev-mosslore') — so planRedraw's remainder is trivially [] before previewPick ever runs, and
+// this scenario could never be observed there. It needs a REAL combat launch, same
+// vaults→room.threshold route as lantern-light.spec.ts's own mcq scenario.
+//
+// srs.json fixture: services.draw.fresh() (kind-blind, prereq-clear, unseen) is the ONLY tier
+// that can produce a mixed-eligibility pool — due() pre-filters by kind (draw/index.ts), so
+// every fact it returns already has a matching encounter; only fresh() can hand back a pool
+// where most facts DON'T. Rather than lean on the pack's natural declaration order (fragile: an
+// earlier version of this fixture marked just one vesting fact already-seen to remove it from
+// the pool, but that fact turned out to be a PREREQ for two others — cliff-definition and
+// single-vs-double-trigger-acceleration, both mcq — so marking it seen UNLOCKED them into the
+// pool instead of shrinking it, and the guard correctly declined to fire against a genuinely
+// different question), mark EVERY vc-law fact already-seen EXCEPT three hand-picked ones. That
+// closes off cascades entirely: the draw pool is bounded by what's unseen, and nothing outside
+// the three targets is, regardless of anyone's prereqs. The three: economics-vs-control and
+// preferred-vs-common (no mcq encounter, prereqs: []) and pre-vs-post-money (mcq, via
+// enc.mcq.pre-post-money — ALSO candidates[0], the pack's first mcq-kind encounter; prereqs:
+// []). The due queue matches pre-vs-post-money directly on the original draw; after planRedraw
+// strips it, the remaining two (mcq-blind) match nothing, so the remainder falls through to the
+// SAME candidates[0].
+const ALREADY_SEEN_VC_LAW_FACT_IDS = [
+  'vc.econ.valuation.pre-post-ambiguity-trap', 'vc.econ.valuation.clarify-pre-money-presumptively',
+  'vc.econ.valuation.fully-diluted', 'vc.econ.optionpool.comes-from-premoney',
+  'vc.econ.optionpool.typical-range-10-to-20', 'vc.econ.optionpool.negotiate-with-option-budget',
+  'vc.econ.valuation.competition-raises-price', 'vc.econ.liqpref.definition',
+  'vc.econ.liqpref.preference-plus-participation', 'vc.econ.liqpref.1x-multiple-standard',
+  'vc.econ.liqpref.2001-bubble-10x', 'vc.econ.liqpref.conversion-ratio',
+  'vc.econ.liqpref.nonparticipating', 'vc.econ.liqpref.nonparticipating-head-fake',
+  'vc.econ.liqpref.full-participation', 'vc.econ.liqpref.capped-participation',
+  'vc.econ.liqpref.participation-cap-multiple-meaning', 'vc.econ.liqpref.stacked-vs-pari-passu',
+  'vc.econ.liqpref.keep-simple-in-early-rounds', 'vc.econ.liqpref.liquidation-event-definition',
+  'vc.econ.paytoplay.definition', 'vc.econ.paytoplay.reduces-liqpref-for-nonparticipants',
+  'vc.econ.paytoplay.ubiquitous-after-dotcom', 'vc.econ.paytoplay.watch-forced-recapitalization',
+  'vc.econ.vesting.four-year-one-year-cliff', 'vc.econ.vesting.cliff-definition',
+  'vc.econ.vesting.single-vs-double-trigger-acceleration', 'vc.econ.antidilution.purpose',
+  'vc.econ.antidilution.full-ratchet', 'vc.econ.antidilution.weighted-average',
+  'vc.econ.antidilution.broad-vs-narrow-weighted-average', 'vc.econ.antidilution.dont-fight-to-eliminate',
+  'vc.econ.convdebt.definition', 'vc.econ.convdebt.discount-range-10-to-30',
+  'vc.econ.convdebt.valuation-cap', 'vc.econ.convdebt.address-acquisition-in-docs',
+  'vc.econ.captable.definition', 'vc.econ.captable.pool-dilutes-founders',
+  'vc.econ.overview.dec-doriot-first-term-sheet',
+];
+
+test('measured turn: raising the lantern on a cast whose remainder still resolves to the SAME encounter holds fate instead of spending (M3)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<Record<string, unknown>>(page, 'save.json');
+  const beforeSrs = await readState<Record<string, unknown>>(page, 'srs.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    const farFuture = Date.now() + 365 * 86_400_000;
+    const seededFacts: Record<string, { box: number; next_due: number; history: unknown[] }> = {};
+    for (const id of ALREADY_SEEN_VC_LAW_FACT_IDS) seededFacts[id] = { box: 5, next_due: farFuture, history: [] };
+    await page.request.put('/api/state/srs.json', {
+      data: { version: 1, facts: seededFacts },
+    });
+
+    // Direct-to-vaults boot — real vc-law pack (lantern-light.spec.ts's own route: chain.spec.ts
+    // / trim-the-lantern.spec.ts / vault-hover.spec.ts all use it too). rank=1 so Smite goes
+    // straight to targeting (no T2/T3 flyout — this scenario only needs the T1 direct branch;
+    // castGatedSpell's own guard insertion is byte-identical and covered by the unit suite).
+    await page.goto('/?scene=vaults&seed=7&rank=1');
+    await waitReady(page, 'vaults');
+
+    // Enter room.threshold ("The Threshold Ledger") — same node/blurb coordinates as
+    // lantern-light.spec.ts's own mcq scenario for this seed's map layout.
+    await canvasClick(page, 225, 300); // green current-room node
+    await page.waitForTimeout(500);
+    await canvasClick(page, 478, 365); // dismiss the blurb ("Descend")
+    await expect(page.locator('.fw-doc'), 'discovered-documents teaching shown').toBeVisible({ timeout: 8000 });
+
+    const tbtn = page.locator('.fw-footer .fw-btn-primary');
+    for (let i = 0; i < 8; i++) {
+      const label = await tbtn.innerText();
+      await tbtn.click();
+      if (label.includes('Close')) break;
+      await page.waitForTimeout(140);
+    }
+
+    await page.waitForFunction(() => (window as Window).__FABLEWOOD_STATE?.scene === 'combat', undefined, {
+      timeout: 15_000,
+    });
+    await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's first turn to open");
+
+    const [keeperTile, targetTile] = await findAdjacentFloorPair(page);
+    await setPos(page, 'keeper', keeperTile.c, keeperTile.r);
+    await setPos(page, 'wisp-0', targetTile.c, targetTile.r); // room.threshold's first enemy
+
+    await page.keyboard.press('2'); // Smite (T1 Kindling, mcq — ACTIONS.smite)
+    await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling
+    await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Smite targeting to open');
+    await canvasClick(page, tileXY(targetTile.c, targetTile.r).x, tileXY(targetTile.c, targetTile.r).y);
+
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+    const firstPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+
+    await page.locator('.fw-lantern-btn').click();
+
+    // Settle: the old overlay closes, the guard runs BETWEEN planRedraw and the consume save,
+    // then a fresh runEncounter re-presents. Both branches (consume or fate-holds) pass
+    // lanternLight:false to the re-present request, so the strip disappears either way — this
+    // is the settle signal, not the regression check itself (that's assert 1 below).
+    await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+    await expect(page.locator('.fw-overlay')).toBeVisible();
+    await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+
+    // assert 1: previewPick caught the identical fallback — the SAME question re-presents.
+    const secondPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+    expect(secondPrompt, 'M3: the remainder resolves to the same encounter, so the SAME question re-presents').toBe(firstPrompt);
+
+    // assert 2: the fate-holds notice line rendered (verbatim copy — lantern.ts's FATE_HOLDS_LINE).
+    await expect(
+      page.locator('.fw-notice'),
+      'the fate-holds notice line is shown',
+    ).toHaveText('The lantern flickers — fate holds this memory fast. Your light is not spent.');
+
+    // assert 3 (persistence law): the light was never spent — the guard skips the consume save
+    // entirely, it doesn't just delay it, so this is already true by the time the overlay
+    // resettled above; waitForState still polls (Global Constraint 4 / M3's whole point).
+    await waitForState<{ lanternLight?: boolean }>(page, 'save.json', (s) => s?.lanternLight === true, 5000);
+
+    // answer the re-presented question so the battle continues cleanly.
+    await page.locator('.fw-opt').first().click();
+    const onward2 = page.getByRole('button', { name: 'Onward ▸' });
+    try {
+      await onward2.waitFor({ state: 'visible', timeout: 1500 });
+      await onward2.click();
+    } catch { /* correct answer auto-resolves without a continue button (kinds.ts renderMcq) */ }
+    await page.locator('.fw-overlay').waitFor({ state: 'detached', timeout: 10_000 });
+  } finally {
+    await page.request.put('/api/state/save.json', {
+      data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DIFFICULTY_DEFS, difficultyPolicyGlyph, pick, reskin, scoreMatch, scoreOrder, stampDifficulty } from '../engine';
+import { DIFFICULTY_DEFS, difficultyPolicyGlyph, pick, previewPick, reskin, scoreMatch, scoreOrder, stampDifficulty } from '../engine';
 import type { Encounter, Pack } from '../../../packs/types';
 import type { EncounterRequest, EncounterResult } from '../../contracts';
 
@@ -48,6 +48,35 @@ describe('pick — the due queue drives selection', () => {
 
   it('returns null when there are no encounters', () => {
     expect(pick(req({}), [mkPack([])])).toBeNull();
+  });
+});
+
+describe("previewPick — pure preview of pick()'s resolution (M3 re-present guard)", () => {
+  it('returns the same choice pick() would make for a resolvable pool', () => {
+    expect(previewPick(req({ factIds: ['f2', 'f1'], kinds: ['mcq'] }), [PACK])).toBe('e-b');
+    expect(previewPick(req({ factIds: [], kinds: ['free_recall'] }), [PACK])).toBe('e-c');
+  });
+
+  it('detects a remainder that resolves to the SAME fallback encounter as the original', () => {
+    // Original pool includes f1 — the due queue matches it directly to e-a.
+    const original = pick(req({ factIds: ['f1', 'f9', 'f10'], kinds: ['mcq'] }), [PACK]);
+    expect(original?.id).toBe('e-a'); // sanity: this really is a due-queue match, not yet the fallback
+
+    // planRedraw would strip the shown fact (f1), leaving ['f9', 'f10'] — neither matches any
+    // mcq encounter's fact_ids, so the due queue falls through to the any-kind-match fallback
+    // (candidates[0]) and lands on e-a again, even though the pool genuinely shrank.
+    expect(previewPick(req({ factIds: ['f9', 'f10'], kinds: ['mcq'] }), [PACK])).toBe(original?.id);
+  });
+
+  it('returns null when the pool has no encounters', () => {
+    expect(previewPick(req({}), [mkPack([])])).toBeNull();
+  });
+
+  it("is independent of req.seed — the guard's verdict cannot depend on which seed the round happens to draw", () => {
+    const a = previewPick(req({ factIds: ['f9', 'f10'], kinds: ['mcq'], seed: 1 }), [PACK]);
+    const b = previewPick(req({ factIds: ['f9', 'f10'], kinds: ['mcq'], seed: 999 }), [PACK]);
+    expect(a).toBe(b);
+    expect(a).toBe('e-a');
   });
 });
 

@@ -43,6 +43,9 @@ import {
 import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
 import { planRedraw, FATE_HOLDS_LINE, heldLanternLight } from '../../lantern';
+import { previewPick } from '../../encounters/engine';
+import { FIXTURE_PACK } from '../../encounters/fixtures';
+import type { Pack } from '../../../packs/types';
 import { AMENDMENT_BATCH_CAP } from '../../../srs/amendments';
 import type { Amendment } from '../../contracts';
 import { grantXp } from '../../progression/grant';
@@ -888,6 +891,15 @@ export class HamletScene extends Phaser.Scene {
     }
   }
 
+  /** M3 — packs for previewPick's would-be resolution check, mirroring encounters/register.ts's
+   *  own packless→FIXTURE_PACK fallback exactly, so the preview resolves against the SAME pool
+   *  a real re-present runEncounter call would. getPacks() is the bridge fetch (bridge/client),
+   *  not services.draw — the guard stays outside the draw census (Global Constraint 3). */
+  private async previewPackPool(): Promise<Pack[]> {
+    const { packs } = await getPacks();
+    return packs.length ? packs.map((p) => p.pack as Pack) : [FIXTURE_PACK];
+  }
+
   private async doWellspring(): Promise<void> {
     this.wellspringSurfaced = [];
     const drawReady = await wellspringDrawReady();
@@ -994,7 +1006,17 @@ export class HamletScene extends Phaser.Scene {
         });
         if (res.redraw) {
           // Ch. IV — re-present from this round's own pool minus the shown facts (census law).
-          const plan = planRedraw(res.redraw.shownFactIds, factIds);
+          let plan = planRedraw(res.redraw.shownFactIds, factIds);
+          if (plan.consume) {
+            // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
+            // encounter fallback the narrowed factIds never touch): preview the would-be
+            // re-present BEFORE spending, and fall back to fate-holds if nothing would change.
+            const wouldBe = previewPick(
+              { context: 'drill', packId: this.packId ?? '', seed: roundSeed, factIds: plan.factIds },
+              await this.previewPackPool(),
+            );
+            if (wouldBe === res.encounterId) plan = { consume: false, factIds };
+          }
           if (plan.consume) await services.save.save({ lanternLight: false });
           res = await services.runEncounter({
             context: 'drill',
