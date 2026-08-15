@@ -169,6 +169,39 @@ async function answerAnyOverlay(page: Page): Promise<void> {
 // falling through to the same candidates[0] regardless of which factId was requested) only
 // bites when the requested factIds themselves have zero entries in encountersOf — true for
 // the T1 route's fixture moss-* ids, never true for ddDraw's real ones.
+type SrsEntry = { box: number; next_due: number; history: unknown[] };
+
+/** Step 0d (T7 review discovery): ddDraw's ladder (due() -> fresh() -> seeded shuffle,
+ *  CombatScene.ts) reads whatever the accumulated .state-e2e/srs.json holds — which drifts
+ *  across the whole suite's runs (every spec that answers a question leaves its own
+ *  history/box/next_due behind), so the door's FIRST draw was not deterministic run-to-run
+ *  (reproduced red at two commits; the known due-queue artifact previously worked around by
+ *  hand-clearing state). Two known, pre-verified free_recall facts — nights-ledger.spec.ts's
+ *  STABILIZE_FACTS idiom, reused (both already confirmed free_recall-only and pack-resident
+ *  there) — at box 1 (safely below REVIVE_BOX=4) with strictly decreasing next_due (most
+ *  overdue first), so due()'s due-first tier deterministically deals DOOR_FACTS[0] on the
+ *  round's own draw and DOOR_FACTS[1] on the lantern's salted, exclusion-listed redraw
+ *  (due({count:2}) returns both; DOOR_FACTS[0] is filtered by the exclusion list, DOOR_FACTS[1]
+ *  survives) — regardless of what any earlier spec left behind. seedDoorFacts PUTs (not
+ *  patches) srs.json wholesale, so this is a genuinely self-contained fixture, not an addition
+ *  on top of drift; the test captures and restores whatever srs.json held before it, own-file
+ *  convention (this spec owns no other file).
+ */
+const DOOR_FACTS: ReadonlyArray<{ factId: string }> = [
+  { factId: 'vc.econ.liqpref.preference-plus-participation' },
+  { factId: 'vc.econ.paytoplay.ubiquitous-after-dotcom' },
+];
+
+async function seedDoorFacts(page: Page): Promise<void> {
+  const now = Date.now();
+  const facts: Record<string, SrsEntry> = {};
+  DOOR_FACTS.forEach(({ factId }, i) => {
+    facts[factId] = { box: 1, next_due: now - (500_000 - i * 100_000), history: [] };
+  });
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded the two known door facts').toBe(true);
+}
+
 async function driveToDeathsDoor(page: Page, timeoutMs = 75_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -219,6 +252,80 @@ async function restoreLootState(page: Page, save: Save | null, inv: Inventory | 
     }
   }
   throw new Error('restoreLootState: save.json never settled on the restored snapshot');
+}
+
+// Task 8 (W6 T8) — scenarios (f)/(g)/(h): the interactive loot-advantage CHOICE itself, not
+// auto-drive's forced raise (offerLantern's `this.auto` branch always raises unconditionally —
+// DungeonScene.ts:637 — so 'keep'/decline is only ever reachable without an ?auto= param at
+// all). Route: the packless dev/e2e fixture (dev.dungeon.json), room `under-1` (roomIndex 0) —
+// deliberately NOT room.threshold (the real vc-law pack's own roomIndex-0 room scenario (b)
+// above uses): EVERY non-boss room in the real pack carries a `gate` (an extra interactive
+// free_recall the player must clear before grantRoomLoot ever fires — DungeonScene.ts's
+// runGate), while under-1 has none, so this is the simplest room that reaches offerLantern's
+// own card directly. ?sim=1 (independent of `dev` — DungeonScene.ts:455) skips the fight
+// itself; roomClearLoot's rng is a pure function of (roomIndex, seed, edge) only (economy.ts),
+// so it doesn't care which dungeon spec is active — the seeds below were verified against the
+// REAL economy.ts (throwaway vitest probe during authoring, same discipline as scenario (e)
+// above), not hand-derived.
+
+/** Node-map x for room index `i` — VaultView.ts's renderMap formula, reproduced (no debug
+ *  accessor exists for node bounds): count = rooms.length+1 (camp), left=96, right=W-86=874,
+ *  step=(right-left)/(count-1), room i sits at nodeXs[i+1] = left+(i+1)*step; STRIP_Y=300. The
+ *  dev fixture carries 4 rooms (count=5, step=194.5), so under-1 (i=0) sits at x≈290.5 — a
+ *  DIFFERENT x than the real pack's room.threshold (225, count=7) scenario (b) above clicks;
+ *  both sit on the same STRIP_Y=300 row. */
+const UNDER1_NODE = { x: 291, y: 300 };
+
+/** Drive into the packless fixture's under-1 (gate-less, roomIndex 0) and past its 2-fact
+ *  teaching modal, ending with the sim-victory chain in flight. The node-click + blurb-dismiss
+ *  + teaching-footer-loop is scenario (b)'s own drive above, generalized: only the node's own x
+ *  differs per room — the blurb/teaching cards themselves are fixed-position regardless. */
+async function enterLootRoomInteractive(page: Page): Promise<void> {
+  await canvasClick(page, UNDER1_NODE.x, UNDER1_NODE.y);
+  await page.waitForTimeout(500);
+  await canvasClick(page, 478, 365); // dismiss the blurb card ("Descend") — same fixed position every room
+  await expect(page.locator('.fw-doc'), 'discovered-documents teaching shown (under-1 carries 2 facts)').toBeVisible({ timeout: 8000 });
+
+  const tbtn = page.locator('.fw-footer .fw-btn-primary');
+  for (let i = 0; i < 8; i++) {
+    const label = await tbtn.innerText();
+    await tbtn.click();
+    if (label.includes('Close')) break;
+    await page.waitForTimeout(140);
+  }
+
+  // sim=1's combatFlash (~700ms, two chained tweens) + SIM_COMBAT_MS (700ms, DungeonScene.ts:51)
+  // + resolveCombat's own streak/save/drawMap bookkeeping (a couple of fast disk round-trips)
+  // all run before grantRoomLoot's offerLantern ever opens the lantern-choice card — pad
+  // generously; a parallel agent fleet can stretch Phaser's own tween/delayedCall timers under
+  // CPU contention.
+  await page.waitForTimeout(2500);
+}
+
+/** Click showLanternChoice's real button (VaultView.ts's 500x232 panel: cx=480, top=182,
+ *  buttons at top+84 "Raise it…"/top+136 "Keep the light" — crucible-v1-package-a.spec.ts's
+ *  V1-20 test already proved this exact geometry out for showResumeChoice's identically-shaped
+ *  panel). The card is pure Phaser with no DOM/debug signal for "is it open yet" (sim's
+ *  combatFlash tween + SIM_COMBAT_MS delay + save bookkeeping all precede it), so this retries
+ *  the click against the one signal this file DOES have: grantRoomLoot's gold grant, which can
+ *  only ever fire once offerLantern's promise resolves. A too-early click just lands on inert
+ *  map background (harmless, nothing else interactive sits at this panel's screen position once
+ *  the blurb/teaching cards are closed) and the next iteration tries again. */
+async function clickLanternChoiceAndAwaitGold(
+  page: Page,
+  pick: 'raise' | 'keep',
+  beforeGold: number,
+  timeoutMs = 20_000,
+): Promise<Inventory | null> {
+  const y = pick === 'raise' ? 266 : 318;
+  const start = Date.now();
+  let inv = await readState<Inventory>(page, 'inventory.json');
+  while ((inv?.gold ?? beforeGold) <= beforeGold && Date.now() - start < timeoutMs) {
+    await canvasClick(page, 480, y);
+    await page.waitForTimeout(700);
+    inv = await readState<Inventory>(page, 'inventory.json');
+  }
+  return inv;
 }
 
 test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
@@ -414,6 +521,7 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
   test("Death's Door: raising the lantern re-draws a different memory and spends the light", async ({ page }) => {
     test.setTimeout(120_000);
     const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
 
     try {
       // fixture: hp low enough that one connecting hit ends the party (deaths-door.spec.ts's
@@ -425,6 +533,10 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
           dungeon: { roomIndex: 0, cleared: [] }, lanternLight: true,
         },
       });
+      // Step 0d hermetic fix — seed BEFORE goto (nights-ledger.spec.ts's own
+      // seedStabilizeFacts-before-goto idiom): the door's due queue must see this fixture from
+      // the moment the app boots, not partway through the run.
+      await seedDoorFacts(page);
 
       // Same route as deaths-door.spec.ts's Pins (see the file-level note above for why this
       // is safe for a prompt-text assertion despite the dungeon room itself being fixture-fed).
@@ -464,6 +576,7 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
       expect(s?.lanternLight).toBe(false);
     } finally {
       await restoreSave(page, beforeSave);
+      await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
     }
   });
 
@@ -501,6 +614,159 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
       );
       expect(inv?.stacks?.['clerks-silver-nib']).toBe(1);
       expect(inv?.stacks?.['mossbound-locket'], 'the un-advantaged uncommon roll did NOT land').toBeUndefined();
+    } finally {
+      await restoreLootState(page, beforeSave, beforeInv);
+    }
+  });
+
+  test('room-trove (interactive): raising the lantern grants advantage on the loot-rarity roll', async ({ page }) => {
+    test.setTimeout(90_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeInv = await readState<Inventory>(page, 'inventory.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+      await page.request.put('/api/state/inventory.json', {
+        data: { version: 1, gold: 20, stacks: {} },
+      });
+
+      // seed 11, roomIndex 0 (under-1): verified against the real economy.ts (throwaway vitest
+      // probe during authoring — roomClearLoot's own documented rng order: gold jitter, the 35%
+      // drop gate, then the rarity roll(s), then the tier pick). edge:'advantage' rolls gold 14
+      // + 'clerks-silver-nib' (rare); the SAME seed under edge:'none' instead lands
+      // 'mossbound-locket' (uncommon — scenario h below) — a genuinely different, better
+      // outcome, so a build that silently drops the edge (or never renders the interactive
+      // choice at all) fails this pin on the trinket id, not a coincidence.
+      await page.goto('/?scene=vaults&dev=1&sim=1&seed=11');
+      await waitReady(page, 'vaults');
+
+      const before = await readState<Inventory>(page, 'inventory.json');
+      await enterLootRoomInteractive(page);
+      await clickLanternChoiceAndAwaitGold(page, 'raise', before?.gold ?? 20);
+
+      const inv = await waitForState<Inventory>(
+        page, 'inventory.json',
+        (i) => (i?.stacks?.['clerks-silver-nib'] ?? 0) >= 1,
+        20_000,
+      );
+      expect(inv?.gold, 'the room-clear gold landed').toBe(20 + 14);
+      expect(inv?.stacks?.['clerks-silver-nib'], 'advantage beat a plain roll — the rare trinket landed').toBe(1);
+      expect(inv?.stacks?.['mossbound-locket'], 'the un-advantaged uncommon roll did NOT land').toBeUndefined();
+
+      const save = await waitForState<Save>(page, 'save.json', (s) => s?.lanternLight === false, 10_000);
+      expect(save?.lanternLight, 'the light is spent').toBe(false);
+    } finally {
+      await restoreLootState(page, beforeSave, beforeInv);
+    }
+  });
+
+  test('room-trove (interactive): raising the lantern refunds when the trove itself rolls no trinket', async ({ page }) => {
+    test.setTimeout(90_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeInv = await readState<Inventory>(page, 'inventory.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+      await page.request.put('/api/state/inventory.json', {
+        data: { version: 1, gold: 20, stacks: {} },
+      });
+
+      await page.goto('/?scene=vaults&dev=1&sim=1&seed=9');
+      await waitReady(page, 'vaults');
+
+      // trim-the-lantern.spec.ts's own disambiguation idiom: final-state equality alone can't
+      // tell "spent then refunded" from "the choice never spent anything" (both end up
+      // lanternLight:true) — collect every real save.json write and prove the actual sequence.
+      // srs/store.ts's ObjectStore.save() re-fetches the REMOTE state and PUTs the whole merged
+      // object (never a sparse patch), so EVERY write in this multi-step drive (room entry,
+      // teaching, sim-resolve bookkeeping) carries a lanternLight value, not just the two that
+      // change it — the signal is the VALUE SEQUENCE, not which writes merely mention the key.
+      const saveWrites: Array<string | null> = [];
+      page.on('request', (req) => {
+        if (req.method() === 'PUT' && req.url().includes('/api/state/save.json')) {
+          saveWrites.push(req.postData());
+        }
+      });
+
+      // seed 9, roomIndex 0: verified via the same throwaway probe — the 35% trinket-drop gate
+      // itself misses under this seed (edge:'advantage' only ever touches RARITY, never the
+      // drop chance — DungeonScene.ts's own comment on grantRoomLoot), so this is genuinely the
+      // honest-refund edge, not a coincidental empty pool.
+      const before = await readState<Inventory>(page, 'inventory.json');
+      await enterLootRoomInteractive(page);
+      const inv = await clickLanternChoiceAndAwaitGold(page, 'raise', before?.gold ?? 20);
+
+      expect(inv?.gold, 'the room-clear gold landed (no trinket this roll)').toBe(20 + 15);
+      expect(Object.keys(inv?.stacks ?? {}), 'no trinket dropped').toHaveLength(0);
+
+      await waitForState<Save>(page, 'save.json', (s) => s?.lanternLight === true, 20_000);
+      const lanternValues = saveWrites
+        .map((b) => JSON.parse(b ?? '{}') as Save)
+        .map((w) => w.lanternLight)
+        .filter((v): v is boolean => v !== undefined);
+      expect(lanternValues.length, 'save writes carrying lanternLight were captured').toBeGreaterThan(0);
+      expect(lanternValues, 'a genuine spend (false) landed on disk somewhere in the drive').toContain(false);
+      expect(lanternValues[lanternValues.length - 1], 'the LAST write in the drive reflects the refund (true) — the merged-toast path').toBe(true);
+
+      await page.screenshot({ path: 'screenshots/e2e-lantern-light-trove-refund.png' }); // the merged toast, visually
+    } finally {
+      await restoreLootState(page, beforeSave, beforeInv);
+    }
+  });
+
+  test('room-trove (interactive): declining the lantern (Keep the light) spends nothing — loot resolves normally', async ({ page }) => {
+    test.setTimeout(90_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeInv = await readState<Inventory>(page, 'inventory.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+      await page.request.put('/api/state/inventory.json', {
+        data: { version: 1, gold: 20, stacks: {} },
+      });
+
+      // SAME seed as the raise scenario above (11) but 'keep' instead of 'raise': the gold
+      // jitter and 35%-drop rolls are identical either way (edge only ever touches the RARITY
+      // roll — economy.ts's own rng-order comment), so this is a direct contrast on the same
+      // rng stream — edge:'none' lands the plain first roll, 'mossbound-locket' (uncommon),
+      // never the advantaged 'clerks-silver-nib' (rare) the raise scenario gets.
+      await page.goto('/?scene=vaults&dev=1&sim=1&seed=11');
+      await waitReady(page, 'vaults');
+
+      const saveWrites: Array<string | null> = [];
+      page.on('request', (req) => {
+        if (req.method() === 'PUT' && req.url().includes('/api/state/save.json')) {
+          saveWrites.push(req.postData());
+        }
+      });
+
+      const before = await readState<Inventory>(page, 'inventory.json');
+      await enterLootRoomInteractive(page);
+      const inv = await clickLanternChoiceAndAwaitGold(page, 'keep', before?.gold ?? 20);
+
+      expect(inv?.gold, 'the same gold roll as the raise scenario above — edge never touches it').toBe(20 + 14);
+      expect(inv?.stacks?.['mossbound-locket'], 'the plain, un-advantaged roll landed').toBe(1);
+      expect(inv?.stacks?.['clerks-silver-nib'], 'the advantaged rare never had a chance to land').toBeUndefined();
+
+      // no spend: 'keep' returns 'none' before offerLantern's own save call ever runs. Every
+      // write in this drive still carries a lanternLight value (srs/store.ts's ObjectStore.save
+      // re-fetches the remote state and PUTs the whole merged object, never a sparse patch), so
+      // the proof is that it holds true across EVERY write, never once dipping to false —
+      // stronger than inferring absence from an unchanged final value.
+      const lanternValues = saveWrites
+        .map((b) => JSON.parse(b ?? '{}') as Save)
+        .map((w) => w.lanternLight)
+        .filter((v): v is boolean => v !== undefined);
+      expect(lanternValues.length, 'save writes carrying lanternLight were captured').toBeGreaterThan(0);
+      expect(lanternValues.every((v) => v === true), 'lanternLight never dipped to false anywhere in the drive').toBe(true);
+      const save = await readState<Save>(page, 'save.json');
+      expect(save?.lanternLight, 'declining spends nothing — the light is still held').toBe(true);
     } finally {
       await restoreLootState(page, beforeSave, beforeInv);
     }
