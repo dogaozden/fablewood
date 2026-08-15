@@ -545,5 +545,35 @@ describe('Bestiary (Ch. VIII) — Task 5: Unwritten mechanics', () => {
       expect(consumingAct.hpDamage, 'the consuming act carries +1').toBe(2);
       expect(nextAct.hpDamage, 'the next act is plain base — never again').toBe(1);
     });
+
+    // Fix round 1 — controller ruling: an opportunity strike IS the holder acting, exactly like
+    // a turn-action hit (enemyStrike) — CombatScene now reads the SAME hasStatus/consumeOnOwnAction
+    // pattern at BOTH resolveOpportunityStrikes and enemyStrike. computeHit itself can't tell
+    // which of the two CombatScene seams a given call came from (it only ever sees the boolean
+    // the caller hands it) — these two tests pin that the arithmetic is correct and symmetric
+    // regardless of which seam fires FIRST for a given unit, which is the actual cross-path
+    // guarantee CombatScene's wiring relies on. Full end-to-end proof through the real OA
+    // machinery is deferred to Task 6 (no Unwritten unit can be walked-past in the shipped game
+    // until the Lurker exists) — these are this round's unit-level evidence.
+    it('cross-path exactly-once: an OA-from-unseen carries the tempo (and would consume the status); the SAME unit\'s later turn-action hit carries none', () => {
+      // Models resolveOpportunityStrikes firing first — the striker is still Unwritten going
+      // into its OA, so the caller passes true — then enemyStrike firing later that same round;
+      // the OA's own consumeOnOwnAction already cleared 'unwritten' by then, so the caller now
+      // passes false.
+      const oaHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const turnActionHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(oaHit.hpDamage, 'the OA is the first act from the unseen — it carries +1').toBe(2);
+      expect(turnActionHit.hpDamage, 'the turn-action hit is a LATER act — already revealed by the OA, no bonus').toBe(1);
+    });
+
+    it('cross-path exactly-once, the inverse ordering: a turn-action fires first and carries the tempo; a LATER OA from the same unit carries none', () => {
+      // Models enemyStrike firing first (still Unwritten, caller passes true) — its own
+      // consumeOnOwnAction clears the status — then a later OA from the same unit that round;
+      // the caller now passes false, since attacker.statuses no longer carries 'unwritten'.
+      const turnActionHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const oaHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(turnActionHit.hpDamage, 'the turn-action is the first act from the unseen — it carries +1').toBe(2);
+      expect(oaHit.hpDamage, 'a later OA from the same (already-revealed) unit carries no bonus').toBe(1);
+    });
   });
 });

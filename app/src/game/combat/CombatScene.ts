@@ -1630,20 +1630,25 @@ export class CombatScene extends Phaser.Scene {
         // Strike bonus rides it too. The team guard is explicit for the same reason the Strike's
         // own Glow gain guards: this method resolves BOTH directions (enemies strike a party
         // mover as readily as the reverse), and the Fade never swings with the Keeper's level.
+        //
+        // Ch. VIII Task 5 fix round 1 — controller ruling: an opportunity strike IS the holder
+        // ACTING ("cleared the moment the holder ACTS" has no turn-action carve-out, and
+        // in-fiction the stab from the unseen is exactly what writes the thing into the
+        // Ledger). Read the tempo flag BEFORE computeHit (still true if `striker` is going
+        // into this swing still Unwritten), same read-then-consume shape as enemyStrike below.
+        const unwrittenOpeningTempo = hasStatus(striker.statuses, 'unwritten');
         const result = computeHit({
           base: 1 + (striker.team === 'party' ? this.strikeBonus : 0),
           attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
           attackerDauntedSourceAlive: this.dauntedSourceAlive(striker),
-          // Ch. VIII Task 5 — always false: an opportunity strike is a REACTION (Ch. VI: "the
-          // opportunity latch is the only reaction-shaped thing"), never the holder's own
-          // turn-action, so it is never the seam that consumes/rewards Unwritten. An Unwritten
-          // striker throwing an OA here is not revealed by it and gets no bonus for it — only
-          // its own action-execution seam (enemyStrike/runWardenScript) or taking damage does.
-          attackerUnwrittenOpeningTempo: false,
+          attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
+        // Trigger 1 (own action): the striker just swung, regardless of whether it landed —
+        // consume unconditionally here, same as enemyStrike, not gated on result.hpDamage > 0.
+        this.consumeOnOwnAction(striker);
         if (result.hpDamage > 0) {
           this.hud.showBanner(`${striker.name} strikes as ${mover.name} withdraws.`, P.berry);
           this.damageUnit(mover, result.hpDamage, P.berry);

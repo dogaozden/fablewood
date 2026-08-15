@@ -211,13 +211,16 @@ export interface ComputeHitInput {
   attackerDauntedSourceAlive: boolean;
   /** Ch. VIII Task 5 — true ONLY on the exact hit that is the attacker's own first act while
    *  still Unwritten (the opening-tempo bonus): the caller (CombatScene) sets this true
-   *  precisely at the enemy action-execution seam, in the same beat it is about to consume the
-   *  attacker's 'unwritten' status for taking its own action — never a blanket "attacker
-   *  currently carries Unwritten" read. An opportunity strike (a reaction, not the holder's own
-   *  action) thrown BY an Unwritten unit always passes false: it must not spend the one-time
-   *  bonus early. Exactly-once follows from the caller's own wiring, not from anything this
-   *  pure function tracks: once the seam consumes 'unwritten', attackerStatuses no longer
-   *  carries it, so a later hit's flag reads false by construction. */
+   *  precisely at the moment it is about to consume the attacker's 'unwritten' status for
+   *  taking its own action — never a blanket "attacker currently carries Unwritten" read.
+   *  Fix round 1 — controller ruling: an opportunity strike IS the holder acting (the stab
+   *  from the unseen is what writes it into the Ledger), so BOTH the turn-action seam
+   *  (enemyStrike/runWardenScript) and the OA seam (resolveOpportunityStrikes) can legitimately
+   *  pass true here — whichever one is the unit's actual first act. Exactly-once follows from
+   *  the caller's own wiring across BOTH seams, not from anything this pure function tracks:
+   *  once either seam consumes 'unwritten', attackerStatuses no longer carries it, so the
+   *  OTHER seam's later hit (turn-action after an OA, or an OA after a turn-action) reads the
+   *  flag false by construction. */
   attackerUnwrittenOpeningTempo: boolean;
 }
 
