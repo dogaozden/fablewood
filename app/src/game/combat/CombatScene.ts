@@ -15,7 +15,7 @@ import {
   services, type CombatLaunch, type CombatOutcome, type EncounterResult, type EncounterKind, type UseResult,
   type Quality, type EnemySpec,
 } from '../contracts';
-import type { Pack } from '../../packs/types';
+import type { Pack, Encounter } from '../../packs/types';
 import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
 import { candidateDungeonFiles, isDungeonSpec } from '../scenes/dungeon/specResolve';
 import {
@@ -69,6 +69,12 @@ import { DIFFICULTY_DEFS, difficultyPolicyGlyph, previewPick } from '../encounte
 import { FIXTURE_PACK } from '../encounters/fixtures';
 
 const ORIGIN = { x: (960 - GRID_W * CELL) / 2, y: 48 }; // 192, 48 → grid spans y 48..432
+
+/** M3 fix round 1 — the same guard encounters/register.ts's loadPacks() applies to its own
+ *  getPacks() result, mirrored here rather than imported (register.ts's is file-private). */
+function isPack(p: unknown): p is Pack {
+  return !!p && typeof p === 'object' && Array.isArray((p as Pack).encounters) && !!(p as Pack).meta;
+}
 
 /**
  * Recency memory for dueFactIds() (director: "am I not over-asked the same things
@@ -1601,11 +1607,14 @@ export class CombatScene extends Phaser.Scene {
         let plan = planRedraw(result.redraw.shownFactIds, factIds);
         if (plan.consume) {
           // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
-          // encounter fallback the narrowed factIds never touch): preview the would-be
-          // re-present BEFORE spending, and fall back to fate-holds if nothing would change.
+          // encounter fallback the narrowed factIds never touch, or — fix round 1 — a due-queue
+          // hit that only resolves cross-pack): preview the would-be re-present BEFORE spending,
+          // and fall back to fate-holds if nothing would change.
+          const { packs, encountersOf } = await this.previewPackPool();
           const wouldBe = previewPick(
             { context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId, seed: roundSeed, spellTier: 1 },
-            await this.previewPackPool(),
+            packs,
+            encountersOf,
           );
           if (wouldBe === result.encounterId) plan = { consume: false, factIds };
         }
@@ -1774,14 +1783,17 @@ export class CombatScene extends Phaser.Scene {
         let plan = planRedraw(result.redraw.shownFactIds, factIds);
         if (plan.consume) {
           // M3 — the naive remainder can still resolve to the SAME encounter (e.g. a single-
-          // encounter fallback the narrowed factIds never touch): preview the would-be
-          // re-present BEFORE spending, and fall back to fate-holds if nothing would change.
+          // encounter fallback the narrowed factIds never touch, or — fix round 1 — a due-queue
+          // hit that only resolves cross-pack): preview the would-be re-present BEFORE spending,
+          // and fall back to fate-holds if nothing would change.
+          const { packs, encountersOf } = await this.previewPackPool();
           const wouldBe = previewPick(
             {
               context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
               seed: roundSeed, flair: spell.label, spellTier: spell.tier,
             },
-            await this.previewPackPool(),
+            packs,
+            encountersOf,
           );
           if (wouldBe === result.encounterId) plan = { consume: false, factIds };
         }
@@ -2984,13 +2996,27 @@ export class CombatScene extends Phaser.Scene {
     return due.length ? due : seededShuffle(arr, mulberry32(layoutSeed('recency-fallback', this.launch.seed)));
   }
 
-  /** M3 — packs for previewPick's would-be resolution check, mirroring encounters/register.ts's
-   *  own packless→FIXTURE_PACK fallback exactly, so the preview resolves against the SAME pool
-   *  a real re-present runEncounter call would. getPacks() is the bridge fetch (bridge/client),
-   *  not services.draw — the guard stays outside the draw census (Global Constraint 3). */
-  private async previewPackPool(): Promise<Pack[]> {
-    const { packs } = await getPacks();
-    return packs.length ? packs.map((p) => p.pack as Pack) : [FIXTURE_PACK];
+  /** M3 — packs + (fix round 1) cross-pack encountersOf for previewPick's would-be resolution
+   *  check, mirroring encounters/register.ts's runEncounter resolution exactly: the same
+   *  packless→FIXTURE_PACK fallback (now isPack-guarded, matching loadPacks() rather than a
+   *  bare cast), AND the same crossPack gate resolveCrossPack() uses. Without this, a
+   *  same-pack-only preview can predict "different encounter" for a due-queue hit that only
+   *  resolves through a foreign pack, when the real (cross-pack) resolution would actually
+   *  re-present the SAME one — a wasted spend, the exact failure M3 exists to prevent
+   *  (task-7-review.md §5(a)). getPacks() is the bridge fetch (bridge/client); indexReady()/
+   *  isEmpty()/encountersOf() are plain index reads — the draw census tracks only due()/fresh()
+   *  (Global Constraint 3), and isEmpty() is already called elsewhere in this scene (loadContent
+   *  → combatDrawReady) without being treated as a draw. */
+  private async previewPackPool(): Promise<{ packs: Pack[]; encountersOf?: (factId: string) => Encounter[] }> {
+    const { packs: entries } = await getPacks();
+    const installed = entries.map((p) => p.pack).filter(isPack);
+    const packs = installed.length ? installed : [FIXTURE_PACK];
+    let crossPack = false;
+    try {
+      await services.draw.indexReady();
+      crossPack = !services.draw.isEmpty();
+    } catch { /* index down — the single-pack preview above is still honest */ }
+    return { packs, encountersOf: crossPack ? services.draw.encountersOf : undefined };
   }
 
   /** §4 suspension filter, tolerant of a stub/offline amendments service. */

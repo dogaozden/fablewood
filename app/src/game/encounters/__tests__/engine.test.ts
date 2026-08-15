@@ -78,6 +78,27 @@ describe("previewPick — pure preview of pick()'s resolution (M3 re-present gua
     expect(a).toBe(b);
     expect(a).toBe('e-a');
   });
+
+  // M3 fix round 1 (task-7-review.md §5(a)) — a due-queue fact can resolve to an encounter
+  // owned by a DIFFERENT installed pack than req.packId; encountersOf is what makes that
+  // resolvable at all (see the "per-fact source resolution" describe block below). A caller
+  // that calls previewPick WITHOUT threading encountersOf through (the pre-fix-round-1 wiring)
+  // is blind to that foreign-pack hit and falls through to a local-pack-only match instead —
+  // predicting "different encounter" when the real, cross-pack resolution would actually
+  // re-present the identical one. These two cases pin the fix: same request, same packs,
+  // differing ONLY in whether encountersOf is threaded, with DIFFERENT results.
+  const localOnly: Encounter = { id: 'local-fallback', fact_ids: ['fL'], kind: 'mcq', prompt: 'local', options: ['x'], answer: 'x' };
+  const localPack = mkPack([localOnly]);
+  const foreignHit: Encounter = { id: 'foreign-hit', fact_ids: ['fF'], kind: 'mcq', prompt: 'foreign', options: ['y'], answer: 'y' };
+  const crossPackEncountersOf = (factId: string): Encounter[] => (factId === 'fF' ? [foreignHit] : []);
+
+  it('with encountersOf threaded, finds the foreign-pack match the due queue points at', () => {
+    expect(previewPick(req({ factIds: ['fF'], kinds: ['mcq'] }), [localPack], crossPackEncountersOf)).toBe('foreign-hit');
+  });
+
+  it('WITHOUT encountersOf (the pre-fix-round-1 wiring), the identical request instead falls through to the local-pack fallback — the exact drift the review caught', () => {
+    expect(previewPick(req({ factIds: ['fF'], kinds: ['mcq'] }), [localPack])).toBe('local-fallback');
+  });
 });
 
 describe('stampDifficulty — encounter result producer', () => {
