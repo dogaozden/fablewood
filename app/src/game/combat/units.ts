@@ -13,13 +13,15 @@ interface StatBlock {
   attack: number;
   range: number;
   ranged: boolean;
+  /** Ch. VIII — can a landed Shove knock this archetype Toppled? Per-entry bestiary data. */
+  toppleable: boolean;
 }
 
 export const ENEMY_STATS: Record<EnemyArchetype, StatBlock> = {
-  wisp: { hp: 2, speed: 3, move: 3, attack: 1, range: 1, ranged: false },
-  wraith: { hp: 3, speed: 4, move: 3, attack: 1, range: 3, ranged: true },
-  construct: { hp: 5, speed: 2, move: 2, attack: 2, range: 1, ranged: false }, // §8: bruiser must survive one full Weave
-  warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false },
+  wisp: { hp: 2, speed: 3, move: 3, attack: 1, range: 1, ranged: false, toppleable: false },
+  wraith: { hp: 3, speed: 4, move: 3, attack: 1, range: 3, ranged: true, toppleable: false },
+  construct: { hp: 5, speed: 2, move: 2, attack: 2, range: 1, ranged: false, toppleable: false }, // §8: bruiser must survive one full Weave
+  warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false, toppleable: false },
 };
 
 /**

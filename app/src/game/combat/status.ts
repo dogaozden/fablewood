@@ -1,14 +1,22 @@
 /**
- * Conditions (the eight statuses) — pure, Phaser-free, mirrors damage.ts/boss.ts/ai.ts's
- * pattern: this module computes; CombatScene (wiring, out of this module's scope) applies
- * the results to the board. Spec: docs/design/magic-combat-depth.md §2-3.
+ * Conditions — pure, Phaser-free, mirrors damage.ts/boss.ts/ai.ts's pattern: this module
+ * computes; CombatScene (wiring, out of this module's scope) applies the results to the
+ * board. Spec: docs/design/magic-combat-depth.md §2-3 (the shipped eight); Ch. VIII of
+ * docs/superpowers/specs/2026-08-02-concordance.md (Toppled/Daunted/Unwritten, the three
+ * Bestiary newcomers).
  *
- * Lifecycle summary (§3 rule 2-3):
+ * Lifecycle summary (§3 rule 2-3, plus Ch. VIII):
  *  - Kindled ticks damage AND decrements its own duration at the OWNER's turn START
  *    (tickTurnStart) — it never touches the generic turn-end decay.
  *  - Staggered is consumed (removed) at turn start and signals the turn should end.
  *  - Every other duration status decrements at the OWNER's turn END (decayTurnEnd).
  *  - Warded never decays by time — only by absorption (computeHit) or battle end.
+ *  - Toppled/Daunted/Unwritten (Ch. VIII) are a fourth pattern: each is consumed by a
+ *    discrete EVENT rather than by time (the rise; the source falling; acting or taking
+ *    damage) — exempt from decayTurnEnd like Warded, but the event that actually clears
+ *    each one is wired at the CombatScene seam in later Bestiary tasks, not in this pure
+ *    module (this module only defines the ids, the decay exemption, and — for Unwritten —
+ *    the CONSUMED_ON_OWN_ACTION membership the future hook will consult).
  */
 import type { UnitState } from './types';
 import { P } from './palette';
@@ -21,18 +29,27 @@ export type StatusId =
   | 'inked' // takes +1 damage from every hit
   | 'emboldened' // deals +1 on every damaging hit
   | 'weakened' // deals −1 on every damaging hit (floor 0)
-  | 'staggered'; // skips its next turn
+  | 'staggered' // skips its next turn
+  | 'toppled' // knocked down; no duration — consumed entirely by the rise (Ch. VIII)
+  | 'daunted' // carries sourceId; battle-long until the source falls, deals −1 while it stands
+  | 'unwritten'; // enemies only; un-targetable by Strikes until it acts or takes damage
 
 /**
  * turnsLeft counts the OWNER's turn-ends. warded: turnsLeft = -1 (battle-long), magnitude =
  * absorb pool. staggered: turnsLeft = 1 always; consumed at turn start. Every other status's
  * magnitude is a fixed constant per §3 (kindled/inked/emboldened/weakened effects are all
  * exactly "1"); bound/dimmed/staggered don't use magnitude at all (left 0 by convention).
+ * Toppled/Daunted/Unwritten (Ch. VIII) are event-consumed, not turn-counted — turnsLeft is
+ * unused by their lifecycle (exempt from decayTurnEnd; each clears via its own later seam).
  */
 export interface StatusInstance {
   id: StatusId;
   turnsLeft: number;
   magnitude: number;
+  /** Ch. VIII — additive-optional; ONLY Daunted sets this (its source unit's id, read by a
+   *  later seam to lift the daunt the instant that unit falls). Every other status leaves
+   *  this undefined/absent. */
+  sourceId?: string;
 }
 
 export type TickOp = { op: 'damage'; amount: number } | { op: 'consume' };
@@ -51,7 +68,7 @@ function kindledTickStart(u: UnitState): TickOp[] {
   return inst ? [{ op: 'damage', amount: inst.magnitude }] : [];
 }
 
-/** The eight status definitions — HUD chips (§12.3) and the wiring layer read this directly. */
+/** The eleven status definitions — HUD chips (§12.3) and the wiring layer read this directly. */
 export const STATUS_DEFS: Record<StatusId, StatusDef> = {
   kindled: { id: 'kindled', label: 'Kindled', glyph: '▲', tint: P.ember, stack: 'refresh', tickStart: kindledTickStart },
   bound: { id: 'bound', label: 'Bound', glyph: '⌗', tint: P.orchid, stack: 'refresh' },
@@ -61,6 +78,11 @@ export const STATUS_DEFS: Record<StatusId, StatusDef> = {
   emboldened: { id: 'emboldened', label: 'Emboldened', glyph: '↑', tint: P.moss, stack: 'refresh' },
   weakened: { id: 'weakened', label: 'Weakened', glyph: '↓', tint: P.stoneGrey, stack: 'refresh' },
   staggered: { id: 'staggered', label: 'Staggered', glyph: '✱', tint: P.duskPeach, stack: 'refresh' },
+  // Ch. VIII newcomers — no tickStart: each is consumed by a discrete event wired at a
+  // later CombatScene seam (Tasks 2/4/5), not by this module's own turn hooks.
+  toppled: { id: 'toppled', label: 'Toppled', glyph: '▼', tint: P.timber, stack: 'refresh' },
+  daunted: { id: 'daunted', label: 'Daunted', glyph: '↚', tint: P.duskMauve, stack: 'refresh' },
+  unwritten: { id: 'unwritten', label: 'Unwritten', glyph: '◌', tint: P.parchment, stack: 'refresh' },
 };
 
 export function hasStatus(statuses: StatusInstance[], id: StatusId): boolean {
@@ -86,20 +108,31 @@ export function clearStatus(statuses: StatusInstance[], id: StatusId): StatusIns
  * §8 Bond-proof: constructs reject Bound outright. This is the single seam for that
  * immunity — every future caller that grants Bound (Snare-Knot, Lattice, Injunction,
  * Warden's Crown Injunction) gets it for free instead of re-checking archetype itself.
+ *
+ * Ch. VIII: `sourceId` is additive-optional — only a Daunted-granting caller passes it.
+ * A fresh apply sets it; a refresh that omits it keeps whatever the existing instance
+ * already carried (never silently dropped); a refresh that passes a new one overwrites.
  */
-export function applyStatus(u: UnitState, id: StatusId, turns: number, magnitude = 1): StatusInstance[] {
+export function applyStatus(u: UnitState, id: StatusId, turns: number, magnitude = 1, sourceId?: string): StatusInstance[] {
   if (id === 'bound' && u.kind === 'construct') return u.statuses;
   const existing = u.statuses.find((s) => s.id === id);
+  const nextSourceId = sourceId ?? existing?.sourceId;
   const next: StatusInstance = {
     id,
     turnsLeft: existing ? Math.max(existing.turnsLeft, turns) : turns,
     magnitude: existing ? Math.max(existing.magnitude, magnitude) : magnitude,
+    ...(nextSourceId !== undefined ? { sourceId: nextSourceId } : {}),
   };
   return [...u.statuses.filter((s) => s.id !== id), next];
 }
 
-/** Kindled and Warded manage their own lifecycles (see file header) — exempt from turn-end decay. */
-const NO_TURN_END_DECAY = new Set<StatusId>(['warded', 'kindled']);
+/**
+ * Kindled and Warded manage their own lifecycles (see file header) — exempt from turn-end
+ * decay. Toppled/Daunted/Unwritten (Ch. VIII) are also event-consumed rather than
+ * time-based (the rise; the source falling; the two Unwritten triggers) — all five never
+ * tick or expire via decayTurnEnd; each is removed only by its own dedicated seam.
+ */
+const NO_TURN_END_DECAY = new Set<StatusId>(['warded', 'kindled', 'toppled', 'daunted', 'unwritten']);
 
 /** §3 rule 3 — decay at the OWNER's turn end: decrement every duration status. Warded never decays. */
 export function decayTurnEnd(statuses: StatusInstance[]): StatusInstance[] {
@@ -107,6 +140,16 @@ export function decayTurnEnd(statuses: StatusInstance[]): StatusInstance[] {
     .map((s) => (NO_TURN_END_DECAY.has(s.id) ? s : { ...s, turnsLeft: s.turnsLeft - 1 }))
     .filter((s) => NO_TURN_END_DECAY.has(s.id) || s.turnsLeft > 0);
 }
+
+/**
+ * The fourth status lifecycle (Ch. VIII): consumed the moment its holder takes its OWN
+ * action — distinct from turn-end decay (NO_TURN_END_DECAY above) and from turn-start
+ * ticking (tickTurnStart below). Only Unwritten uses it today; Unwritten's OTHER trigger
+ * (cleared on taking damage — the "revealed" moment) is a separate hook, not this set.
+ * This module only defines the membership — the consuming hook lands at the CombatScene
+ * seam in a later Bestiary task.
+ */
+export const CONSUMED_ON_OWN_ACTION = new Set<StatusId>(['unwritten']);
 
 export interface TurnStartTick {
   /** ops in resolution order — the caller applies 'damage' via its damageUnit choke point

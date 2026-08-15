@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   STATUS_DEFS, hasStatus, statusMagnitude, clearStatus, applyStatus,
-  tickTurnStart, decayTurnEnd, effectiveMove, computeHit,
+  tickTurnStart, decayTurnEnd, effectiveMove, computeHit, CONSUMED_ON_OWN_ACTION,
   type StatusId, type StatusInstance,
 } from '../status';
-import { makeKeeper, makeEnemy } from '../units';
+import { makeKeeper, makeEnemy, ENEMY_STATS } from '../units';
 
 const STATUS_IDS: StatusId[] = [
   'kindled', 'bound', 'dimmed', 'warded', 'inked', 'emboldened', 'weakened', 'staggered',
@@ -285,5 +285,134 @@ describe('computeHit — the one pipeline (§3 rule 4)', () => {
     const res = computeHit({ base: 1, ...noMods, targetStatuses });
     expect(res.absorbed).toBe(0);
     expect(res.targetStatuses).toBe(targetStatuses); // same reference — no needless copy
+  });
+});
+
+describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
+  const NEWCOMER_IDS: StatusId[] = ['toppled', 'daunted', 'unwritten'];
+
+  describe('STATUS_DEFS', () => {
+    it('defines toppled/daunted/unwritten, each refresh-stacking with a real glyph', () => {
+      for (const id of NEWCOMER_IDS) {
+        expect(STATUS_DEFS[id].id).toBe(id);
+        expect(STATUS_DEFS[id].stack).toBe('refresh');
+        expect(STATUS_DEFS[id].glyph.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('none of the three carry a tickStart hook — their lifecycles are event-driven, wired outside this module', () => {
+      for (const id of NEWCOMER_IDS) {
+        expect(STATUS_DEFS[id].tickStart).toBeUndefined();
+      }
+    });
+  });
+
+  describe('decayTurnEnd — none of the three decay by time', () => {
+    it('toppled never ticks or expires, no matter how many turn-ends pass — it has no duration, only the rise consumes it', () => {
+      let statuses: StatusInstance[] = [{ id: 'toppled', turnsLeft: 1, magnitude: 0 }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'toppled', turnsLeft: 1, magnitude: 0 }]);
+    });
+
+    it('daunted never decays by time — battle-long until its source falls, a later seam', () => {
+      let statuses: StatusInstance[] = [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }]);
+    });
+
+    it('unwritten never decays by time — cleared only by acting or taking damage, both later seams', () => {
+      let statuses: StatusInstance[] = [{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }]);
+    });
+  });
+
+  describe('applyStatus — keep-the-larger stands untouched for the three newcomers', () => {
+    it('toppled refresh-stacks like every other status: one instance, turnsLeft/magnitude keep the larger', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) };
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) }; // re-knocked mid-rise: still one instance
+      expect(u.statuses).toEqual([{ id: 'toppled', turnsLeft: 1, magnitude: 0 }]);
+      expect(u.statuses).toHaveLength(1);
+    });
+
+    it('unwritten refresh-stacks like every other status', () => {
+      let u = makeEnemy({ archetype: 'wisp' }, 0, 0, 0);
+      u = { ...u, statuses: applyStatus(u, 'unwritten', -1, 0) };
+      expect(u.statuses).toEqual([{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }]);
+    });
+
+    it("daunted keeps the larger turnsLeft/magnitude on refresh, exactly like Warded's max rule", () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 5, 2) }; // bigger re-application
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: 5, magnitude: 2, sourceId: 'pall-1' }]);
+    });
+  });
+
+  describe('StatusInstance.sourceId — additive-optional, only Daunted sets it', () => {
+    it('a fresh Daunted apply sets sourceId to the given source', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: 1, magnitude: 1, sourceId: 'pall-1' }]);
+    });
+
+    it('sourceId survives a refresh that omits it — it is not dropped', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 2, 1) }; // refresh, no sourceId argument this time
+      expect(u.statuses[0].sourceId).toBe('pall-1');
+    });
+
+    it('a later apply can overwrite sourceId with a new source', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-2') };
+      expect(u.statuses[0].sourceId).toBe('pall-2');
+    });
+
+    it('toppled and unwritten never carry a sourceId — the key is absent, not just undefined', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) };
+      expect('sourceId' in u.statuses[0]).toBe(false);
+    });
+  });
+
+  describe('CONSUMED_ON_OWN_ACTION — the fourth lifecycle', () => {
+    it('contains exactly unwritten; the consuming hook itself lands at the CombatScene seam, later', () => {
+      expect(CONSUMED_ON_OWN_ACTION.has('unwritten')).toBe(true);
+      expect(CONSUMED_ON_OWN_ACTION.size).toBe(1);
+    });
+  });
+
+  describe('ENEMY_STATS.toppleable — topple-ability is per-entry data (units.ts)', () => {
+    it('all four standing archetypes are NOT toppleable — Toppling arrives with the Husk, a later task', () => {
+      for (const archetype of ['wisp', 'wraith', 'construct', 'warden'] as const) {
+        expect(ENEMY_STATS[archetype].toppleable).toBe(false);
+      }
+    });
+  });
+
+  describe('regression: the newcomers coexist with the original eight, no cross-contamination', () => {
+    it('decayTurnEnd ticks a co-applied Weakened down by 1 while Toppled sits untouched beside it', () => {
+      const statuses: StatusInstance[] = [
+        { id: 'weakened', turnsLeft: 2, magnitude: 1 },
+        { id: 'toppled', turnsLeft: 1, magnitude: 0 },
+      ];
+      expect(decayTurnEnd(statuses)).toEqual([
+        { id: 'weakened', turnsLeft: 1, magnitude: 1 },
+        { id: 'toppled', turnsLeft: 1, magnitude: 0 },
+      ]);
+    });
+
+    it('computeHit is unaffected by an unrelated Daunted status (with sourceId) sitting in the array', () => {
+      const res = computeHit({
+        base: 1,
+        attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
+        targetStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }],
+        flank: false, overglow: false, weld: false, rider: false,
+      });
+      expect(res.hpDamage).toBe(2); // base 1 + emboldened 1; daunted/sourceId untouched — no pipeline change this task
+    });
   });
 });
