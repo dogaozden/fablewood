@@ -2425,8 +2425,11 @@ export class CombatScene extends Phaser.Scene {
       );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
       this.time.delayedCall(560, () => {
-        // Satchel can't fell its own actor (no I3-style self-damage path here), so no
-        // unit.alive check is needed — only the C1/C2 gate + pilot re-invoke.
+        // Ch. VII rebase round (W6 final review M2) — the alive guard the other gated handlers
+        // carry. Satchel still can't fell its own actor directly, but the 560ms gap is real
+        // wall-clock: the actor can be dead by the time this fires, and returning a corpse to
+        // its own action menu is the failure mode. Same one-liner as the Strike gate's.
+        if (!unit.alive) { this.endPlayerTurn(); return; }
         this.budget = spendAction(this.budget);
         if (turnExhausted(this.budget)) {
           this.endPlayerTurn();
@@ -2450,8 +2453,9 @@ export class CombatScene extends Phaser.Scene {
     // never here — contrast the glow branch above (and the heal branch below), which both
     // consume immediately on use. NO services.inventory.removeItem/useItem call on this branch
     // (defer-removal law): armAid always replaces the standing arm outright (one live arm at a
-    // time), so re-arming needs no special-case. Same turn-cost shape as glow/heal above/below
-    // (560ms delayedCall -> endPlayerTurn) — this branch predates W6's turn-budget rework.
+    // time), so re-arming needs no special-case. Same turn-cost shape as glow/heal above/below —
+    // Ch. VII binds all three tools to Ch. VI's law, and that law costs the ACTION, not the turn:
+    // arming leaves banked movement spendable, exactly like a Glow item or a heal.
     if (item.effect.kind === 'reveal_option' || item.effect.kind === 'retry_cast') {
       this.armedAid = armAid(this.armedAid, item.id, item.effect.kind);
       this.hud.showBanner(
@@ -2461,7 +2465,23 @@ export class CombatScene extends Phaser.Scene {
         P.lanternGold,
       );
       this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
-      this.time.delayedCall(560, () => this.endPlayerTurn());
+      this.time.delayedCall(560, () => {
+        if (!unit.alive) { this.endPlayerTurn(); return; }
+        this.budget = spendAction(this.budget);
+        if (turnExhausted(this.budget)) {
+          this.endPlayerTurn();
+        } else {
+          // Ch. VI re-review N1 — same checkEnd-first guard as the sibling branches; see the
+          // Strike gate's comment. Arming deals no damage, but symmetry with the other gated
+          // sites is worth more than the (today, always-null) check it costs here.
+          const end = this.checkEnd();
+          if (end === 'retreat') { this.enterDeathsDoor(); return; }
+          if (end) { this.resolveBattle(end); return; }
+          this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+          this.returnToActionMenu(unit);
+          if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+        }
+      });
       return;
     }
 
@@ -2508,6 +2528,7 @@ export class CombatScene extends Phaser.Scene {
     this.hud.showBanner(res.message, P.moss);
     this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
     this.time.delayedCall(560, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
       this.budget = spendAction(this.budget);
       if (turnExhausted(this.budget)) {
         this.endPlayerTurn();
