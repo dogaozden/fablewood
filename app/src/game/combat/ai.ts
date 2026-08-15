@@ -30,10 +30,22 @@ export function carefulStepMove(baseMove: number): number {
  * this round (oaSpent). The scene calls this once per tile a mover's path vacates and
  * applies 1 flat (flank-eligible, via computeHit) damage from each returned unit,
  * marking oaSpent afterward. Pushes never call this (the mover didn't choose to move).
+ *
+ * Ch. VIII — `midRiseIds` extends the same "latch disabled" idiom to a unit mid-rise from
+ * Toppled: unlike Staggered, Toppled carries no duration to check via hasStatus (it's
+ * consumed by the rise), so the scene tracks it as a separate turn-scoped id set instead and
+ * threads it in here. Optional with an empty default so every pre-existing call site (every
+ * caller before Ch. VIII) keeps compiling and behaving identically without passing it.
  */
-export function opportunityStrikers(vacatedTile: Coord, moverTeam: Team, units: UnitState[]): UnitState[] {
+export function opportunityStrikers(
+  vacatedTile: Coord,
+  moverTeam: Team,
+  units: UnitState[],
+  midRiseIds: ReadonlySet<string> = new Set(),
+): UnitState[] {
   return units.filter((u) =>
-    u.alive && u.team !== moverTeam && !u.oaSpent && !hasStatus(u.statuses, 'staggered') &&
+    u.alive && u.team !== moverTeam && !u.oaSpent &&
+    !hasStatus(u.statuses, 'staggered') && !midRiseIds.has(u.id) &&
     manhattan(vacatedTile, u) === 1,
   );
 }

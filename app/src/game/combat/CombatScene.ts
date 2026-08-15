@@ -35,8 +35,8 @@ import {
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
-import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
-import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, type TurnBudget } from './turnBudget';
+import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, STATUS_DEFS, type StatusId } from './status';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
@@ -260,6 +260,20 @@ export class CombatScene extends Phaser.Scene {
   private tileImages = new Map<string, Phaser.GameObjects.Image>();
   /** §4.2 — per-turn toggle ('c'): half move, provokes no opportunity strikes. Reset each turn. */
   private carefulStepOn = false;
+  /** Ch. VIII — this turn's rise-tolled movement base (raw effectiveMove halved by the house
+   *  floor via tollRise), set ONCE per unit in advanceTurn's shared turn-start seam. Both
+   *  moveBudgetFor (party) and runEnemyTurn's effMove (enemy) read this SAME field instead of
+   *  re-deriving from raw effectiveMove — one source of truth, so the budget/moveField/AI-input
+   *  can't disagree the way the W6 split-read bug let them. null = no toll this turn (the
+   *  common case); reset every turn, not just rising ones, so a past toll never leaks forward. */
+  private tolledMoveBase: number | null = null;
+  /** Ch. VIII — units currently mid-rise (Toppled just consumed this round): the opportunity
+   *  latch is disabled for them, the same idiom as Staggered (§4.2/opportunityStrikers), but
+   *  Toppled carries no duration to check via hasStatus — it's gone the instant the rise
+   *  happens. Turn-scoped scene state instead: added at the rise, cleared at round wrap
+   *  (alongside oaSpent below) — the natural boundary "until its next turn" describes, since
+   *  every unit's own next turn IS the next round in this engine's strict initiative cycle. */
+  private midRiseIds = new Set<string>();
   /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
   private hoveredStatusUnitId: string | null = null;
 
@@ -405,6 +419,8 @@ export class CombatScene extends Phaser.Scene {
     this.bossReveal = null;
     this.tileImages.clear();
     this.carefulStepOn = false;
+    this.tolledMoveBase = null;
+    this.midRiseIds.clear();
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
@@ -871,6 +887,7 @@ export class CombatScene extends Phaser.Scene {
     if (nxt.newRound) {
       for (const u of this.units) u.oaSpent = false;
       this.objectionSpent = false;
+      this.midRiseIds.clear(); // Ch. VIII — mid-rise lasts the rest of ITS round, same boundary
     }
     this.orderIndex = nxt.index;
     const unit = this.unitById(nxt.id)!;
@@ -902,6 +919,26 @@ export class CombatScene extends Phaser.Scene {
       this.time.delayedCall(650, () => this.advanceTurn());
       return;
     }
+
+    // Ch. VIII — the rise toll: a Toppled unit stands automatically at its own turn start,
+    // paying half THIS turn's movement base before anything else touches it (composition law:
+    // toll first, stance second — Ch. VI's halving identity holds relative to the TOLLED base).
+    // ONE shared seam for party and enemy alike — the Husk can Topple the retinue same as Shove
+    // topples the Husk (Ch. VIII) — so `tolledMoveBase` is set here, once, and BOTH
+    // moveBudgetFor (party, via beginPlayerTurn below) and runEnemyTurn's effMove read the same
+    // value rather than each re-deriving it from raw effectiveMove (the W6 split-read lesson).
+    // Reset unconditionally (not just on a rise) so a previous turn's toll can never leak into
+    // this one; the condition itself is consumed here too, per the chapter ("carries no
+    // duration — it is consumed by the rise").
+    if (hasStatus(unit.statuses, 'toppled')) {
+      unit.statuses = unit.statuses.filter((s) => s.id !== 'toppled');
+      this.tolledMoveBase = tollRise(effectiveMove(unit.move, unit.statuses));
+      this.midRiseIds.add(unit.id);
+      this.hud.showBanner(`${unit.name} rises, unsteady — half speed this turn.`, P.timber);
+    } else {
+      this.tolledMoveBase = null;
+    }
+
     if (unit.team === 'party') {
       // §5.1 Glow source 2 — a party unit starting ITS turn on a lit lantern tile grants +1
       // Glow. Checked exactly once, right here at turn start, so no stacking trick is possible;
@@ -946,9 +983,11 @@ export class CombatScene extends Phaser.Scene {
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
   }
 
-  /** §3 Bound/Dimmed (effectiveMove) composed with §4.2 Careful Step's half-move toggle. */
+  /** §3 Bound/Dimmed (effectiveMove) composed with §4.2 Careful Step's half-move toggle. Ch.
+   *  VIII: on a rising turn, `tolledMoveBase` (set once in advanceTurn) REPLACES the raw
+   *  effectiveMove call as this turn's base — toll first, stance second, per the chapter. */
   private moveBudgetFor(unit: UnitState): number {
-    const eff = effectiveMove(unit.move, unit.statuses);
+    const eff = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     return this.carefulStepOn ? carefulStepMove(eff) : eff;
   }
 
@@ -1001,9 +1040,12 @@ export class CombatScene extends Phaser.Scene {
    *  Reuses returnToActionMenu's own "recompute the move field off budget.left, then reshow the
    *  menu" idiom — Press On spends the action exactly like the five gated action handlers, just
    *  with no delayedCall presentation beat (nothing here can fell anyone, so there's no checkEnd
-   *  to run first). */
+   *  to run first). Ch. VIII: on a rising turn `tolledMoveBase` stands in for raw effectiveMove
+   *  here too — the identity above holds RELATIVE TO THE TOLLED BASE, per the chapter's
+   *  composition law (toll first, stance second), so Press On must combine off the same tolled
+   *  eff moveBudgetFor already used to seed `this.budget.total`, not the untolled one. */
   private pressOn(unit: UnitState): void {
-    const eff = effectiveMove(unit.move, unit.statuses);
+    const eff = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     const combined = this.carefulStepOn ? carefulStepMove(eff + eff) : eff + eff;
     const bonus = combined - this.budget.total;
     this.budget = grantPressOn(this.budget, bonus);
@@ -1480,7 +1522,7 @@ export class CombatScene extends Phaser.Scene {
     if (carefulStep) return;
     for (const vacated of path.slice(0, -1)) {
       if (!mover.alive) return;
-      for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
+      for (const striker of opportunityStrikers(vacated, mover.team, this.units, this.midRiseIds)) {
         if (!mover.alive) break;
         // §9.3 — an opportunity strike is free-lane steel, so the Warden's Objection answers it
         // exactly like a Strike: negated, riposted, and the striker's one-per-round is still
@@ -2695,7 +2737,12 @@ export class CombatScene extends Phaser.Scene {
     const party = this.units.filter((u) => u.team === 'party');
     // §3 Bound/Dimmed feed the AI's OWN move budget without editing ai.ts: hand decideEnemy a
     // shallow clone whose `.move` is already the effective value (ai.ts stays pure/untouched).
-    const effMove = effectiveMove(unit.move, unit.statuses);
+    // Ch. VIII: `tolledMoveBase`, set by advanceTurn's shared rise-toll seam just before this
+    // call, stands in for raw effectiveMove on a rising turn — the SAME `effMove` const then
+    // feeds both the AI's decision input (selfForAi, just below) and the real move field
+    // (computeMoveField further down), so the two can never disagree (the W6 split-read lesson,
+    // now honored on the enemy side too).
+    const effMove = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     const selfForAi = effMove === unit.move ? unit : { ...unit, move: effMove };
     const intent = decideEnemy(selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id));
 
@@ -3611,6 +3658,12 @@ export class CombatScene extends Phaser.Scene {
     keeper.hp = split.keeper;
     keeper.alive = keeper.hp > 0;
     keeper.statuses = [];
+    // Ch. VIII — defensive: `tolledMoveBase` is scene-level, keyed to "whichever turn last ran
+    // advanceTurn's seam," not to the Keeper specifically. The door can interrupt any unit's
+    // turn (not just a rising Keeper's), so without this reset a revived Keeper could inherit a
+    // stray toll left over from an unrelated unit. Statuses are already wiped above (any real
+    // Toppled the Keeper itself carried is gone too) — this just matches that "start fresh".
+    this.tolledMoveBase = null;
     this.reviveView(keeper); // undo fadeDead's death tween, same as a Satchel revival
     this.drawHpBar(keeper);
     // The pool moved with no battle event to account for it — the same re-anchor the Satchel

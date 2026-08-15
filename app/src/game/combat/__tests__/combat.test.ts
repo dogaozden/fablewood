@@ -618,6 +618,27 @@ describe('opportunity strikes — eligibility (§4.2)', () => {
     expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [sameTeam])).toEqual([]);
     expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [farWisp])).toEqual([]);
   });
+
+  // Ch. VIII — mid-rise (a Toppled unit that just stood at its own turn start) disables the
+  // opportunity latch until turn end, same idiom as Staggered above, but Toppled itself carries
+  // no duration to check via hasStatus (it's consumed by the rise) — the scene tracks it as a
+  // separate turn-scoped mark instead, threaded in as this 4th, optional, default-empty
+  // parameter so every pre-existing call site (including every test above) keeps compiling and
+  // behaving identically without passing it.
+  it('suppressed when the striker is mid-rise (Ch. VIII), even though otherwise eligible', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp], new Set(['wisp-0']))).toEqual([]);
+  });
+
+  it('an unrelated id in midRiseIds does not suppress a striker not in the set', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp], new Set(['some-other-unit'])).map((u) => u.id)).toEqual(['wisp-0']);
+  });
+
+  it('omitting midRiseIds entirely (every pre-existing call site) is unaffected — defaults to no exclusions', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp]).map((u) => u.id)).toEqual(['wisp-0']);
+  });
 });
 
 describe('Careful Step movement math (§4.2)', () => {

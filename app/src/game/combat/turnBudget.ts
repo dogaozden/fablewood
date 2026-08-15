@@ -1,5 +1,10 @@
 // turnBudget.ts — Ch. VI spendable movement: move -> act -> move the remainder, per-tile spend.
-// Pure model only: CombatScene (Tasks 2-3) drives it, this module owns the arithmetic and the two flags.
+// Pure model only: owns the TurnBudget state machine (spend/grant/lock transitions) and the
+// Ch. VIII rise toll. The movement-VALUE arithmetic itself lives elsewhere — effectiveMove in
+// status.ts, Careful Step's halving in ai.ts (carefulStepMove), Press On's bonus calc in
+// CombatScene.ts (pressOn) — this module composes over whatever those hand it; it does not
+// derive move values from unit stats on its own (Task 2 — the header used to claim broader
+// ownership than the module actually has).
 
 /** total = effectiveMove after stance/Press On math (turn start / recompute); left = remaining
  *  tiles-worth of cost. legSpent locks the Careful Step stance at the first committed leg;
@@ -51,4 +56,14 @@ export function turnExhausted(b: TurnBudget): boolean {
  *  of sync (the old guard only knew about legSpent; Press On only ever set actionSpent). */
 export function stanceLocked(b: TurnBudget): boolean {
   return b.legSpent || b.pressedOn;
+}
+
+/** Ch. VIII — the rise toll: a Toppled unit stands automatically at its own turn start, and
+ *  that turn's movement base is halved (the house halving: floor, min 1 — same shape as
+ *  carefulStepMove, but a separate law) BEFORE anything else touches it. Composition order is
+ *  law: rise-toll first, stance second — CombatScene applies this to the raw effectiveMove
+ *  once, at turn start, then Careful Step/Press On compose over the TOLLED result exactly as
+ *  they would over any other base (Ch. VI's identity holds relative to it). */
+export function tollRise(base: number): number {
+  return Math.max(1, Math.floor(base / 2));
 }
