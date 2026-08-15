@@ -70,6 +70,18 @@ function hasTile(tiles: Array<{ c: number; r: number }>, c: number, r: number): 
   return tiles.some((t) => t.c === c && t.r === r);
 }
 
+/** Ch. VIII Task 5 — valid target ids for `action` from the ACTIVE unit (CombatScene.
+ *  validTargetsDebug, new this task): the only way to observe the Unwritten exclusion on
+ *  Strike/Shove's own validTargets branches (and its absence on a spell's) without fighting
+ *  menu-click geometry for every case — same read-only debug-surface spirit as reachable above. */
+async function validTargets(page: Page, action: string): Promise<string[]> {
+  return page.evaluate((a) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { validTargetsDebug?(action: string): string[] } | undefined;
+    return s?.validTargetsDebug?.(a) ?? [];
+  }, action);
+}
+
 async function setPos(page: Page, id: string, c: number, r: number): Promise<void> {
   await page.evaluate(
     ({ id, c, r }) => {
@@ -570,4 +582,144 @@ test('bestiary scenario c: Daunted — the move field excludes closer tiles, dam
   const afterRestoredStrike = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the restored Strike to resolve');
   const restoredDealt = afterRestoredStrike.log.at(-1)?.dmg ?? -1;
   expect(restoredDealt, 'full damage is restored — identical to the original undaunted control').toBe(controlDealt);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario d (Task 5 — Unwritten): "what is not yet written cannot be struck." wisp-0 stands in
+// for the Lurker (via debugApplyStatus, the same "debug seam stands in for the later real
+// archetype" spirit as Task 3's debugForceToppleable / Task 4's sourceId param) — Task 6 lands
+// the real archetype that begins combat this way.
+//
+// Geometry across both tests below reuses scenario b's exact known-good layout: Keeper(5,1),
+// wisp-0(6,1) adjacent. wisp-1 exiles to (10,6) (scenario b/c's own spot — melee-only, can't
+// close in time). wraith-2 exiles to (8,6), NOT (10,1) — scenario c's own fix note applies
+// here too: (10,1) shares the Keeper's row, and wraith's range(3)+move(3) closes it and fires
+// down the row, contaminating any hp measurement; (8,6) shares neither row nor column.
+//
+// This first test proves the TARGETING half: Strike (and Shove — T3's own predicate, wired
+// but never end-to-end tested until an Unwritten unit existed to test it against) exclude an
+// Unwritten enemy; a spell's own validTargets does not (the chapter's own distinction). Then it
+// proves clear trigger 2 (damage taken) IN ISOLATION from trigger 1 (own action): a non-lethal
+// Kindled tick stands in for "a spell hits it" — a deterministic, non-Strike/Shove damage
+// source that travels the SAME damageUnit choke a real cast would, without fighting a live
+// MCQ's fact-dependent content (this file's own established lethal/non-lethal-Kindled-tick
+// substitution idiom, scenario a/c). Both party units are moved OUT of wisp-0's move+range
+// reach (4) before its own turn opens: left adjacent, wisp-0 would ALSO attack post-tick
+// (trigger 1 firing in the same turn), which would clear Unwritten too and silently mask a
+// broken trigger 2 — a mutation check on this exact test caught precisely that confound before
+// this geometry was added, so isolating the two triggers here is load-bearing, not decorative.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario d: Strike (and Shove) exclude an Unwritten enemy; a spell still reaches it; taking damage reveals it', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6);
+  await setPos(page, 'wraith-2', 8, 6);
+  await setPos(page, 'keeper', 5, 1);
+  await setPos(page, 'wisp-0', 6, 1);
+
+  // --- Sanity (pre-Unwritten): adjacency alone already makes wisp-0 a valid Strike target.
+  const before = await validTargets(page, 'strike');
+  expect(before, 'sanity: wisp-0 is Strike-targetable before Unwritten applies').toContain('wisp-0');
+
+  await applyStatus(page, 'wisp-0', 'unwritten', -1, 0);
+  const marked = await unitState(page, 'wisp-0');
+  expect(marked?.statuses.some((st) => st.id === 'unwritten'), 'sanity: the debug-apply landed').toBe(true);
+
+  // --- Targeting: Strike AND Shove exclude it; a spell (Smite) does not.
+  const strikeTargets = await validTargets(page, 'strike');
+  expect(strikeTargets, "Strike's own validTargets skips the Unwritten enemy").not.toContain('wisp-0');
+  const shoveTargets = await validTargets(page, 'shove');
+  expect(shoveTargets, "Shove excludes it too — T3's own predicate, now actually exercised end-to-end").not.toContain('wisp-0');
+  const smiteTargets = await validTargets(page, 'smite');
+  expect(smiteTargets, "a spell's own validTargets reaches it fine — the chapter's own distinction").toContain('wisp-0');
+
+  // --- Trigger 2 (damage taken), isolated: a non-lethal Kindled tick (wisp-0's hp is 2) — see
+  // the header note above for why this stands in for a real spell hit. Move BOTH party units
+  // beyond wisp-0's move(3)+range(1)=4 reach first, so its own turn (right after the tick) has
+  // no valid attack target and cannot ALSO clear the status via trigger 1 — isolating trigger 2
+  // as the only possible cause of what this test checks next.
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 1);
+  await setPos(page, 'mira', 1, 6); // scenario c's own proven-safe far tile
+  await setPos(page, 'keeper', 1, 1); // same row, far column — distance 5 > wisp-0's reach of 4
+  await page.keyboard.press('7'); // End the Keeper's turn 1.
+  const turn2 = await passUntilKeeper(page);
+  expect(turn2.activeId).toBe('keeper');
+
+  const revealed = await unitState(page, 'wisp-0');
+  expect(revealed?.hp, 'sanity: the Kindled tick dealt exactly 1, non-lethal').toBe(1);
+  expect(revealed?.statuses.some((st) => st.id === 'unwritten'), 'taking damage revealed it — Unwritten is gone, with no target in reach to have acted on instead').toBe(false);
+
+  // Re-pin adjacency (wisp-0's own turn moved it toward the now-distant party; the Keeper's own
+  // setPos must come LAST to force the reachable/moveField refresh, scenario c's own rule) so
+  // the final targeting check re-exercises the exact geometry the earlier exclusion check used.
+  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'keeper', 5, 1);
+  const afterTargets = await validTargets(page, 'strike');
+  expect(afterTargets, 'revealed: Strike-targetable again').toContain('wisp-0');
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario d (Task 5 — Unwritten), the act-variant: proves clear trigger 1 (own action) and the
+// +1 opening-tempo bonus, exactly once. wisp-0 (attack 1, per units.ts's ENEMY_STATS) is kept
+// adjacent to the Keeper across two full rounds and never takes damage first — so its OWN first
+// act is unambiguously the reveal trigger, not trigger 2. Since the Keeper is already in range
+// 1 the instant wisp-0's turn opens, decideEnemy's own "already in range from where we stand?
+// hit without moving" branch (ai.ts) fires deterministically every round — no AI-scoring
+// uncertainty to derive, unlike scenario a's own deflected-path geometry. No flank (the other
+// two enemies stay exiled off both the Keeper/wisp-0 row and the opposite-tile column), so the
+// Keeper's hp delta reads the modifier pipeline directly: base 1 +1 while still unwritten
+// (round 1), then plain base 1 once already revealed (round 2) — the exactly-once pin. The
+// exiled pair are re-pinned before round 2 (this file's own "re-teleport everyone back" idiom,
+// scenario a/b) since their own AI could otherwise wander back into relevance between rounds.
+// ---------------------------------------------------------------------------------------
+test("bestiary scenario d: an Unwritten enemy's own first act deals +1 and reveals it; its next act is plain base — exactly once", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6);
+  await setPos(page, 'wraith-2', 8, 6);
+  await setPos(page, 'keeper', 5, 1);
+  await setPos(page, 'wisp-0', 6, 1);
+  await applyStatus(page, 'wisp-0', 'unwritten', -1, 0);
+
+  const wisp0 = await unitState(page, 'wisp-0');
+  expect(wisp0?.hp, "sanity: wisp-0 hasn't been damaged — its own act will be the FIRST reveal").toBe(2);
+
+  // --- Round 1: the Keeper ends its turn without attacking wisp-0 — wisp-0's own turn (later
+  // in the same round, per its lower speed) is the first thing that can reveal it.
+  const keeperBeforeR1 = await unitState(page, 'keeper');
+  await page.keyboard.press('7');
+  const turn2 = await passUntilKeeper(page);
+  expect(turn2.activeId).toBe('keeper');
+
+  const keeperAfterR1 = await unitState(page, 'keeper');
+  expect(
+    (keeperBeforeR1?.hp ?? 0) - (keeperAfterR1?.hp ?? 0),
+    "round 1: wisp-0's opening act carried the +1 tempo bonus (base 1 + 1)",
+  ).toBe(2);
+  const wisp0AfterR1 = await unitState(page, 'wisp-0');
+  expect(wisp0AfterR1?.statuses.some((st) => st.id === 'unwritten'), "wisp-0's own act revealed it").toBe(false);
+  expect(wisp0AfterR1?.hp, 'wisp-0 itself took no damage this round — the reveal came from ITS act, not trigger 2').toBe(2);
+
+  // --- Round 2: re-pin geometry, then let wisp-0 act again — now plain base, never a repeat.
+  await setPos(page, 'wisp-1', 10, 6);
+  await setPos(page, 'wraith-2', 8, 6);
+  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'keeper', 5, 1);
+  const keeperBeforeR2 = await unitState(page, 'keeper');
+
+  await page.keyboard.press('7');
+  const turn3 = await passUntilKeeper(page);
+  expect(turn3.activeId).toBe('keeper');
+
+  const keeperAfterR2 = await unitState(page, 'keeper');
+  expect(
+    (keeperBeforeR2?.hp ?? 0) - (keeperAfterR2?.hp ?? 0),
+    "round 2: wisp-0's SECOND act is plain base — the +1 does not repeat",
+  ).toBe(1);
 });

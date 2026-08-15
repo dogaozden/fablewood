@@ -209,6 +209,16 @@ export interface ComputeHitInput {
    *  the one bit it can't derive itself and hands back the answer; irrelevant whenever
    *  attackerStatuses carries no 'daunted' entry. */
   attackerDauntedSourceAlive: boolean;
+  /** Ch. VIII Task 5 — true ONLY on the exact hit that is the attacker's own first act while
+   *  still Unwritten (the opening-tempo bonus): the caller (CombatScene) sets this true
+   *  precisely at the enemy action-execution seam, in the same beat it is about to consume the
+   *  attacker's 'unwritten' status for taking its own action — never a blanket "attacker
+   *  currently carries Unwritten" read. An opportunity strike (a reaction, not the holder's own
+   *  action) thrown BY an Unwritten unit always passes false: it must not spend the one-time
+   *  bonus early. Exactly-once follows from the caller's own wiring, not from anything this
+   *  pure function tracks: once the seam consumes 'unwritten', attackerStatuses no longer
+   *  carries it, so a later hit's flag reads false by construction. */
+  attackerUnwrittenOpeningTempo: boolean;
 }
 
 export interface ComputeHitResult {
@@ -222,17 +232,26 @@ export interface ComputeHitResult {
 
 /**
  * The ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack:
- *   base + emboldened(+1) − weakened(−1) − daunted(−1, source-alive-gated) + flank(+1)
- *   + overglow(+1) + weld(+1) + rider(+1) → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
+ *   base + emboldened(+1) − weakened(−1) − daunted(−1, source-alive-gated)
+ *   + unwritten-opening-tempo(+1, exactly-once) + flank(+1) + overglow(+1) + weld(+1)
+ *   + rider(+1) → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
  * Inked amplifies only a real (nonzero, post-floor) hit — a 0 stays 0.
  *
  * Ch. VIII — daunted folds exactly like weakened (statusMagnitude off the attacker), gated by
  * the caller-supplied `attackerDauntedSourceAlive` since this pure module can't check the
  * board itself: the source falling flips that flag on the caller's very next read, so the
  * penalty lifts the same beat the source falls, with no separate decay/clear needed here.
+ *
+ * Ch. VIII Task 5 — the opening-tempo bonus is a flat +1, gated by the caller-supplied
+ * `attackerUnwrittenOpeningTempo` (this module has no way to know "is this particular hit the
+ * one consuming the status" — that is a CombatScene wiring fact, not a board-state fact, but
+ * the same "caller resolves what this module can't" shape as the daunted gate above).
  */
 export function computeHit(input: ComputeHitInput): ComputeHitResult {
-  const { base, attackerStatuses, targetStatuses, flank, overglow, weld, rider, attackerDauntedSourceAlive } = input;
+  const {
+    base, attackerStatuses, targetStatuses, flank, overglow, weld, rider,
+    attackerDauntedSourceAlive, attackerUnwrittenOpeningTempo,
+  } = input;
 
   const dauntedPenalty = hasStatus(attackerStatuses, 'daunted') && attackerDauntedSourceAlive
     ? statusMagnitude(attackerStatuses, 'daunted')
@@ -242,6 +261,7 @@ export function computeHit(input: ComputeHitInput): ComputeHitResult {
     + statusMagnitude(attackerStatuses, 'emboldened')
     - statusMagnitude(attackerStatuses, 'weakened')
     - dauntedPenalty
+    + (attackerUnwrittenOpeningTempo ? 1 : 0)
     + (flank ? 1 : 0)
     + (overglow ? 1 : 0)
     + (weld ? 1 : 0)

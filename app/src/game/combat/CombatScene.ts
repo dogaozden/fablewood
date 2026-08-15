@@ -35,7 +35,7 @@ import {
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
-import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, STATUS_DEFS, type StatusId } from './status';
+import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId } from './status';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
@@ -1273,11 +1273,27 @@ export class CombatScene extends Phaser.Scene {
 
   /** Ch. VIII — Unwritten cannot be TARGETED by Strikes (and Shove) while it holds; spells and
    *  area effects reach it fine (the chapter's own distinction) — so this predicate belongs ONLY
-   *  on Strike/Shove's own validTargets branches, never weave/sequence/cast/smite/parley. Task 5
-   *  (the Lurker, Unwritten's own bestiary entry) hasn't landed yet; it should reuse this SAME
-   *  method by name when it adds the matching filter to Strike's own case below. */
+   *  on Strike/Shove's own validTargets branches, never weave/sequence/cast/smite/parley. Wired
+   *  into Shove's own case (Task 3) and, below, Strike's own case (Task 5) — the two the
+   *  chapter names explicitly, reusing this exact method by name rather than duplicating it. */
   private isStrikeTargetable(target: UnitState): boolean {
     return !hasStatus(target.statuses, 'unwritten');
+  }
+
+  /** Ch. VIII Task 5 — the fourth status lifecycle (status.ts's CONSUMED_ON_OWN_ACTION): clears
+   *  every status in that set the instant `unit` completes ITS OWN action. Generic over set
+   *  membership (`CONSUMED_ON_OWN_ACTION.has(s.id)`, never a hardcoded 'unwritten') per
+   *  status.ts's own documented intent, so a future addition to the set needs no second
+   *  CombatScene edit. Wired at BOTH branches of the enemy action-execution seam
+   *  (runEnemyTurn's doAttack, below): enemyStrike's base-kit hit calls this itself (ordering
+   *  matters there — see its own comment), and the Warden's phase script (runWardenScript) is
+   *  covered directly in doAttack, since either can be "the holder's own action" for a unit
+   *  that carries a consumed-on-own-action status. A safe no-op whenever `unit` carries none of
+   *  the set's members — i.e. every unit, every turn, until Task 6's Lurker exists. */
+  private consumeOnOwnAction(unit: UnitState): void {
+    if (unit.statuses.some((s) => CONSUMED_ON_OWN_ACTION.has(s.id))) {
+      unit.statuses = unit.statuses.filter((s) => !CONSUMED_ON_OWN_ACTION.has(s.id));
+    }
   }
 
   /** Ch. VIII Task 4 — if `unit` is actively Daunted (carries the status AND its source is
@@ -1316,7 +1332,9 @@ export class CombatScene extends Phaser.Scene {
   private validTargets(unit: UnitState, action: ActionKind): UnitState[] {
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
     switch (action) {
-      case 'strike': return enemies.filter((e) => manhattan(unit, e) <= 1);
+      // Ch. VIII Task 5 — Strike excludes Unwritten, same law/predicate as Shove below
+      // (isStrikeTargetable); spells/area effects (every other case here) are untouched.
+      case 'strike': return enemies.filter((e) => manhattan(unit, e) <= 1 && this.isStrikeTargetable(e));
       case 'smite': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'weave': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'cast': return enemies.filter((e) => manhattan(unit, e) <= 3);
@@ -1617,6 +1635,12 @@ export class CombatScene extends Phaser.Scene {
           attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
           attackerDauntedSourceAlive: this.dauntedSourceAlive(striker),
+          // Ch. VIII Task 5 — always false: an opportunity strike is a REACTION (Ch. VI: "the
+          // opportunity latch is the only reaction-shaped thing"), never the holder's own
+          // turn-action, so it is never the seam that consumes/rewards Unwritten. An Unwritten
+          // striker throwing an OA here is not revealed by it and gets no bonus for it — only
+          // its own action-execution seam (enemyStrike/runWardenScript) or taking damage does.
+          attackerUnwrittenOpeningTempo: false,
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
@@ -2300,6 +2324,9 @@ export class CombatScene extends Phaser.Scene {
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
           flank: false, overglow: false, weld: false, rider: false,
           attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
+          // Ch. VIII Task 5 — moot: `caster` here is always party-side (Unwritten is
+          // enemies-only), so attacker.statuses can never carry it; false is the inert value.
+          attackerUnwrittenOpeningTempo: false,
         });
         target.statuses = result.targetStatuses;
         if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
@@ -2366,6 +2393,10 @@ export class CombatScene extends Phaser.Scene {
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
       attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
+      // Ch. VIII Task 5 — moot: `caster` here is always party-side (Cinder-Rebuke/Processional's
+      // own push, or Shove's `unit`) — enemy heaves use enemyStrike's own separate inline
+      // forceMove, never this method. False is the inert value.
+      attackerUnwrittenOpeningTempo: false,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) {
@@ -2495,6 +2526,9 @@ export class CombatScene extends Phaser.Scene {
       base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
       attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
+      // Ch. VIII Task 5 — moot: `attacker` here is always the party's own Strike-user (this
+      // method's own doc comment above), and Unwritten is enemies-only. False is the inert value.
+      attackerUnwrittenOpeningTempo: false,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
@@ -2891,12 +2925,20 @@ export class CombatScene extends Phaser.Scene {
       if (this.destroyed) return;
       // §9.4 — on the turns his phase script fires (Crown Injunction / Call the Clause) the
       // Warden spends his whole action on it; otherwise he falls through to his base kit, the
-      // Writ of Seizure (enemyStrike's push branch below).
-      if (!(unit.isBoss && this.runWardenScript(unit))) {
-        if (intent.attackTargetId) {
-          const tgt = this.unitById(intent.attackTargetId);
-          if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
-        }
+      // Writ of Seizure (enemyStrike's push branch below). Ch. VIII Task 5 — these are the
+      // enemy action-execution seam's two branches (the census this task's brief asked for):
+      // enemyStrike consumes CONSUMED_ON_OWN_ACTION statuses itself (ordering matters there —
+      // see its own comment); the scripted branch is covered right here, since either can be
+      // "the holder's own action" for a unit that carries one.
+      const scripted = unit.isBoss && this.runWardenScript(unit);
+      if (scripted) {
+        // The script (Bound/summon) deals no damage, so the opening-tempo +1 never applies
+        // here — nothing to fold it into. No boss carries Unwritten this wave; a safe no-op
+        // today, correct if that ever changes.
+        this.consumeOnOwnAction(unit);
+      } else if (intent.attackTargetId) {
+        const tgt = this.unitById(intent.attackTargetId);
+        if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
       }
       this.endTurnDecay(unit);
       this.time.delayedCall(460, () => this.advanceTurn());
@@ -3071,12 +3113,20 @@ export class CombatScene extends Phaser.Scene {
       }
     }
 
+    // Ch. VIII Task 5 — the opening-tempo bonus: true only while `attacker` still carries
+    // Unwritten going INTO this hit (its first act from the unseen — it may already be gone
+    // via trigger 2, damage taken earlier this same turn, in which case this correctly reads
+    // false). Read BEFORE consumeOnOwnAction (below) clears it, so the SAME act that spends
+    // the status is the one that gets the +1 — never again after, since attacker.statuses
+    // won't carry 'unwritten' the next time this method runs for the same unit.
+    const unwrittenOpeningTempo = hasStatus(attacker.statuses, 'unwritten');
     const result = computeHit({
       base: attacker.attack + bumpBonus,
       attackerStatuses: attacker.statuses,
       targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
       attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
+      attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
     });
     target.statuses = result.targetStatuses;
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {
@@ -3084,6 +3134,10 @@ export class CombatScene extends Phaser.Scene {
     }
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, P.berry);
     if (bumpBonus > 0) this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
+    // Ch. VIII Task 5 — trigger 1 (own action): `attacker` just took ITS action, so this is
+    // where Unwritten (if it still holds) is consumed. Must run AFTER the computeHit call
+    // above reads attacker.statuses, never before.
+    this.consumeOnOwnAction(attacker);
     // §9.4/§9.5 — the Warden's ordinary blow IS the Writ of Seizure, so it announces itself by
     // its (pack-relabelable) move name; the damage still reads off the target's own −N float,
     // exactly as it does for every other hit.
@@ -3130,6 +3184,15 @@ export class CombatScene extends Phaser.Scene {
 
   private damageUnit(unit: UnitState, amount: number, color: number): void {
     if (this.destroyed || amount <= 0 || !unit.alive) return;
+    // Ch. VIII Task 5 — trigger 2 (damage taken): "being struck writes you." damageUnit is the
+    // ONE choke every hp-loss source funnels through (crucible #10) — Strike, spells, OAs,
+    // bumps, Kindled ticks, self-chip, all of it — so this is the single place trigger 2 can
+    // live, and clearing it here means every source responds identically with no per-caller
+    // wiring. Cleared BEFORE the hp mutation below, so `unit` is never left
+    // untargetable-yet-hurt even transiently within this call.
+    if (hasStatus(unit.statuses, 'unwritten')) {
+      unit.statuses = clearStatus(unit.statuses, 'unwritten');
+    }
     const before = unit.hp;
     unit.hp = Math.max(0, unit.hp - amount);
     if (unit.team === 'party') {
@@ -4071,6 +4134,16 @@ export class CombatScene extends Phaser.Scene {
    *  debug-surface spirit as orderDebug/layoutDebug beside it. */
   reachableDebug(): Coord[] {
     return [...this.reachable.values()];
+  }
+
+  /** Debug: valid target ids for `action` from the ACTIVE unit's current position (e2e-only —
+   *  Ch. VIII Task 5: the only way a test can observe validTargets' Unwritten exclusion —
+   *  Strike/Shove only, never a spell — directly, without fighting menu-click geometry for
+   *  every case. Same read-only debug-surface spirit as reachableDebug just above.) */
+  validTargetsDebug(action: ActionKind): string[] {
+    const unit = this.unitById(this.activeId);
+    if (!unit) return [];
+    return this.validTargets(unit, action).map((u) => u.id);
   }
 
   /** Debug: mark a unit toppleable for Shove regardless of its real archetype stat (e2e-only —

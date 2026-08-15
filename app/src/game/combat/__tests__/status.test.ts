@@ -225,6 +225,7 @@ describe('computeHit — the one pipeline (§3 rule 4)', () => {
   const noMods = {
     attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
     flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+    attackerUnwrittenOpeningTempo: false,
   };
 
   it('base only, no modifiers', () => {
@@ -414,6 +415,7 @@ describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
         attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
         targetStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }],
         flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+        attackerUnwrittenOpeningTempo: false,
       });
       expect(res.hpDamage).toBe(2); // base 1 + emboldened 1; daunted/sourceId untouched — no pipeline change this task
     });
@@ -424,6 +426,7 @@ describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
   describe('computeHit — the −1 fold, active only while the source stands (mirrors weakened)', () => {
     const base2 = {
       base: 2, targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false,
+      attackerUnwrittenOpeningTempo: false,
     };
     const dauntedStatus = (magnitude = 1): StatusInstance[] => [{ id: 'daunted', turnsLeft: -1, magnitude, sourceId: 'pall-1' }];
 
@@ -446,6 +449,7 @@ describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
       const res = computeHit({
         base: 1, targetStatuses: [], flank: false, overglow: false, weld: false, rider: false,
         attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true,
+        attackerUnwrittenOpeningTempo: false,
       });
       expect(res.hpDamage).toBe(0);
     });
@@ -478,6 +482,68 @@ describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
       // from "no-op" for sourceId specifically, while magnitude still refreshes to the max.
       u = { ...u, statuses: applyStatus(u, 'daunted', -1, 3, 'pall-1') };
       expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 3, sourceId: 'pall-1' }]);
+    });
+  });
+});
+
+describe('Bestiary (Ch. VIII) — Task 5: Unwritten mechanics', () => {
+  describe('computeHit — the opening-tempo +1 fold (rides the act that consumes the status)', () => {
+    // Local equivalent of the "computeHit — the one pipeline" describe block's own `noMods`
+    // (that one is scoped to its own callback, not reachable here) — same shape, minus the
+    // field under test in this block.
+    const noMods = {
+      attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+      flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+    };
+
+    it('true adds a flat +1, same shape as flank/overglow/weld/rider', () => {
+      expect(computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true }).hpDamage).toBe(2);
+    });
+
+    it('false (the default, every-other-hit case): no bonus', () => {
+      expect(computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false }).hpDamage).toBe(1);
+    });
+
+    it('reacts to the FLAG only, not to whether attackerStatuses happens to carry the unwritten id — the caller decides which hit this is, this pure module just folds what it is told', () => {
+      const withStatusInArray = computeHit({
+        base: 1, ...noMods, attackerUnwrittenOpeningTempo: true,
+        attackerStatuses: [{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }],
+      });
+      const withoutStatusInArray = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      expect(withStatusInArray.hpDamage).toBe(2);
+      expect(withoutStatusInArray.hpDamage).toBe(2);
+    });
+
+    it('stacks additively with other modifiers (emboldened + flank + opening tempo, all at once)', () => {
+      const res = computeHit({
+        base: 1, ...noMods, attackerUnwrittenOpeningTempo: true, flank: true,
+        attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
+      });
+      expect(res.hpDamage).toBe(4); // 1 + 1(emboldened) + 1(tempo) + 1(flank)
+    });
+
+    it('folds BEFORE the floor, like every other modifier — a heavily Weakened attacker still floors at 0 even with the tempo bonus stacked on top', () => {
+      // base 0, weakened(2) => pre-floor -2, tempo +1 => pre-floor -1 => floors to 0. If the
+      // bonus were (wrongly) applied AFTER the floor instead, this would read 1, not 0 — the
+      // number pins the pipeline ORDER, not just the sign.
+      const res = computeHit({
+        base: 0, ...noMods, attackerUnwrittenOpeningTempo: true,
+        attackerStatuses: [{ id: 'weakened', turnsLeft: 1, magnitude: 2 }],
+      });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('exactly-once, pinned at the pure-function level: two sequential calls modeling "the consuming act" then "the next act" both read correctly off whatever the caller passes', () => {
+      // Mirrors CombatScene's own sequence (enemyStrike): hit 1 fires while attacker.statuses
+      // still carries 'unwritten', so the caller passes true; consumeOnOwnAction then clears
+      // it; hit 2 fires with the caller now passing false, since attacker.statuses no longer
+      // carries it. This module has no memory between calls — exactly-once is a property of
+      // the CALLER's wiring (proven at the CombatScene/e2e level) — but this pins that
+      // computeHit itself never "remembers" a prior true and always reflects the current call.
+      const consumingAct = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const nextAct = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(consumingAct.hpDamage, 'the consuming act carries +1').toBe(2);
+      expect(nextAct.hpDamage, 'the next act is plain base — never again').toBe(1);
     });
   });
 });

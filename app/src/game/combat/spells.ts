@@ -406,8 +406,10 @@ function primaryAmount(base: number, opts: ResolveSpellOpts, welded: boolean): n
     overglow: !!opts.overglow,
     weld: welded,
     rider: !!opts.rider,
-    // Ch. VIII — moot with attackerStatuses empty (no 'daunted' to gate); false is the inert value.
+    // Ch. VIII — moot with attackerStatuses empty (no 'daunted'/'unwritten' to gate); false is
+    // the inert value for both.
     attackerDauntedSourceAlive: false,
+    attackerUnwrittenOpeningTempo: false,
   });
   return hpDamage + (opts.miraBonus ?? 0);
 }
