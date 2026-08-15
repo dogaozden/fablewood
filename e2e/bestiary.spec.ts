@@ -153,6 +153,19 @@ test('bestiary scenario a: the rise toll — a Toppled Keeper stands at a price,
   const afterRise = await unitState(page, 'keeper');
   expect(afterRise?.statuses.some((st) => st.id === 'toppled'), 'Toppled is consumed by the rise').toBe(false);
 
+  // Fix round 1 (I2) — Press On must compose off the TOLLED base too, not just moveBudgetFor:
+  // CombatScene.pressOn()'s own tolled-base swap-in was previously proven only by code symmetry
+  // with moveBudgetFor's (identical) line, never actually executed by a test. No Careful Step is
+  // active this turn, so Press On grants the full tolled eff again (2+2) — landing the Keeper
+  // back on the RAW un-tolled distance (4) for this one turn, at the cost of the action (the
+  // same "Careful Step + Press On = normal distance" identity turnBudget.test.ts's compose-law
+  // pin already proves at the pure level, exercised here through the real scene wiring instead).
+  await page.keyboard.press('8'); // Press On hotkey (measured-turn.spec.ts's own idiom)
+  const pressed = await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'Press On to spend the action');
+  expect(pressed.budget.total, 'Press On composes off the TOLLED base (2), not the raw stat (4): 2+2').toBe(4);
+  expect(pressed.budget.left, 'the bonus extends what was left (2), not a refill to the new total').toBe(4);
+  expect(pressed.budget.pressedOn, 'Press On locks the stance').toBe(true);
+
   // Following turn (next round): the toll does not repeat — full, un-tolled base again.
   await page.keyboard.press('7');
   const restored = await passUntilKeeper(page, 30_000);

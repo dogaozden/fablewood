@@ -270,9 +270,10 @@ export class CombatScene extends Phaser.Scene {
   /** Ch. VIII — units currently mid-rise (Toppled just consumed this round): the opportunity
    *  latch is disabled for them, the same idiom as Staggered (§4.2/opportunityStrikers), but
    *  Toppled carries no duration to check via hasStatus — it's gone the instant the rise
-   *  happens. Turn-scoped scene state instead: added at the rise, cleared at round wrap
-   *  (alongside oaSpent below) — the natural boundary "until its next turn" describes, since
-   *  every unit's own next turn IS the next round in this engine's strict initiative cycle. */
+   *  happens. Turn-scoped scene state instead: added at the rise, cleared PER-UNIT at that
+   *  unit's own next turn start (fix round 1, I1 — NOT a bulk round-wrap clear: a non-first
+   *  unit's own next turn lands mid the FOLLOWING round, after that round's earlier actors
+   *  already moved, so a bulk clear at round-wrap would re-arm its latch one slot too early). */
   private midRiseIds = new Set<string>();
   /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
   private hoveredStatusUnitId: string | null = null;
@@ -887,13 +888,25 @@ export class CombatScene extends Phaser.Scene {
     if (nxt.newRound) {
       for (const u of this.units) u.oaSpent = false;
       this.objectionSpent = false;
-      this.midRiseIds.clear(); // Ch. VIII — mid-rise lasts the rest of ITS round, same boundary
     }
     this.orderIndex = nxt.index;
     const unit = this.unitById(nxt.id)!;
     this.activeId = unit.id;
     this.hud.setActive(unit.id, this.aliveIds());
     this.focusCue(unit);
+
+    // Ch. VIII fix round 1 (I1) — mid-rise clears PER-UNIT, at that unit's own next turn start,
+    // NOT in bulk at round-wrap. The chapter's law is "until the unit's NEXT turn" — for a unit
+    // that isn't first in initiative (every enemy; Mira), its own next turn lands MID the
+    // following round, strictly after that round's earlier actors already moved. A bulk clear
+    // at round-wrap (the original shape) would re-arm a non-first unit's latch at the TOP of
+    // the next round — before its own turn — wrongly exposing an early actor (e.g. the Keeper)
+    // to a strike the chapter says should still be suppressed. Unconditional and first thing in
+    // this unit's own turn-start processing: a stale mark from an earlier rise naturally expires
+    // the instant this next turn arrives, regardless of what the turn holds afterward (a
+    // Kindled death, a Staggered skip, or a normal turn) — mirrors how tickTurnStart's own
+    // Kindled/Staggered handling below runs unconditionally at turn start too.
+    this.midRiseIds.delete(unit.id);
 
     // §3 rule 2 — tick order at turn start: (a) Kindled damage via the damageUnit choke point
     // (may kill); (b) Staggered — consumed, turn ends here before the unit can act. Replaces
