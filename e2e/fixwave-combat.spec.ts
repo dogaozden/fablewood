@@ -174,6 +174,20 @@ test('attestation-phase-skip: a T3 Verbatim Decree at the Warden advances the bo
     } catch { /* a fully auto-resolving pass needs no continue click */ }
     await page.locator('.fw-textarea').waitFor({ state: 'detached', timeout: 20_000 });
 
+    // Step 0c (T6 boss-cluster bisect): debugSetPos never spends the movement leg, so post-T2
+    // (move·act·move, End Turn) the turn stays open ("Steps remain") after this single Cast —
+    // advanceTurn() (the only place that consumes pendingBossPhase and opens the next Parley)
+    // never runs otherwise. Press End Turn like a real player standing still with movement left
+    // over would (boss-cluster-diagnosis.md) — never touches debugSetPos itself. The scene
+    // briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
+    // (CombatScene.ts's Phase type) — wait it out before deciding whether the turn is open.
+    const afterCast = await waitForCombat(page, (s) => s?.state !== 'resolving',
+      'the post-Cast state settled (left "resolving")', 5_000);
+    if (afterCast?.state === 'playerMove') {
+      await page.keyboard.press('7'); // End Turn
+      await page.waitForTimeout(400);
+    }
+
     // THE VERDICT: the T3 cast re-armed the next boss phase, so phase 2's Parley opens on its
     // own. Before the fix castGatedSpell never touched phaseIndex and this never appeared —
     // ordinary turns simply resumed and the negotiation stalled at phase 1 forever.

@@ -235,6 +235,22 @@ async function driveCastOnWarden(page: Page, parkMobId: string): Promise<void> {
       await cont.click();
     } catch { /* a full auto-resolving pass needs no continue click */ }
     await page.waitForTimeout(500);
+
+    // Step 0c (T6 boss-cluster bisect): debugSetPos is a teleport that never spends the
+    // movement leg (turnBudget.ts), so post-T2 (move·act·move, End Turn) `turnExhausted` is
+    // false after this single Cast and the turn stays open ("Steps remain") instead of
+    // auto-ending — advanceTurn() (the only place that consumes pendingBossPhase and opens the
+    // next Parley) never runs. Press End Turn like a real player standing still with movement
+    // left over would. Never touches debugSetPos itself — a teleport that also spent budget
+    // would make the tests lie about the movement economy (boss-cluster-diagnosis.md).
+    // The scene briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
+    // (CombatScene.ts's Phase type) — a same-instant read can still catch that transitional
+    // value, so wait it out before deciding whether the turn is actually still open.
+    const afterCast = await waitForCombatState(page, (x) => x?.state !== 'resolving', 5_000);
+    if (afterCast?.state === 'playerMove') {
+      await page.keyboard.press('7'); // End Turn
+      await page.waitForTimeout(400);
+    }
     return;
   }
   throw new Error('driveCastOnWarden: could not land a Cast on the Warden after 8 attempts');
