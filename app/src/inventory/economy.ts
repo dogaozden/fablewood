@@ -104,15 +104,20 @@ export interface BossLoot {
   relicId: string;
 }
 
-/** Boss bounty: 60-100 gold, a boss-weighted trinket, and always the Warden's signet.
- *  `edged` — see roomClearLoot's own doc: the Signet's Ch. IX passive, same fold-in rule. */
-export function bossLoot(rng: Rng, edge: Edge = 'none', edged = false): BossLoot {
+/** Boss bounty: 60-100 gold, a boss-weighted trinket, and the boss's own relic.
+ *  `edged` — see roomClearLoot's own doc: the Signet's Ch. IX passive, same fold-in rule.
+ *  `relicId` — Ch. IX Provenance: "each boss carries its own... the Vault-Warden's falling
+ *  back to the Signet". The spec's own relicId (specResolve.bossRelicId) when the caller has
+ *  one; omitted/undefined falls back to the Warden Signet of Terms — old packs, and the
+ *  Vault-Warden's own spec, keep working unchanged. Never consumes an rng() call, so the
+ *  gold/trinket roll is byte-identical with or without it. */
+export function bossLoot(rng: Rng, edge: Edge = 'none', edged = false, relicId?: string): BossLoot {
   const gold = 60 + Math.floor(rng() * 41);
   const finalEdge: Edge = edge !== 'none' ? edge : edged ? 'advantage' : 'none';
   return {
     gold,
     trinketId: pickTrinket(rollRarityEdged(rng, BOSS_RARITY_WEIGHTS, finalEdge), rng),
-    relicId: 'warden-signet-of-terms',
+    relicId: relicId ?? 'warden-signet-of-terms',
   };
 }
 

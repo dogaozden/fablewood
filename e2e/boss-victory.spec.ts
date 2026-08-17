@@ -387,6 +387,16 @@ test('boss-victory (real dungeon path): Vault-Warden kill via auto=boss, persist
     expect(Number.isFinite(saveAfter?.hp), 'hp is not NaN after victory').toBe(true);
     expect(saveAfter?.hp).toBeGreaterThan(0);
 
+    // ---- Ch. IX Provenance: "each boss carries its own [relic]" ----
+    // The dev fixture's under-boss room names relicId:'unbroken-clasp' (dev.dungeon.json;
+    // specResolve.test.ts pins the fixture clean against relicError). This is the
+    // discriminating proof the plumbing (resolveCombat -> bossVictory -> bossLoot) actually
+    // reads the SPEC's relicId: a build that left it unthreaded would still grant the
+    // hardcoded Signet fallback and pass every other assertion in this file.
+    const invAfter = await readState<Inventory>(page, 'inventory.json');
+    expect(invAfter?.stacks?.['unbroken-clasp'], "the boss's own relicId (the spec's, not the fallback) was granted").toBe(1);
+    expect(invAfter?.stacks?.['warden-signet-of-terms'], 'never the hardcoded Signet fallback when the spec names a relic').toBeUndefined();
+
     // ---- reload after victory resumes sanely (no ghost state) ----
     // IMPORTANT: page.reload() would replay the EXACT current URL, including our own ?auto=boss
     // dev-harness directive — that's a test-harness artifact (re-triggering the fight again), not

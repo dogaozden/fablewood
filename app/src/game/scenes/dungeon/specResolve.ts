@@ -6,6 +6,7 @@
 import type { DungeonSpec, DungeonRoom } from '../../contracts';
 import type { Pack, Quest } from '../../../packs/types';
 import { isEnemyArchetype, knownArchetypes } from '../../combat/units';
+import { CATALOG, itemById } from '../../../inventory/catalog';
 
 /** "The Preference Vaults" → "the-preference-vaults". */
 export function slugify(s: string): string {
@@ -160,4 +161,93 @@ export function archetypeError(spec: DungeonSpec, packId: string): string | null
     `The map for "${packId}" names a creature the Ledger has no entry for: "${first}"${where}${rest}. ` +
     `Known entries: ${knownArchetypes().join(', ')}.`
   );
+}
+
+// ---------------------------------------------------------------- Ch. IX — relic provenance
+
+/**
+ * Ch. IX (Provenance) — "each boss carries its own [relic]: the pack's boss spec names a
+ * relicId from the engine catalog, the Vault-Warden's falling back to the Signet." `relicId`
+ * is NOT part of contracts.ts's BossSpec (ORCHESTRATOR-OWNED, deliberately left untouched) —
+ * read the same tolerant, local-cast way unknownArchetypes reads `enemies`/`archetype` above:
+ * a real field on real pack JSON, just not yet promoted into the shared TS contract. Returns
+ * `unknown` (not narrowed to string) so unknownRelicIds below can still catch and report a
+ * non-string value, same tolerance archetype validation gives a non-string `archetype`.
+ */
+function rawBossRelicId(room: DungeonRoom): unknown {
+  const boss = (room as { boss?: unknown }).boss;
+  if (!boss || typeof boss !== 'object') return undefined;
+  return (boss as { relicId?: unknown }).relicId;
+}
+
+/** True for a string that names a real catalog item of type 'relic' — never a trinket,
+ *  consumable, or tool id typo'd into the boss slot. */
+function isKnownRelicId(x: unknown): x is string {
+  return typeof x === 'string' && itemById(x)?.type === 'relic';
+}
+
+/** Every relic id the engine catalog knows, alphabetical — knownArchetypes' own shape. */
+function knownRelicIds(): string[] {
+  return CATALOG.filter((i) => i.type === 'relic').map((i) => i.id).sort();
+}
+
+/**
+ * Ch. IX — every `relicId` a boss room's spec names that the catalog does not recognize as a
+ * relic: absent from the catalog entirely, or present under a different type. De-duplicated in
+ * first-seen order across all rooms — unknownArchetypes' own shape, transposed from archetypes
+ * to relics.
+ *
+ * A room with NO relicId at all is never a problem here: Provenance's own fallback law (the
+ * Vault-Warden's own spec still falls back to the Signet) makes "absent" the default, valid
+ * case — bossLoot's own `relicId?` parameter carries that fallback at grant time, not this check.
+ *
+ * Deliberately NOT folded into isDungeonSpec above, archetypeError's own reasoning transposed:
+ * a typo'd relic id is a spec that IS the right file and IS well-formed — the author should be
+ * told which word is wrong, not have their map quietly skipped for the next candidate file.
+ */
+export function unknownRelicIds(spec: DungeonSpec): string[] {
+  const bad: string[] = [];
+  const seen = new Set<string>();
+  for (const room of spec.rooms ?? []) {
+    const relicId = rawBossRelicId(room);
+    if (relicId === undefined || relicId === null || isKnownRelicId(relicId)) continue;
+    const label = String(relicId);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    bad.push(label);
+  }
+  return bad;
+}
+
+/**
+ * Ch. IX — the load-time error for a spec naming a relicId the catalog doesn't recognize as a
+ * relic, or null when clean. Same shape/placement as archetypeError: names the offending id,
+ * the first room that carries it, and the legal set, so an author learns what they MAY write.
+ *
+ * The caller throws this at spec-load (DungeonScene.loadSpec/useFixture, beside the archetype
+ * check) rather than leaving it to surface later as a nameless, icon-less Satchel row —
+ * store.grant(id) never validates its argument (app/src/inventory/store.ts), so an unvalidated
+ * typo would otherwise ship silently all the way into a player's inventory.
+ */
+export function relicError(spec: DungeonSpec, packId: string): string | null {
+  const bad = unknownRelicIds(spec);
+  if (!bad.length) return null;
+  const first = bad[0];
+  const room = (spec.rooms ?? []).find((r) => String(rawBossRelicId(r)) === first);
+  const where = room ? ` in room "${room.id}"` : '';
+  const rest = bad.length > 1 ? ` (and ${bad.length - 1} more: ${bad.slice(1).map((b) => `"${b}"`).join(', ')})` : '';
+  return (
+    `The map for "${packId}" names a relic the Ledger has no entry for: "${first}"${where}${rest}. ` +
+    `Known relics: ${knownRelicIds().join(', ')}.`
+  );
+}
+
+/** Ch. IX — the boss room's own relicId, once the spec has already passed relicError's
+ *  load-time gate (DungeonScene.loadSpec/useFixture): a defined return is guaranteed to be a
+ *  real catalog relic id, so bossVictory can pass it straight to bossLoot with no second
+ *  lookup. undefined means "the spec names none" — Provenance's own fallback case, not an
+ *  error; bossLoot's own `relicId?` parameter supplies the Signet default for it. */
+export function bossRelicId(room: DungeonRoom): string | undefined {
+  const relicId = rawBossRelicId(room);
+  return typeof relicId === 'string' ? relicId : undefined;
 }

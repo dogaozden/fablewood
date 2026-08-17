@@ -35,7 +35,16 @@ import {
   nodeState,
   type DungeonProgress,
 } from './roomFlow';
-import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText, rewardXp, archetypeError } from './specResolve';
+import {
+  candidateDungeonFiles,
+  isDungeonSpec,
+  bossQuest,
+  rewardText,
+  rewardXp,
+  archetypeError,
+  relicError,
+  bossRelicId,
+} from './specResolve';
 import { VaultView, type NodeHandlers } from './VaultView';
 import { FIXTURE_PACK_ID } from '../../combat/fixtures';
 import devSpecJson from './__fixtures__/dev.dungeon.json';
@@ -254,6 +263,11 @@ export class DungeonScene extends Phaser.Scene {
     // well-formed — the author needs the offending word named, not their map quietly dropped.
     const archetypeProblem = archetypeError(spec, this.packId);
     if (archetypeProblem) throw new Error(archetypeProblem);
+    // Ch. IX (Provenance) — relicId validation, same placement/reasoning as the archetype
+    // check just above: a typo'd relic id is a well-formed map naming a word the Ledger
+    // doesn't know, not a reason to skip the file.
+    const relicProblem = relicError(spec, this.packId);
+    if (relicProblem) throw new Error(relicProblem);
     this.spec = spec;
   }
 
@@ -270,6 +284,10 @@ export class DungeonScene extends Phaser.Scene {
     // a pack file to find a typo that lives in dev.dungeon.json.
     const archetypeProblem = archetypeError(spec, 'dev-fixture');
     if (archetypeProblem) throw new Error(archetypeProblem);
+    // Ch. IX — same fixture-gets-the-same-gate treatment as the archetype check above, and the
+    // same reason: named 'dev-fixture' unconditionally, not this.packId (see the comment above).
+    const relicProblem = relicError(spec, 'dev-fixture');
+    if (relicProblem) throw new Error(relicProblem);
     this.spec = spec;
     this.facts = toFactMap(devFactsJson as unknown as FactLite[]);
     this.pack = null;
@@ -589,7 +607,7 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     if (room.boss) {
-      await this.bossVictory(outcome, pending);
+      await this.bossVictory(outcome, pending, bossRelicId(room));
       return { transitioned: true };
     }
 
@@ -817,8 +835,11 @@ export class DungeonScene extends Phaser.Scene {
 
   /** `pending` — levels already accumulated upstream this beat (resolveCombat's own gate-drill
    *  renewals, if this boss room was also gated; Wave 4 Task 5) — merged with this method's own
-   *  boss/quest grants into ONE ceremony card, never a separate one per source. */
-  private async bossVictory(outcome: CombatOutcome, pending: number[] = []): Promise<void> {
+   *  boss/quest grants into ONE ceremony card, never a separate one per source.
+   *  `relicId` — Ch. IX Provenance: the boss room's own relicId (specResolve.bossRelicId,
+   *  resolveCombat's own call site), or undefined when the spec names none — bossLoot's own
+   *  fallback supplies the Signet for that case, so this is a straight passthrough. */
+  private async bossVictory(outcome: CombatOutcome, pending: number[] = [], relicId?: string): Promise<void> {
     // already marked + persisted by resolveCombat right after combat victory (crucible V1-12)
     const streak = services.save.get().streak + 1;
     const quest = this.pack ? bossQuest(this.pack) : undefined;
@@ -829,7 +850,7 @@ export class DungeonScene extends Phaser.Scene {
     const rng = mulberry32((this.seed + 104729) >>> 0);
     // Concordance Ch. IX — the Warden Signet of Terms edges every loot roll while borne.
     const edged = services.inventory.bornRelic() === 'warden-signet-of-terms';
-    const loot = bossLoot(rng, edge, edged);
+    const loot = bossLoot(rng, edge, edged, relicId);
     await services.inventory.addGold(loot.gold);
     await services.inventory.grantItem(loot.relicId);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);

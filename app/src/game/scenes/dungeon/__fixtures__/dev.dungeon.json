@@ -56,7 +56,8 @@
           { "branchEncounterId": "moss.boss.p1", "recallTags": ["moss"] },
           { "branchEncounterId": "moss.boss.p2", "recallTags": ["moss"] },
           { "branchEncounterId": "moss.boss.p3", "recallTags": ["moss"] }
-        ]
+        ],
+        "relicId": "unbroken-clasp"
       }
     }
   ]
