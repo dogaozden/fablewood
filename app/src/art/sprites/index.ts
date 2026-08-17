@@ -11,6 +11,7 @@ import { tileGrass, tilePath, tileWater } from './hamletTiles';
 import { hamletProps } from './set-hamlet-props'; // A3 — reviewed PASS: docs/art-reviews/hamlet-props.md
 import { combatSprites } from './set-combat'; // A2 — reviewed PASS: docs/art-reviews/combat-tiles-icons.md
 import { enemySprites } from './set-enemies'; // A1 — reviewed PASS: docs/art-reviews/combat-enemies.md
+import { bestiarySprites } from './set-bestiary'; // Ch. VIII — reviewed PASS: docs/art-reviews/bestiary-entries.md
 import { characterSprites } from './set-characters'; // A4 — reviewed PASS: docs/art-reviews/characters-set.md
 
 export interface SpriteAnim {
@@ -67,6 +68,9 @@ export const SPRITES: readonly SpriteDef[] = [
   ...combatSprites,
   // Combat enemies (A1) — gate-reviewed + validated; 2-frame idles, scale 3.
   ...enemySprites,
+  // Ch. VIII bestiary entries — gate-reviewed + validated; SINGLE-frame (the chapter's
+  // "static-frame sprites"), scale 3. Lurker 16×16, Husk/Pall 16×24 (overhang upward).
+  ...bestiarySprites,
   // Companion Mira (18-frame sheet) + NPCs clerk/berry/alder (A4) — gate-reviewed + validated.
   // char.mira stays scale 1 (16-native) per D2; combat display-scales ×3, bottom-center origin.
   ...characterSprites,
