@@ -319,3 +319,125 @@ describe('no bridge (static build) — in-memory session, warned once', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 });
+
+describe('borne relic (Concordance Ch. IX) — one relic, chosen freely, persisted with the hoard', () => {
+  it('bears an owned relic and reads it back via bornRelic() and snapshot()', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready();
+    await s.grant('warden-signet-of-terms');
+
+    await s.bearRelic('warden-signet-of-terms');
+
+    expect(s.bornRelic()).toBe('warden-signet-of-terms');
+    expect(s.snapshot().bornRelicId).toBe('warden-signet-of-terms');
+    const disk = b.raw('inventory.json') as { bornRelicId: string };
+    expect(disk.bornRelicId).toBe('warden-signet-of-terms');
+  });
+
+  it('bearing a second owned relic swaps the borne one for free', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready();
+    await s.grant('warden-signet-of-terms');
+    await s.grant('unbroken-clasp');
+    await s.bearRelic('warden-signet-of-terms');
+
+    await s.bearRelic('unbroken-clasp');
+
+    expect(s.bornRelic()).toBe('unbroken-clasp');
+  });
+
+  it('bearing null sets the relic down', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready();
+    await s.grant('warden-signet-of-terms');
+    await s.bearRelic('warden-signet-of-terms');
+
+    await s.bearRelic(null);
+
+    expect(s.bornRelic()).toBeNull();
+    expect(s.snapshot().bornRelicId).toBeNull();
+    const disk = b.raw('inventory.json') as { bornRelicId: string | null };
+    expect(disk.bornRelicId).toBeNull();
+  });
+
+  it('rejects bearing a non-relic id even when owned, writing nothing', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready();
+    await s.grant('superior-draught'); // owned, but type 'consumable' not 'relic'
+    const putSpy = vi.spyOn(b, 'putState');
+
+    await expect(s.bearRelic('superior-draught')).rejects.toThrow();
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(s.bornRelic()).toBeNull();
+  });
+
+  it('rejects bearing a relic id that is not owned, writing nothing', async () => {
+    const b = new FakeBridge();
+    const s = new InventoryStore(b);
+    await s.ready(); // no relics granted
+    const putSpy = vi.spyOn(b, 'putState');
+
+    await expect(s.bearRelic('unbroken-clasp')).rejects.toThrow();
+
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(s.bornRelic()).toBeNull();
+  });
+
+  it('preserves bornRelicId across an unrelated mutation, alongside foreign keys', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', {
+      version: 1,
+      gold: 30,
+      stacks: { 'warden-signet-of-terms': 1 },
+      bornRelicId: 'warden-signet-of-terms',
+      ledgerNote: 'the Clerk remembers',
+    });
+    const s = new InventoryStore(b);
+    await s.ready();
+
+    await s.addGold(1);
+    await s.grant('embermend-draught');
+
+    const disk = b.raw('inventory.json') as { bornRelicId: string; ledgerNote: string };
+    expect(disk.bornRelicId).toBe('warden-signet-of-terms');
+    expect(disk.ledgerNote).toBe('the Clerk remembers');
+  });
+
+  it('an old save missing bornRelicId reads as null, not a crash', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', { version: 1, gold: 40, stacks: {} }); // pre-Ch.IX shape
+    const s = new InventoryStore(b);
+
+    await s.ready();
+
+    expect(s.bornRelic()).toBeNull();
+    expect(s.snapshot().bornRelicId).toBeNull();
+  });
+
+  it('corrupt-file recovery defaults bornRelicId to null like the rest of the wallet', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', ['not', 'a', 'wallet']);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const s = new InventoryStore(b);
+
+    await s.ready();
+
+    expect(s.bornRelic()).toBeNull();
+  });
+
+  it('bornRelic() defensively reads null if the borne id is no longer in stacks (hand-edited save)', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', { version: 1, gold: 10, stacks: {}, bornRelicId: 'warden-signet-of-terms' });
+    const s = new InventoryStore(b);
+
+    await s.ready();
+
+    expect(s.bornRelic()).toBeNull();
+    expect(s.snapshot().bornRelicId).toBeNull();
+  });
+});
