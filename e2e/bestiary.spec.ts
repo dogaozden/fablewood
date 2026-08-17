@@ -287,6 +287,54 @@ test('bestiary scenario a: Careful Step also composes off the TOLLED base — a 
 });
 
 // ---------------------------------------------------------------------------------------
+// Scenario a, fix round (I1) — the rise toll's house floor must never override a zero another
+// law already made. A unit that is both Bound (effectiveMove forces move to 0, status.ts:188)
+// and Toppled rises at its own turn start into that same zero: tollRise(0) must stay 0, not
+// resurrect a phantom tile via the min-1 floor meant to guard a MOBILE unit's halving. Same
+// drive pattern as scenario a's own rise-toll test above (seed=7, wisp-0/wraith-2 lethally
+// Kindled so they die at their own turn-start tick before ever acting, wisp-1 exiled out of
+// reach) — only the Keeper's own fixture differs. Bound is applied with turns=2, not scenario
+// a's own turns=1 idiom for Toppled: Bound is a real duration status (decays at the OWNER's
+// turn end — status.ts's NO_TURN_END_DECAY does NOT cover it, unlike Toppled's event-consumed
+// lifecycle), so turns=1 would decay to 0 and vanish at the end of the Keeper's own turn 1,
+// before ever reaching the turn-2 rise this test is about.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario a: a Bound-and-Toppled unit rises with ZERO movement — the house floor never overrides a zero another law already made (fix round, I1)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2); // dies at its own turn-start tick (hp 2)
+  await applyStatus(page, 'wraith-2', 'kindled', 1, 3); // dies at its own turn-start tick (hp 3)
+  await setPos(page, 'wisp-1', 11, 7); // exiled — melee-only, can't close the distance in time
+
+  const fresh = await snap(page);
+  expect(fresh?.budget.total, "sanity: the Keeper's fresh, un-tolled move budget").toBe(4);
+
+  // Fixture the Keeper Bound (turns=2 — survives one turn-end decay, see header note) AND Toppled.
+  await applyStatus(page, 'keeper', 'bound', 2);
+  await applyStatus(page, 'keeper', 'toppled', 1, 1);
+
+  await page.keyboard.press('7'); // end turn 1
+  const risen = await passUntilKeeper(page);
+  expect(risen.activeId).toBe('keeper');
+
+  // The rise still fires (Toppled is consumed either way), but the toll must land on ZERO:
+  // Bound's effectiveMove is 0 before tollRise ever runs, and the house floor must not
+  // resurrect it.
+  expect(risen.budget.total, 'a Bound-and-Toppled rise: tollRise(effectiveMove) must stay 0').toBe(0);
+  expect(risen.budget.left, 'nothing spent yet, and nothing TO spend').toBe(0);
+
+  const afterRise = await unitState(page, 'keeper');
+  expect(afterRise?.statuses.some((st) => st.id === 'toppled'), 'Toppled is consumed by the rise regardless').toBe(false);
+  expect(afterRise?.statuses.some((st) => st.id === 'bound'), 'sanity: Bound is still live — it is why move is 0').toBe(true);
+
+  const tiles = await reachable(page);
+  expect(tiles, 'no legal move tile exists at budget 0').toEqual([]);
+});
+
+// ---------------------------------------------------------------------------------------
 // Scenario g (Task 8b) — Ch. VIII's own text: "Damage vs a Toppled unit: adjacent attackers +1,
 // non-adjacent −1 (the ±1 idiom, both directions)." Task 8's completeness sweep found the term
 // was never wired into computeHit (the engine's own documented single damage-modifier pipeline)
