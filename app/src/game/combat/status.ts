@@ -222,6 +222,16 @@ export interface ComputeHitInput {
    *  OTHER seam's later hit (turn-action after an OA, or an OA after a turn-action) reads the
    *  flag false by construction. */
   attackerUnwrittenOpeningTempo: boolean;
+  /** Ch. V/Ch. VIII (Task 8b) — is the ATTACKER adjacent (manhattan 1) to the TARGET for this
+   *  hit? Gates the Toppled term below: a Toppled target takes +1 from an adjacent attacker,
+   *  −1 from a non-adjacent one. This module has no board access, so the caller computes it
+   *  for real off live positions — same "caller resolves what this pure module can't" shape as
+   *  `flank` — and passes it uniformly for every hit with a real attacker position (melee,
+   *  ranged, spells, opportunity strikes, enemy blows alike), even where adjacency is
+   *  geometrically guaranteed (Strike, OAs): no always-true shortcuts. A damage source with no
+   *  attacker position at all (spells.ts's pure pre-pass, empty statuses) passes false — moot,
+   *  since targetStatuses there never carries 'toppled' to react to. */
+  adjacent: boolean;
 }
 
 export interface ComputeHitResult {
@@ -237,7 +247,8 @@ export interface ComputeHitResult {
  * The ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack:
  *   base + emboldened(+1) − weakened(−1) − daunted(−1, source-alive-gated)
  *   + unwritten-opening-tempo(+1, exactly-once) + flank(+1) + overglow(+1) + weld(+1)
- *   + rider(+1) → floor 0 → + inked(+1) if >0 → Warded absorbs → HP.
+ *   + rider(+1) ± toppled(adjacent ? +1 : −1, target-side) → floor 0 → + inked(+1) if >0 →
+ *   Warded absorbs → HP.
  * Inked amplifies only a real (nonzero, post-floor) hit — a 0 stays 0.
  *
  * Ch. VIII — daunted folds exactly like weakened (statusMagnitude off the attacker), gated by
@@ -249,16 +260,24 @@ export interface ComputeHitResult {
  * `attackerUnwrittenOpeningTempo` (this module has no way to know "is this particular hit the
  * one consuming the status" — that is a CombatScene wiring fact, not a board-state fact, but
  * the same "caller resolves what this module can't" shape as the daunted gate above).
+ *
+ * Ch. V/Ch. VIII Task 8b — the Toppled term is the pipeline's one TARGET-side fold: ±1 off
+ * `targetStatuses` carrying 'toppled', signed by the caller-supplied `adjacent` (see its own
+ * doc above). No magnitude read here — the chapter's ±1 is flat, unlike every other status's
+ * own statusMagnitude-driven term. Joins the same pre-floor sum as daunted/weakened/tempo, so
+ * it inherits the family's existing floor at 0 with no special-casing.
  */
 export function computeHit(input: ComputeHitInput): ComputeHitResult {
   const {
     base, attackerStatuses, targetStatuses, flank, overglow, weld, rider,
-    attackerDauntedSourceAlive, attackerUnwrittenOpeningTempo,
+    attackerDauntedSourceAlive, attackerUnwrittenOpeningTempo, adjacent,
   } = input;
 
   const dauntedPenalty = hasStatus(attackerStatuses, 'daunted') && attackerDauntedSourceAlive
     ? statusMagnitude(attackerStatuses, 'daunted')
     : 0;
+
+  const toppledTerm = hasStatus(targetStatuses, 'toppled') ? (adjacent ? 1 : -1) : 0;
 
   let dmg = base
     + statusMagnitude(attackerStatuses, 'emboldened')
@@ -268,7 +287,8 @@ export function computeHit(input: ComputeHitInput): ComputeHitResult {
     + (flank ? 1 : 0)
     + (overglow ? 1 : 0)
     + (weld ? 1 : 0)
-    + (rider ? 1 : 0);
+    + (rider ? 1 : 0)
+    + toppledTerm;
   dmg = Math.max(0, dmg);
   if (dmg > 0) dmg += statusMagnitude(targetStatuses, 'inked');
 

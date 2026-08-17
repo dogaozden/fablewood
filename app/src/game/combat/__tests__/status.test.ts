@@ -225,7 +225,7 @@ describe('computeHit — the one pipeline (§3 rule 4)', () => {
   const noMods = {
     attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
     flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
-    attackerUnwrittenOpeningTempo: false,
+    attackerUnwrittenOpeningTempo: false, adjacent: false,
   };
 
   it('base only, no modifiers', () => {
@@ -418,7 +418,7 @@ describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
         attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
         targetStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }],
         flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
-        attackerUnwrittenOpeningTempo: false,
+        attackerUnwrittenOpeningTempo: false, adjacent: false,
       });
       expect(res.hpDamage).toBe(2); // base 1 + emboldened 1; daunted/sourceId untouched — no pipeline change this task
     });
@@ -429,7 +429,7 @@ describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
   describe('computeHit — the −1 fold, active only while the source stands (mirrors weakened)', () => {
     const base2 = {
       base: 2, targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false,
-      attackerUnwrittenOpeningTempo: false,
+      attackerUnwrittenOpeningTempo: false, adjacent: false,
     };
     const dauntedStatus = (magnitude = 1): StatusInstance[] => [{ id: 'daunted', turnsLeft: -1, magnitude, sourceId: 'pall-1' }];
 
@@ -452,7 +452,7 @@ describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
       const res = computeHit({
         base: 1, targetStatuses: [], flank: false, overglow: false, weld: false, rider: false,
         attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true,
-        attackerUnwrittenOpeningTempo: false,
+        attackerUnwrittenOpeningTempo: false, adjacent: false,
       });
       expect(res.hpDamage).toBe(0);
     });
@@ -497,6 +497,7 @@ describe('Bestiary (Ch. VIII) — Task 5: Unwritten mechanics', () => {
     const noMods = {
       attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
       flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+      adjacent: false,
     };
 
     it('true adds a flat +1, same shape as flank/overglow/weld/rider', () => {

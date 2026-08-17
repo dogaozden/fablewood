@@ -1685,12 +1685,18 @@ export class CombatScene extends Phaser.Scene {
         // Ledger). Read the tempo flag BEFORE computeHit (still true if `striker` is going
         // into this swing still Unwritten), same read-then-consume shape as enemyStrike below.
         const unwrittenOpeningTempo = hasStatus(striker.statuses, 'unwritten');
+        // Task 8b — computed for real, not hardcoded true, even though opportunityStrikers'
+        // own filter (ai.ts) only ever returns strikers already at manhattan(vacated, u) === 1:
+        // the census rule is uniform computation at every computeHit call site, no exceptions
+        // for sites where adjacency happens to be geometrically guaranteed.
+        const adjacent = manhattan(striker, vacated) === 1;
         const result = computeHit({
           base: 1 + (striker.team === 'party' ? this.strikeBonus : 0),
           attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
           attackerDauntedSourceAlive: this.dauntedSourceAlive(striker),
           attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
+          adjacent,
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
@@ -2373,6 +2379,10 @@ export class CombatScene extends Phaser.Scene {
         const target = this.unitById(op.targetId);
         if (!target?.alive) continue;
         if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
+        // Task 8b — a spell's real attacker/target board positions (unlike spells.ts's own
+        // pure pre-pass): the ranged half of the ±1 idiom lives here (a cast at range 2+ vs a
+        // Toppled target reads non-adjacent, −1).
+        const adjacent = manhattan(caster, target) === 1;
         const result = computeHit({
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
           flank: false, overglow: false, weld: false, rider: false,
@@ -2380,6 +2390,7 @@ export class CombatScene extends Phaser.Scene {
           // Ch. VIII Task 5 — moot: `caster` here is always party-side (Unwritten is
           // enemies-only), so attacker.statuses can never carry it; false is the inert value.
           attackerUnwrittenOpeningTempo: false,
+          adjacent,
         });
         target.statuses = result.targetStatuses;
         if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
@@ -2442,6 +2453,9 @@ export class CombatScene extends Phaser.Scene {
     }
     if (!bump || !res.bump) return false;
     if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return false; }
+    // Task 8b — real board positions: `target` never moved on this branch (the push was
+    // blocked, `!res.moved`), so its position here is still the live one the bump lands on.
+    const adjacent = manhattan(caster, target) === 1;
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
@@ -2450,6 +2464,7 @@ export class CombatScene extends Phaser.Scene {
       // own push, or Shove's `unit`) — enemy heaves use enemyStrike's own separate inline
       // forceMove, never this method. False is the inert value.
       attackerUnwrittenOpeningTempo: false,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) {
@@ -2575,6 +2590,9 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const flank = isFlanked(attacker, target, attacker.team, this.units);
+    // Task 8b — computed for real like every other site, even though Strike's own range (§4.1,
+    // range 1) geometrically guarantees this is always true: no always-true shortcuts.
+    const adjacent = manhattan(attacker, target) === 1;
     const result = computeHit({
       base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
@@ -2582,6 +2600,7 @@ export class CombatScene extends Phaser.Scene {
       // Ch. VIII Task 5 — moot: `attacker` here is always the party's own Strike-user (this
       // method's own doc comment above), and Unwritten is enemies-only. False is the inert value.
       attackerUnwrittenOpeningTempo: false,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
@@ -3144,6 +3163,11 @@ export class CombatScene extends Phaser.Scene {
     }
 
     const flank = !attacker.ranged && isFlanked(attacker, target, attacker.team, this.units);
+    // Task 8b — captured here, alongside flank and BEFORE the push/heave block below can move
+    // `target`'s position: both describe the geometry at the moment of THIS swing's contact,
+    // not wherever a same-blow push (e.g. the Husk's own heave) might relocate the target to
+    // afterward. Real for every enemy blow, melee or the wraith's own ranged reach alike.
+    const adjacent = manhattan(attacker, target) === 1;
     let bumpBonus = 0;
     // Ch. VIII — did the Husk's heave actually MOVE its target (as opposed to bouncing it off a
     // wall)? Only a landed push knocks Toppled, so the knock below needs this one bit, and it
@@ -3187,6 +3211,7 @@ export class CombatScene extends Phaser.Scene {
       flank, overglow: false, weld: false, rider: false,
       attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
       attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {

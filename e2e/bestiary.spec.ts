@@ -287,35 +287,27 @@ test('bestiary scenario a: Careful Step also composes off the TOLLED base — a 
 });
 
 // ---------------------------------------------------------------------------------------
-// Task 8 sweep FINDING — Ch. VIII's own text: "Damage vs a Toppled unit: adjacent attackers +1,
-// non-adjacent −1 (the ±1 idiom, both directions)." Traced to source before writing this pin:
-// computeHit (status.ts) is the engine's OWN documented single damage-modifier pipeline ("the
-// ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack") — its formula reads
-// emboldened/weakened/daunted/unwritten-opening-tempo/flank/overglow/weld/rider/inked, and NO
-// term for a Toppled target or attacker-adjacency exists anywhere in it. meleeHit (CombatScene.ts,
-// Strike's own damage path) calls computeHit with exactly that parameter set — no Toppled/target
-// status, no adjacency flag beyond the unrelated `flank`. A repo-wide search for "toppled" outside
-// this test file turns up only the rise/consumption seam (advanceTurn), the status application on
-// a landed Shove/heave, and status.ts's label/glyph/stacking metadata — never a damage modifier.
-// This is not a missing e2e pin over working code; the mechanic itself was never wired. The pin
-// below is written to the CHAPTER's law and is expected to fail against HEAD — that failure IS
-// the finding, reported verbatim rather than fixed (app/ is out of scope for this task) or
-// softened to pass.
+// Scenario g (Task 8b) — Ch. VIII's own text: "Damage vs a Toppled unit: adjacent attackers +1,
+// non-adjacent −1 (the ±1 idiom, both directions)." Task 8's completeness sweep found the term
+// was never wired into computeHit (the engine's own documented single damage-modifier pipeline)
+// — this pin was originally written RED, against HEAD, as that finding. Task 8b implemented the
+// term in status.ts and threaded computed adjacency (manhattan 1) through every computeHit call
+// site; this pin now proves the law rather than reporting its absence. This is the adjacent
+// (+1) half, via Strike — the non-adjacent (−1) half follows below.
 //
-// Fix round 1 (review C1): the modified leg must NOT reuse the control leg's own target.
-// `damageUnit` (CombatScene.ts) floors HP at `Math.max(0, hp - amount)`, and the logged `dmg` is
-// a pool-wide before/after delta (`enemyHpSum()`), not raw computeHit output — so a target that's
-// already down to its last HP point can only ever LOG a delta of however much HP it had left,
-// regardless of how much real damage the (eventually fixed) engine computes. wisp-0 (2 max HP)
-// loses 1 HP in the control leg, leaving exactly 1 HP of headroom — not enough to show a genuine
-// +1 (needs 2). Reusing it would make this pin permanently red with the IDENTICAL failure message
-// even after the missing term is correctly implemented, misleading whoever lands that fix. The
-// modified leg now strikes a FRESH target (wraith-2, 3 max HP, untouched all test long) instead —
-// same Strike shape (adjacent, no other modifiers, same relative tile), only the target and its
-// Toppled status differ. The headroom itself is asserted explicitly below, not just assumed, so
-// this can never silently regress back into the clamp trap.
+// Fix round 1 (review C1, preserved): the modified leg must NOT reuse the control leg's own
+// target. `damageUnit` (CombatScene.ts) floors HP at `Math.max(0, hp - amount)`, and the logged
+// `dmg` is a pool-wide before/after delta (`enemyHpSum()`), not raw computeHit output — so a
+// target that's already down to its last HP point can only ever LOG a delta of however much HP
+// it had left, regardless of how much real damage the engine computes. wisp-0 (2 max HP) loses 1
+// HP in the control leg, leaving exactly 1 HP of headroom — not enough to show a genuine +1
+// (needs 2). Reusing it would misreport a real +1 as a clamp artifact. The modified leg strikes a
+// FRESH target (wraith-2, 3 max HP, untouched all test long) instead — same Strike shape
+// (adjacent, no other modifiers, same relative tile), only the target and its Toppled status
+// differ. The headroom itself is asserted explicitly below, not just assumed, so this can never
+// silently regress back into the clamp trap.
 // ---------------------------------------------------------------------------------------
-test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled target (Ch. VIII\'s ±1 idiom)', async ({ page }) => {
+test('bestiary scenario g: an adjacent Strike deals +1 against a Toppled target (Ch. VIII\'s ±1 idiom)', async ({ page }) => {
   test.setTimeout(60_000);
   await page.goto('/?scene=combat&seed=7');
   await waitReady(page, 'combat');
@@ -363,7 +355,84 @@ test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled targ
   await canvasClick(page, tileXY(6, 1).x, tileXY(6, 1).y);
   const afterToppled = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the Strike-vs-Toppled to resolve');
   const toppledDealt = afterToppled.log.at(-1)?.dmg ?? -1;
-  expect(toppledDealt, "Ch. VIII: an adjacent attacker deals +1 against a Toppled target — see the FINDING note above if this fails").toBe(controlDealt + 1);
+  expect(toppledDealt, "Ch. VIII: an adjacent attacker deals +1 against a Toppled target").toBe(controlDealt + 1);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario g, the ranged half (Task 8b) — Ch. VIII's own text: "...non-adjacent −1". Every
+// player-side ranged action (Smite, Cinder-Rebuke, Weave, Sequence, Cast) requires resolving a
+// real MCQ/trivia encounter, and there is no debug hook to force a specific quality bucket (one
+// existed for T3's toppleable fixture, debugForceToppleable, and was deliberately removed once
+// real content covered the need — CombatScene.ts's own comment on its removal). Driving a real
+// MCQ cast to a KNOWN quality deterministically would mean borrowing difficulty-p3.spec.ts's
+// pattern (fetch /api/packs, match rendered option text against the installed pack's real answer
+// strings) — the ONLY test in this file that would depend on real pack content, where every
+// other test here (including the Strike pin above) is fully hermetic via debug hooks. So this
+// proves the ranged half through a different real attacker instead: enemyStrike (CombatScene.ts)
+// already resolves the wraith's own ranged reach (ranged:true, range 3) with a flat
+// `attacker.attack` base, AI-driven, no encounter involved at all — the SAME computeHit
+// call-site family as the Strike test above, just the enemy-attacker direction the chapter's own
+// text treats identically ("enemy blows... alike; symmetric by construction").
+//
+// Geometry (verified against seed=7's real layout via CombatScene.layoutDebug, not hand-derived
+// — scenario a's own history warned that guessing here isn't reliable): row 1 is clear floor
+// across columns 1-10, no gold/lantern/wall. wraith-2 sits at (7,1), two tiles from the Keeper
+// (5,1) along that same row — hasLineOfFire (grid.ts) clears at distance 2 (≤ its range of 3),
+// and ai.ts's own "already in range from where we stand? hit without moving" branch fires
+// deterministically, so there's no AI-scoring uncertainty to derive. wisp-0/wisp-1 are exiled to
+// row 6, far beyond their own move(3)+range(1) reach of the Keeper; mira sits at distance 4 from
+// the wraith — one tile beyond its range 3 — so she never enters its target pool. The wraith is
+// the only thing that can act on the Keeper either round.
+//
+// Emboldened(+1) is applied to the wraith once, for the whole test, so neither leg's delta rests
+// on a bare 0 — the control leg alone (delta 2, not 1) already proves the wraith reliably
+// attacks the Keeper in this exact geometry, so the modified leg's delta of 1 can only read as
+// the −1 term, never as "nothing happened" (the Strike pin's own C1 headroom fix guards against
+// the identical ambiguity from the other direction).
+// ---------------------------------------------------------------------------------------
+test("bestiary scenario g: a non-adjacent wraith deals −1 against a Toppled party member (Ch. VIII's ±1 idiom, the ranged half)", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-0', 10, 6); // exiled — beyond move(3)+range(1) of the Keeper
+  await setPos(page, 'wisp-1', 9, 6); // exiled — same reasoning
+  await setPos(page, 'wraith-2', 7, 1); // distance 2 from the Keeper, same row — non-adjacent, in LoF/range
+  await setPos(page, 'keeper', 5, 1);
+
+  // Emboldened(+1) on the wraith for the whole test — see the header note above (keeps both
+  // legs' deltas unambiguously nonzero-and-different: control 2, modified 1).
+  await applyStatus(page, 'wraith-2', 'emboldened', 5, 1);
+
+  // --- Round 1 control: Keeper NOT toppled — the non-adjacent wraith hits for base(1) + emboldened(1).
+  const keeperBeforeR1 = await unitState(page, 'keeper');
+  await page.keyboard.press('7'); // End the Keeper's turn 1.
+  const turn2 = await passUntilKeeper(page);
+  expect(turn2.activeId).toBe('keeper');
+
+  const keeperAfterR1 = await unitState(page, 'keeper');
+  const controlDelta = (keeperBeforeR1?.hp ?? 0) - (keeperAfterR1?.hp ?? 0);
+  expect(controlDelta, 'sanity: the non-adjacent wraith hits for base(1) + emboldened(1), Keeper un-toppled').toBe(2);
+
+  // --- Round 2 modified: re-pin geometry (this file's own "re-teleport everyone back" idiom —
+  // nothing should actually have moved, since the wraith's own "already in range" branch never
+  // relocates it, but this stays explicit rather than assumed), then Topple the Keeper — same
+  // wraith, same distance, now −1.
+  await setPos(page, 'wisp-0', 10, 6);
+  await setPos(page, 'wisp-1', 9, 6);
+  await setPos(page, 'wraith-2', 7, 1);
+  await setPos(page, 'keeper', 5, 1);
+  await applyStatus(page, 'keeper', 'toppled', 1, 1);
+
+  const keeperBeforeR2 = await unitState(page, 'keeper');
+  await page.keyboard.press('7'); // End the Keeper's turn 2.
+  const turn3 = await passUntilKeeper(page);
+  expect(turn3.activeId).toBe('keeper');
+
+  const keeperAfterR2 = await unitState(page, 'keeper');
+  const toppledDelta = (keeperBeforeR2?.hp ?? 0) - (keeperAfterR2?.hp ?? 0);
+  expect(toppledDelta, "Ch. VIII: a non-adjacent attacker deals −1 against a Toppled target").toBe(controlDelta - 1);
 });
 
 // ---------------------------------------------------------------------------------------
@@ -414,6 +483,16 @@ test('bestiary scenario a: mid-rise disables the opportunity latch for the rest 
   const turn2 = await passUntilKeeper(page);
   expect(turn2.activeId).toBe('keeper');
   await applyStatus(page, 'keeper', 'toppled', 1, 1);
+  // Task 8b — wraith-2 lands its own round-2 attack from the same non-adjacent standoff tile
+  // (5,3) it always takes (distance 2 from the Keeper, confirmed by DIAG evidence during this
+  // fix). Now that the Keeper is genuinely Toppled, that attack alone floors to 0 (base 1 − the
+  // new non-adjacent −1 term, Ch. VIII's ±1 idiom) — a real, correct consequence of the law, not
+  // a bug in it — which would silently skip refreshing Dimmed (CombatScene.ts's enemyStrike
+  // gates the Dimmed apply on hpDamage > 0) and break this test's own Dimmed-vs-raw-stat
+  // cross-check below. Emboldened(+1) keeps that one hit's damage positive (1+1−1=1) so Dimmed
+  // still refreshes exactly as this test always intended; it does not touch anything this test
+  // asserts about wraith-2's OWN incoming hp (only its outgoing damage).
+  await applyStatus(page, 'wraith-2', 'emboldened', 2, 1);
   await page.keyboard.press('7'); // end turn 2 without moving
 
   // --- Round 3 test: the rise fires; re-stage the identical approach (the enemies' own round-2

@@ -336,7 +336,7 @@ describe('§5.4 anti-soul math — S1 (no question-avoidant optimum)', () => {
     const strikeBase = resolveAction('strike', 1).hits;
     const strikeMax = computeHit({
       base: strikeBase, attackerStatuses: [], targetStatuses: [], flank: true, overglow: false, weld: false, rider: false,
-      attackerDauntedSourceAlive: false, attackerUnwrittenOpeningTempo: false,
+      attackerDauntedSourceAlive: false, attackerUnwrittenOpeningTempo: false, adjacent: false,
     }).hpDamage;
 
     const maxAoeTiles = (id: 'smite' | 'weave' | 'sequence' | 'cast'): number => {
