@@ -626,8 +626,15 @@ export class CombatScene extends Phaser.Scene {
     const heel = borne === 'waymark-heel';
     for (const u of this.units) {
       if (u.team !== 'party') continue;
-      const rawBase = u.kind === 'keeper' ? KEEPER.move : u.kind === 'mira' ? MIRA.move : u.move;
-      u.move = rawBase + (heel ? 1 : 0);
+      // Fix round (final review F3/M2): narrowed to the two known party kinds so "recomputes
+      // from the KEEPER/MIRA base constants" is true BY CONSTRUCTION, not just true today — the
+      // old third branch fell back to reading u.move (already-modified on the second of this
+      // method's two deliberate calls), silently doubling the Heel for any other kind. A third
+      // party kind (a summon, a companion) must add its own `else if (u.kind === '...')` branch
+      // with its own base constant here; until then it is simply left untouched rather than
+      // guessed at.
+      if (u.kind === 'keeper') u.move = KEEPER.move + (heel ? 1 : 0);
+      else if (u.kind === 'mira') u.move = MIRA.move + (heel ? 1 : 0);
     }
 
     // Ch. IX — the Margin Lamp: enemies begin combat already written. The reveal-on-act/damage
@@ -2702,9 +2709,13 @@ export class CombatScene extends Phaser.Scene {
       // (hasLineOfFire), which is precisely why that predicate was chosen over a manhattan disk.
       if (dir) {
         const landed = this.pushUnit(unit, target, dir, null, { bump: true });
-        // Ch. VIII's heave gate, mirrored line for line (landed && alive && isToppleable) — the
-        // same law seen from the party's side of the board, and read AFTER the push has resolved
-        // so the corpse-never-topples discipline holds even though this push cannot fell anyone.
+        // Fix round (final review F2): this used to name the heave's gate (:3479) as the
+        // ancestor mirrored here, but the heave's own gate carries a fourth conjunct
+        // (attacker.kind === 'husk') the heave needs and this doesn't. Shove's gate (:2643) is
+        // the byte-identical one — mirrored line for line (landed && alive && isToppleable),
+        // the same law seen from the item's side of the board, and read AFTER the push has
+        // resolved so the corpse-never-topples discipline holds even though this push cannot
+        // fell anyone.
         if (landed && target.alive && this.isToppleable(target)) {
           target.statuses = applyStatus(target, 'toppled', 1, 1);
           this.drawHpBar(target);

@@ -35,7 +35,7 @@ describe('effectLabel — the six Ch. IX kinds (verbatim copy)', () => {
     expect(effectLabel(fakeItem({ kind: 'begin_written' }))).toBe('Enemies begin combat written');
   });
   it('rest_light', () => {
-    expect(effectLabel(fakeItem({ kind: 'rest_light', amount: 1 }))).toBe('Each hearth rest banks +1 Lantern-light');
+    expect(effectLabel(fakeItem({ kind: 'rest_light', amount: 1 }))).toBe('Once a rest, the first Lantern-light spent is caught');
   });
   it('push_blast', () => {
     expect(effectLabel(fakeItem({ kind: 'push_blast', reach: 3, tiles: 1 }))).toBe(

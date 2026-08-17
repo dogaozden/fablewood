@@ -37,7 +37,11 @@ export function effectLabel(item: ItemDef): string {
     case 'begin_written':
       return 'Enemies begin combat written';
     case 'rest_light':
-      return 'Each hearth rest banks +1 Lantern-light';
+      // Fix round (final review I1): this used to describe the pre-correction law (a rest-
+      // time +1 grant), which contradicted Ch. IV's ratified binary light after the 2026-08-17
+      // amendment moved the Wick's catch to the raise-SPEND seam (lantern.ts's
+      // spendLanternLight(), WICK_CATCH_LINE). Controller-ruled replacement, verbatim.
+      return 'Once a rest, the first Lantern-light spent is caught';
     case 'push_blast':
       // Ch. IX, W9 T7 review finding 4 — the label has to carry the LINE, not just the range.
       // The straight-jet law is ratified as a feature ("line up the shot"), so a label reading
