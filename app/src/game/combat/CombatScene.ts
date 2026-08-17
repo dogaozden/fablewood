@@ -975,9 +975,13 @@ export class CombatScene extends Phaser.Scene {
     // topples the Husk (Ch. VIII) — so `tolledMoveBase` is set here, once, and BOTH
     // moveBudgetFor (party, via beginPlayerTurn below) and runEnemyTurn's effMove read the same
     // value rather than each re-deriving it from raw effectiveMove (the W6 split-read lesson).
-    // Reset unconditionally (not just on a rise) so a previous turn's toll can never leak into
-    // this one; the condition itself is consumed here too, per the chapter ("carries no
-    // duration — it is consumed by the rise").
+    // Reset here on every turn that reaches this point (not just a rise) so a previous turn's
+    // toll can never leak into a later budget read; the condition itself is consumed here too,
+    // per the chapter ("carries no duration — it is consumed by the rise"). M1 (fix round): the
+    // two early returns above (Kindled death, Staggered) skip this reset entirely — the actual
+    // guarantee against leakage isn't the reset's unconditionality, it's that neither path ever
+    // computes a budget or move field for a dead or turn-skipped unit; a stale value only leaks
+    // once something reads it, and nothing does.
     if (hasStatus(unit.statuses, 'toppled')) {
       unit.statuses = unit.statuses.filter((s) => s.id !== 'toppled');
       this.tolledMoveBase = tollRise(effectiveMove(unit.move, unit.statuses));
