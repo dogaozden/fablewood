@@ -144,7 +144,15 @@ test('the combat Satchel pane never lists relics, even one owned and borne', asy
 // only if) DungeonScene actually reads bornRelic() and threads it into bossLoot. A build that
 // left the wiring unthreaded reverts to the un-edged 'mossbound-locket' control, so this is a
 // genuinely discriminating live proof of the call-site wiring, not a vacuous one.
-type LootSave = { scene?: string; hp?: number; streak?: number; lastPlayed?: string; lanternLight?: boolean };
+type LootSave = {
+  scene?: string;
+  hp?: number;
+  streak?: number;
+  lastPlayed?: string;
+  lanternLight?: boolean;
+  wickCaught?: boolean;
+  lastHearthAt?: string;
+};
 type LootInventory = { version: number; gold: number; stacks: Record<string, number>; bornRelicId?: string | null };
 
 /** leveling-grant-sequence.spec.ts / lantern-light.spec.ts's own restoreLootState idiom,
@@ -254,5 +262,148 @@ test("Mira's shelf shows ten rows: the eight staples plus both of today's two ro
     await page.request.put('/api/state/inventory.json', {
       data: beforeInv ?? { version: 1, gold: 0, stacks: {} },
     });
+  }
+});
+
+// Task 4, the Second Wick — corrected 2026-08-17: the chapter's first translation ("+1
+// Lantern-light, banked, compounding") contradicted Ch. IV's ratified binary light and was
+// re-authored. The lawful mechanic: while borne, the FIRST spend of the raise after a hearth
+// rest re-banks the light at once instead of clearing it — once per rest-cycle, never a second
+// stockpiled light. All four scenarios drive the SAME deterministic spend surface as the
+// Signet's own proof above: `?scene=vaults&sim=1&auto=boss&seed=7` (auto=boss always raises
+// when a light is held — DungeonScene.offerLantern's own auto-threading rule — so a single
+// page.goto is one full, real spend, no manual clicking).
+const WICK_ID = 'second-wick';
+
+/** Minimal Cottage-rest drive (miras-stall.spec.ts's own runCottageConversation, specialized
+ *  to the 2-BASE-page case: absent lastHearthAt is grace, not a break, so no 3rd page). */
+async function restAtCottage(page: Page): Promise<void> {
+  await tapKey(page, 'e'); // open (page 1 starts typing)
+  await page.waitForTimeout(250);
+  await tapKey(page, 'e'); // skip page 1's typewriter
+  await page.waitForTimeout(200);
+  await tapKey(page, 'e'); // advance to page 2 (starts typing)
+  await page.waitForTimeout(250);
+  await tapKey(page, 'e'); // skip its typewriter
+  await page.waitForTimeout(200);
+  await tapKey(page, 'e'); // the closing tap
+  await page.waitForTimeout(200);
+}
+
+test('the Second Wick borne, catch available: the first spend re-banks the light instead of clearing it', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    // wickCaught absent = catch available (correct default — nobody is mid-cycle).
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+    const save = await waitForState<LootSave>(page, 'save.json', (s) => s?.wickCaught === true, 60_000);
+    expect(save?.wickCaught, 'the catch fired').toBe(true);
+    expect(save?.lanternLight, 'the light re-banked at once — still held, not cleared').toBe(true);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('the Second Wick borne, catch already used this cycle: the next spend clears the light normally (once per rest-cycle)', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true, wickCaught: true },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+    const save = await waitForState<LootSave>(page, 'save.json', (s) => s?.lanternLight === false, 60_000);
+    expect(save?.lanternLight, 'no second catch this cycle — the light clears normally').toBe(false);
+    expect(save?.wickCaught, 'the used-catch flag is untouched by a normal spend').toBe(true);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('a hearth rest resets the Second Wick\'s catch — spent, rested, and it catches again', async ({ page }) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    // Fixture: the catch is already spent this cycle, no lastHearthAt (never-rested grace —
+    // canRestTonight(undefined, now) is true, and the Cottage conversation stays 2 base pages,
+    // no break/ward line).
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 3, embers: 0, wickCaught: true, lastPlayed: '' },
+    });
+
+    await page.goto('/?scene=hamlet&seed=7');
+    await waitReady(page, 'hamlet');
+    await waitHamletPlayer(page);
+
+    const warped = await warpHamletTo(page, 'cottage');
+    expect(warped, 'warp hook parked the Keeper at the Cottage').toBe(true);
+    await restAtCottage(page);
+
+    const afterRest = await waitForState<LootSave>(page, 'save.json', (s) => s?.wickCaught === false, 20_000);
+    expect(afterRest?.wickCaught, 'the hearth rest reset the catch').toBe(false);
+    expect(afterRest?.lanternLight, "Solace's own grant still bank the ONE light, as ever").toBe(true);
+
+    // Spend again — the reset catch fires a SECOND time, proving the reset is real (not just a
+    // one-shot flag that happened to start false).
+    await page.request.put('/api/state/save.json', {
+      data: { ...afterRest, scene: 'vaults' },
+    });
+    await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+    const afterSpend = await waitForState<LootSave>(page, 'save.json', (s) => s?.wickCaught === true, 60_000);
+    expect(afterSpend?.wickCaught, 'the catch fired again after the rest reset it').toBe(true);
+    expect(afterSpend?.lanternLight, 'still held — re-banked, not cleared').toBe(true);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('without the Second Wick borne, the spend clears the light normally (regression: the hoisted helper preserves the base case)', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 20, stacks: {} } });
+
+    await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+    const save = await waitForState<LootSave>(page, 'save.json', (s) => s?.lanternLight === false, 60_000);
+    expect(save?.lanternLight, 'no Wick borne — the light clears normally, exactly as before this task').toBe(false);
+    expect(save?.wickCaught, 'wickCaught never sets when the Wick is not borne').not.toBe(true);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
   }
 });

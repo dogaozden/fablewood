@@ -49,7 +49,14 @@ import { enterDoor, recordAnswer, type DeathsDoorState } from './deathsdoor';
 // shape) is header-marked "ORCHESTRATOR-OWNED — do not edit" and outside that list. Flagged in
 // the task report as a deviation from the codebase's usual services-locator pattern.
 import { presentHoldTheLine, type HoldTheLineHandle } from '../encounters/overlay';
-import { planRedraw, FATE_HOLDS_LINE, LANTERN_REDRAW_SALT, heldLanternLight } from '../lantern';
+import {
+  planRedraw,
+  FATE_HOLDS_LINE,
+  LANTERN_REDRAW_SALT,
+  heldLanternLight,
+  spendLanternLight,
+  WICK_CATCH_LINE,
+} from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
@@ -1864,8 +1871,13 @@ export class CombatScene extends Phaser.Scene {
           if (wouldBe === result.encounterId) plan = { consume: false, factIds };
         }
         if (plan.consume) {
-          await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
-          this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
+          // spend BEFORE the benefit lands; Concordance Ch. IX (corrected 2026-08-17) — the
+          // Second Wick's catch re-banks the light instead of clearing it, once per rest-cycle.
+          const wickCaught = await spendLanternLight();
+          this.hud.showBanner(
+            wickCaught ? WICK_CATCH_LINE : 'The lantern flares — another memory surfaces.',
+            P.lanternGold,
+          );
         }
         result = await services.runEncounter({
           context, kinds: [kind], factIds: plan.factIds, packId: this.launch.packId,
@@ -2138,8 +2150,13 @@ export class CombatScene extends Phaser.Scene {
           if (wouldBe === result.encounterId) plan = { consume: false, factIds };
         }
         if (plan.consume) {
-          await services.save.save({ lanternLight: false }); // spend BEFORE the benefit lands
-          this.hud.showBanner('The lantern flares — another memory surfaces.', P.lanternGold);
+          // spend BEFORE the benefit lands; Concordance Ch. IX (corrected 2026-08-17) — the
+          // Second Wick's catch re-banks the light instead of clearing it, once per rest-cycle.
+          const wickCaught = await spendLanternLight();
+          this.hud.showBanner(
+            wickCaught ? WICK_CATCH_LINE : 'The lantern flares — another memory surfaces.',
+            P.lanternGold,
+          );
         }
         result = await services.runEncounter({
           context, kinds: [artKind], factIds: plan.factIds, packId: this.launch.packId,
@@ -3881,14 +3898,17 @@ export class CombatScene extends Phaser.Scene {
         // the two cast sites, nothing else in this round's remaining control flow calls
         // refreshParty before the door might close, so a spend here would otherwise leave
         // the glyph showing lit until some unrelated later refresh happened to fire.
+        let wickCaught = false;
         if (alt) {
-          await services.save.save({ lanternLight: false });
+          // Concordance Ch. IX — the Second Wick's catch (corrected 2026-08-17), same helper
+          // and once-per-rest-cycle law as every other spend site.
+          wickCaught = await spendLanternLight();
           this.refreshParty();
         }
         result = await services.runEncounter({
           context: 'drill', kinds: DD_KINDS, factIds: [alt ?? id], packId: this.launch.packId,
           seed: roundSeed, flair: DEATHS_DOOR_TITLE,
-          lanternLight: false, notice: alt ? undefined : FATE_HOLDS_LINE,
+          lanternLight: false, notice: !alt ? FATE_HOLDS_LINE : wickCaught ? WICK_CATCH_LINE : undefined,
         });
       }
     } catch {

@@ -20,7 +20,7 @@ import {
   type FactLite,
 } from '../../contracts';
 import { embersOf, TRIM_HEAL_CORRECT, TRIM_HEAL_MISS } from '../../rest/embers';
-import { heldLanternLight } from '../../lantern';
+import { heldLanternLight, spendLanternLight, WICK_CATCH_LINE } from '../../lantern';
 import { seededShuffle } from '../../recency';
 import type { Fact, Pack } from '../../../packs/types';
 import { getPacks, getPackAsset } from '../../../bridge/client';
@@ -654,7 +654,9 @@ export class DungeonScene extends Phaser.Scene {
     if (!heldLanternLight()) return 'none';
     const choice = this.auto ? 'raise' : await this.view.showLanternChoice(troveName);
     if (choice !== 'raise') return 'none';
-    await services.save.save({ lanternLight: false });
+    // Concordance Ch. IX — the Second Wick's catch (corrected 2026-08-17): the first spend
+    // after a hearth rest re-banks the light instead of clearing it, once per rest-cycle.
+    if (await spendLanternLight()) this.view.toast(WICK_CATCH_LINE, 'good');
     return 'advantage';
   }
 

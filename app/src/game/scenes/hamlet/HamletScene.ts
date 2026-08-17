@@ -42,7 +42,7 @@ import {
 } from './content';
 import { canRestTonight } from '../../rest/embers';
 import { partitionByRecency, seededShuffle } from '../../recency';
-import { planRedraw, FATE_HOLDS_LINE, heldLanternLight } from '../../lantern';
+import { planRedraw, FATE_HOLDS_LINE, heldLanternLight, spendLanternLight, WICK_CATCH_LINE } from '../../lantern';
 import { previewPick } from '../../encounters/engine';
 import { FIXTURE_PACK } from '../../encounters/fixtures';
 import type { Pack, Encounter } from '../../../packs/types';
@@ -904,6 +904,10 @@ export class HamletScene extends Phaser.Scene {
           // in grantXp (xp/level single-writer) and never keyed off save.streak
           // (Wellspring/boss's counter is a different mechanic; controller ruling W5).
           lanternLight: true,
+          // Concordance Ch. IX — the Second Wick's catch resets every hearth rest: a fresh
+          // rest-cycle means the catch is available again. Lands beside the grant above, same
+          // patch, same write (game/lantern.ts's spendLanternLight() owns the read+set).
+          wickCaught: false,
           // Ch. VII amendment — the break law rides this SAME patch (single-write law);
           // absent (no streak key at all) when the vigil wasn't broken tonight, OR when
           // the ward caught the break — either way, untouched, exactly as shipped.
@@ -1091,14 +1095,19 @@ export class HamletScene extends Phaser.Scene {
             );
             if (wouldBe === res.encounterId) plan = { consume: false, factIds };
           }
-          if (plan.consume) await services.save.save({ lanternLight: false });
+          // Concordance Ch. IX — the Second Wick's catch (corrected 2026-08-17): the first
+          // spend after a hearth rest re-banks the light instead of clearing it, once per
+          // rest-cycle. Reuses the SAME notice channel FATE_HOLDS_LINE already rides — the
+          // two are mutually exclusive (plan.consume gates one, wickCaught only matters
+          // inside the other).
+          const wickCaught = plan.consume && (await spendLanternLight());
           res = await services.runEncounter({
             context: 'drill',
             packId: this.packId ?? '',
             seed: roundSeed,
             factIds: plan.factIds,
             lanternLight: false,
-            notice: plan.consume ? undefined : FATE_HOLDS_LINE,
+            notice: !plan.consume ? FATE_HOLDS_LINE : wickCaught ? WICK_CATCH_LINE : undefined,
           });
         }
         for (const fid of res.factIds) {
