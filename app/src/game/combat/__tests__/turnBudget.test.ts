@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise } from '../turnBudget';
 import { carefulStepMove } from '../ai';
+import { effectiveMove } from '../status';
 
 describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remainder)', () => {
   it('mkTurnBudget: fresh budget has left===total and nothing spent', () => {
@@ -168,6 +169,16 @@ describe('Ch. VIII — the rise toll (tollRise): a Toppled unit\'s turn-start mo
 
   it('the house floor: base 1 tolls to 1, NOT 0 — rising never zeroes a unit\'s movement', () => {
     expect(tollRise(1)).toBe(1);
+  });
+
+  it('zero-preserving (fix round, I1): base 0 tolls to 0, NOT 1 — the house floor guards a ' +
+    'MOBILE unit\'s halving; it never overrides a zero another law already made', () => {
+    expect(tollRise(0)).toBe(0);
+  });
+
+  it('the I1 composition, exactly as CombatScene:983 calls it — a Bound unit\'s effectiveMove ' +
+    'is 0 before the toll ever runs, and the toll must not resurrect that zero', () => {
+    expect(tollRise(effectiveMove(4, [{ id: 'bound', turnsLeft: 1, magnitude: 0 }]))).toBe(0);
   });
 });
 

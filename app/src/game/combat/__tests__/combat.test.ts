@@ -746,7 +746,12 @@ describe('Careful Step movement math (§4.2)', () => {
     expect(carefulStepMove(5)).toBe(2);
     expect(carefulStepMove(3)).toBe(1);
     expect(carefulStepMove(1)).toBe(1);
-    expect(carefulStepMove(0)).toBe(1);
+  });
+
+  it('zero-preserving (fix round, I1 — tollRise\'s pre-existing sibling): a move-0 unit (e.g. ' +
+    'Bound) halves to 0, not 1 — the floor guards a MOBILE unit\'s halving, it never overrides ' +
+    'a zero another law already made', () => {
+    expect(carefulStepMove(0)).toBe(0);
   });
 });
 
