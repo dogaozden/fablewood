@@ -247,6 +247,8 @@ export interface InventorySnapshot {
   gold: number;
   /** itemId → count (ids from inventory/catalog.ts; state-referenced, never renamed) */
   stacks: Record<string, number>;
+  /** the one relic whose passive is live, or null if none borne (Concordance Ch. IX) */
+  bornRelicId: string | null;
 }
 
 export interface UseResult {
@@ -273,6 +275,11 @@ export interface InventoryApi {
   buy(id: string, cost: number, qty?: number): Promise<boolean>;
   /** atomic sale: held check + remove + credit in ONE store write; false (no write) if not enough held */
   sell(id: string, price: number, qty?: number): Promise<boolean>;
+  /** choose the one live relic passive, or null to set it down — swap costs nothing
+   *  (Concordance Ch. IX); false (no write) if id isn't an owned relic */
+  bearRelic(id: string | null): Promise<boolean>;
+  /** the currently borne relic id, or null */
+  bornRelic(): string | null;
 }
 
 // ---------------------------------------------------------------- draw

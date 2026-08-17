@@ -156,7 +156,7 @@ function installServices(initial: Partial<SaveData>): Harness {
   services.inventory = {
     ready: async () => {},
     getGold: () => 0,
-    snapshot: () => ({ gold: 0, stacks: {} }),
+    snapshot: () => ({ gold: 0, stacks: {}, bornRelicId: null }),
     addGold: async () => {
       addGoldGate.calls += 1;
       if (addGoldGate.hold && addGoldGate.calls === 1) await firstGold.promise;
@@ -169,6 +169,8 @@ function installServices(initial: Partial<SaveData>): Harness {
     useItem: async () => ({ ok: true, message: '' }),
     buy: async () => true,
     sell: async () => true,
+    bearRelic: async () => true,
+    bornRelic: () => null,
   };
   services.amendments = {
     ready: async () => {},

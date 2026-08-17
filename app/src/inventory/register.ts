@@ -31,4 +31,6 @@ services.inventory = {
   useItem: (id) => useItem(store, id),
   buy: (id, cost, qty) => store.buy(id, cost, qty),
   sell: (id, price, qty) => store.sell(id, price, qty),
+  bearRelic: (id) => store.bearRelic(id),
+  bornRelic: () => store.bornRelic(),
 };

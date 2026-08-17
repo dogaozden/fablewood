@@ -818,6 +818,7 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
     const snap = {
       gold: 0,
       stacks: { 'embermend-draught': 2, 'scriveners-hint': 3, 'faded-coin-cache': 1, 'lanternoil-tonic': 0 },
+      bornRelicId: null,
     };
     const usable = usableSatchelItems(snap);
     // Phase 3 (Ch. VII Mira's Stall) — trial tools now surface alongside heals; trinkets
@@ -829,10 +830,10 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
   });
 
   it('usableSatchelItems is empty when nothing owned is usable in combat (cannot-use-when-empty); Ward of Focus stays excluded', () => {
-    expect(usableSatchelItems({ gold: 0, stacks: {} })).toEqual([]);
+    expect(usableSatchelItems({ gold: 0, stacks: {}, bornRelicId: null })).toEqual([]);
     // Ward of Focus (streak_shield) is passive — never armed, never in the combat Satchel,
     // even when owned (Constraint 4). It's the one tool kind that stays excluded permanently.
-    expect(usableSatchelItems({ gold: 0, stacks: { 'ward-of-focus': 1 } })).toEqual([]);
+    expect(usableSatchelItems({ gold: 0, stacks: { 'ward-of-focus': 1 }, bornRelicId: null })).toEqual([]);
   });
 
   it('resolveHealUse restores the item amount, clamped to the caller-supplied maxPool', () => {
