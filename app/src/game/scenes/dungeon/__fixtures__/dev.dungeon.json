@@ -33,6 +33,17 @@
       "gate": { "encounterId": "moss.gate.recall" }
     },
     {
+      "id": "under-bestiary",
+      "name": "The Unnumbered Margin",
+      "blurb": "The page-count fails here. Something with too many legs waits in the gutter where the numbering stopped, a shape that has forgotten its own name stands very still, and the dark between them hangs like a curtain nobody drew.",
+      "teaching": ["moss.f4"],
+      "enemies": [
+        { "archetype": "lurker", "tags": ["moss"], "kinds": ["mcq"] },
+        { "archetype": "husk", "tags": ["moss"], "kinds": ["match"] },
+        { "archetype": "pall", "tags": ["moss"], "kinds": ["mcq"] }
+      ]
+    },
+    {
       "id": "under-boss",
       "name": "The Root-Heart Hollow",
       "blurb": "At the rotten heart of the old tree, the Moss-Warden waits — a great mossy sentinel grown tight around a single stolen truth.",
