@@ -20,7 +20,7 @@ import { getPacks, getPackAsset, type PackEntry } from '../../bridge/client';
 import { candidateDungeonFiles, isDungeonSpec } from '../scenes/dungeon/specResolve';
 import {
   GRID_W, GRID_H, CELL, ACTIONS, key, manhattan, type ActionKind, type UnitState, type Coord, type Dir,
-  type TileType,
+  type TileType, type Team,
 } from './types';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles,
@@ -202,6 +202,26 @@ export function splitPooledHp(pool: number, poolMax: number): { keeper: number; 
   return { keeper, mira: clamped - keeper };
 }
 
+/**
+ * Ch. IX — the Unbroken Clasp's decision, pure: does this blow (`amount`, about to land on a
+ * unit at `hp`) get caught? Once per battle (`claspSpent` — the caller's own combat-transient
+ * flag), party-side only, and only when the blow would actually fell the unit (`hp > 0 &&
+ * amount >= hp`) — `hp <= 0` reads false rather than throwing, honoring the chapter's "a unit
+ * already at Death's Door is past clasping" as a standalone law here, even though damageUnit's
+ * own `!unit.alive` early return already keeps a fallen unit from ever reaching this call in
+ * practice.
+ *
+ * Returns a plain boolean, not the shape `(amount, hp, borne, flagUnspent) -> clasped|felled`
+ * floated at brief time: "not caught" does not mean "felled" (most calls are ordinary chip
+ * damage that was never lethal to begin with), so naming the default case after the wrong one
+ * would mislead more than a union would clarify.
+ */
+export function claspCatches(
+  team: Team, hp: number, amount: number, claspSpent: boolean, borne: string | null,
+): boolean {
+  return team === 'party' && hp > 0 && amount >= hp && !claspSpent && borne === 'unbroken-clasp';
+}
+
 export class CombatScene extends Phaser.Scene {
   private launch!: CombatLaunch;
   private layout!: Layout;
@@ -248,6 +268,10 @@ export class CombatScene extends Phaser.Scene {
   private ddRevivedUsed = false;
   /** The hold-the-line status card (Task 7); open exactly while `dd` is non-null. */
   private ddFrame: HoldTheLineHandle | null = null;
+  /** Ch. IX — the Unbroken Clasp: true once its once-per-battle catch has fired. Same cadence
+   *  as `ddRevivedUsed` above (once per BATTLE, never per unit/round) — reset in create()
+   *  (trap 1), never persisted (a relic's passive is a live read every time, per T5's idiom). */
+  private claspSpent = false;
   private encSeed = 0;
   private destroyed = false;
   private demo = false; // ?demo=1 → autopilot the party (screenshots + e2e)
@@ -413,6 +437,7 @@ export class CombatScene extends Phaser.Scene {
     this.graceAvailable = true;
     this.dd = null;
     this.ddRevivedUsed = false;
+    this.claspSpent = false;
     this.closeDdFrame();
     this.debugPrefer = null;
     this.actionLog = [];
@@ -3374,7 +3399,37 @@ export class CombatScene extends Phaser.Scene {
       this.time.delayedCall(200, () => this.revealNotice(unit));
     }
     const before = unit.hp;
-    unit.hp = Math.max(0, unit.hp - amount);
+    // Ch. IX — the Unbroken Clasp: once per battle, party-side only, the first blow that would
+    // take a party unit to 0 leaves it at 1 instead. This has to REPLACE the clamp write below,
+    // not follow it — the opposite placement from the Husk's heave-knock (Ch. VIII), a side
+    // effect deliberately placed AFTER damageUnit so a killing blow never also topples the
+    // corpse it just made. The Clasp isn't layering an effect onto a completed mutation; it's
+    // changing what the mutation writes. Deciding here means `unit.hp <= 0` below simply never
+    // becomes true for a caught blow, so the death branch (alive=false, statuses wiped,
+    // fadeDead) — and everything checkEnd()/enterDeathsDoor() read off it afterward — never has
+    // to know the Clasp exists. "A unit already at Death's Door is past clasping" needs no
+    // extra guard here either: this function's own entry check above (`!unit.alive`) already
+    // refuses a second blow against an individually fallen unit, and the whole-party door
+    // (`state === 'deathsdoor'`) freezes the board — no enemy acts and nothing calls
+    // damageUnit — so a unit can never reach this line while it's open.
+    let claspBorne: string | null = null;
+    if (unit.team === 'party') {
+      try { claspBorne = services.inventory.bornRelic(); } catch { /* offline/stub → no relic passives */ }
+    }
+    if (claspCatches(unit.team, before, amount, this.claspSpent, claspBorne)) {
+      this.claspSpent = true;
+      unit.hp = 1;
+      // Delayed, not shown from here directly: this line runs inside the SAME synchronous call
+      // chain as the attack's own closing banner (enemyStrike's "X strikes Y (−N)", a self-chip
+      // caller's own line, ...), which fires moments later and would otherwise instantly
+      // replace this one — showBanner is replace-not-stack (T4's fold-in arc, Ch. IX). Landing
+      // last instead of first also reads better (the blow, then the save), and 90ms leaves wide
+      // margin before the ~460ms the enemy-turn driver waits before the NEXT turn's own opening
+      // banner would replace this one in turn (runEnemyTurn's own delayedCall chain).
+      this.time.delayedCall(90, () => { if (!this.destroyed) this.hud.showBanner('The Clasp holds.', P.lanternGold); });
+    } else {
+      unit.hp = Math.max(0, unit.hp - amount);
+    }
     if (unit.team === 'party') {
       this.hpLost += before - unit.hp; // actual loss = pooled delta (re-anchored on every hp sync)
       this.damageTaken += before - unit.hp; // the run's honest total — never re-anchored
