@@ -38,7 +38,9 @@ describe('effectLabel — the six Ch. IX kinds (verbatim copy)', () => {
     expect(effectLabel(fakeItem({ kind: 'rest_light', amount: 1 }))).toBe('Each hearth rest banks +1 Lantern-light');
   });
   it('push_blast', () => {
-    expect(effectLabel(fakeItem({ kind: 'push_blast', reach: 3, tiles: 1 }))).toBe('Push a foe one tile, from three away');
+    expect(effectLabel(fakeItem({ kind: 'push_blast', reach: 3, tiles: 1 }))).toBe(
+      'Push a foe one tile down a clear line, from three away',
+    );
   });
   it('every new kind returns non-empty prose (no silent blank fallthrough)', () => {
     const kinds: ItemEffect[] = [

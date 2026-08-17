@@ -1057,8 +1057,29 @@ test("an armed aid is inert at Death's Door: no strike renders, the arm neither 
  *  the "Steps remain" banner. Asserted at the BUDGET, deliberately — the actionLog entry the
  *  old pins used is pushed BEFORE the 560ms delayedCall on every branch, so it stays green
  *  whether or not spendAction is ever reached (final review C1: that is exactly how the arm
- *  branch's missing gate hid). `left > 0` is what proves the action didn't eat the whole turn. */
+ *  branch's missing gate hid). `left > 0` is what proves the action didn't eat the whole turn.
+ *
+ *  W9 T7 fix round — the WAIT lives here now, and it polls instead of sleeping. Each caller used
+ *  to sleep a fixed 700ms (500 on the arm leg, after armHint's own 250) to clear
+ *  useSatchelItem's 560ms delayedCall, which is ~140ms of margin against a PHASER SCENE CLOCK —
+ *  and that clock advances with the render loop, so it lags wall-clock under load. Characterized
+ *  at 2-in-3 failures on a loaded machine, and reproduced with T7's code reverted to its own BASE
+ *  (87d9700), so the brittleness is this sleep and nothing about the Page. The symptom was always
+ *  the same and always a lie: log.at(-1) already reads 'satchel' (pushed synchronously, before the
+ *  delayedCall) while budget.actionSpent is still false — a red on a green gate.
+ *
+ *  Polling the budget is safe for every assertion below, not just its own: spendAction, the
+ *  "Steps remain" banner and returnToActionMenu all run in the SAME synchronous block inside that
+ *  delayedCall, so the instant actionSpent is observable the rest has landed too. Kept in the
+ *  helper rather than at the three call sites so a fourth Satchel branch cannot be added without
+ *  it — the arm leg was exactly such an omission once (final review C1, above). */
 async function expectSatchelPaidTheAction(page: Page, leg: string): Promise<void> {
+  await expect
+    .poll(async () => (await snap(page))?.budget?.actionSpent, {
+      timeout: 15_000,
+      message: `${leg}: waiting out useSatchelItem's delayedCall before reading the budget`,
+    })
+    .toBe(true);
   const s = await snap(page);
   expect(s?.log.at(-1)?.action, `${leg}: resolved as a satchel action`).toBe('satchel');
   expect(s?.budget?.actionSpent, `${leg}: spent the turn's ACTION (Ch. VI's spendAction gate)`).toBe(true);
@@ -1099,9 +1120,8 @@ test('every Satchel use costs the ACTION, not the turn (heal, glow, and the tria
   const healRow = page.locator('.inv-row', { hasText: 'Embermend Draught' });
   await healRow.getByRole('button', { name: 'Use' }).click();
   await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
-  await page.waitForTimeout(700); // past useSatchelItem's 560ms delayedCall -> the budget gate
 
-  await expectSatchelPaidTheAction(page, 'heal');
+  await expectSatchelPaidTheAction(page, 'heal'); // waits out the delayedCall itself, by polling
 
   // ---- glow, on the Keeper's next open turn (waitForKeeperTurn ends the spent one).
   s = await waitForKeeperTurn(page);
@@ -1112,7 +1132,6 @@ test('every Satchel use costs the ACTION, not the turn (heal, glow, and the tria
   const glowRow = page.locator('.inv-row', { hasText: 'Wick-Tallow' });
   await glowRow.getByRole('button', { name: 'Use' }).click();
   await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
-  await page.waitForTimeout(700);
 
   await expectSatchelPaidTheAction(page, 'glow');
 
@@ -1125,7 +1144,6 @@ test('every Satchel use costs the ACTION, not the turn (heal, glow, and the tria
   expect((await snap(page))?.armedAid, 'the arm landed — this leg really is the arm branch').toEqual({
     itemId: 'scriveners-hint', kind: 'reveal_option',
   });
-  await page.waitForTimeout(500); // past the arm branch's own 560ms delayedCall (armHint waits 250)
 
   await expectSatchelPaidTheAction(page, 'aid-arm');
 

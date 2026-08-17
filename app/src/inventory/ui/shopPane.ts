@@ -39,7 +39,11 @@ export function effectLabel(item: ItemDef): string {
     case 'rest_light':
       return 'Each hearth rest banks +1 Lantern-light';
     case 'push_blast':
-      return 'Push a foe one tile, from three away';
+      // Ch. IX, W9 T7 review finding 4 — the label has to carry the LINE, not just the range.
+      // The straight-jet law is ratified as a feature ("line up the shot"), so a label reading
+      // only "from three away" invites a player to aim at a diagonal foe two tiles off and meet
+      // a bare "no foe within reach." with nothing explaining why.
+      return 'Push a foe one tile down a clear line, from three away';
     case 'none':
       return '';
   }
