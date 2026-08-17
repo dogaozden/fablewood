@@ -855,10 +855,15 @@ export class DungeonScene extends Phaser.Scene {
     await services.inventory.grantItem(loot.relicId);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
+    // Ch. IX Provenance fix round 1 (I1) — derived the SAME way trinketName is, just above:
+    // the toast used to hardcode "their signet" regardless of which relic loot.relicId actually
+    // named, decoupled from the real grant since the day Provenance shipped. Uniform derivation,
+    // no Signet special-case — the vc-law toast now names it by its proper catalog name too.
+    const relicName = itemById(loot.relicId)?.name;
     const lanternSuffix = edge === 'advantage' && loot.trinketId ? " — drawn by the lantern's light." : '';
     let lootLine = trinketName
-      ? ` The Warden yields ${loot.gold} coin, their signet, and a ${trinketName}${lanternSuffix || '.'}`
-      : ` The Warden yields ${loot.gold} coin and their signet.`;
+      ? ` The Warden yields ${loot.gold} coin, their ${relicName}, and a ${trinketName}${lanternSuffix || '.'}`
+      : ` The Warden yields ${loot.gold} coin and their ${relicName}.`;
     if (wickCaught) {
       // Fix round 1 (F1) — folded into lootLine (the SAME text vaultOpensBeat shows below),
       // never a separate toast: offerLantern's own toast used to fire early and collide with

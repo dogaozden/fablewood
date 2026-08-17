@@ -675,9 +675,10 @@ describe('the Second Wick composes into the loot message, not a second toast (Ch
 
   it("bossVictory: the catch appends to lootLine, the SAME text vaultOpensBeat shows once", async () => {
     // seed 7's boss loot under edge:'advantage': 60 gold, Clerk's Silver Nib (drawn by the
-    // lantern's light — the trinket suffix), the Warden's signet. DEV_REWARD prefixes it (no
-    // pack in this fixture). bornRelic returns 'second-wick', never the Signet, so `edged`
-    // stays false — this exercises the Wick's append in isolation from the Signet's own edge.
+    // lantern's light — the trinket suffix), the Unbroken Clasp (dev.dungeon.json's under-boss
+    // relicId, Ch. IX Provenance — Task 8). DEV_REWARD prefixes it (no pack in this fixture).
+    // bornRelic returns 'second-wick', never the Signet, so `edged` stays false — this
+    // exercises the Wick's append in isolation from the Signet's own edge.
     setSearch('?dev=1&sim=1&auto=win');
     const h = installServices({
       hp: 16,
@@ -696,7 +697,7 @@ describe('the Second Wick composes into the loot message, not a second toast (Ch
     const beat = vv.log.find((l) => l.startsWith('vaultOpens:'));
     expect(beat).toBe(
       'vaultOpens:the Undercroft falls quiet, and one knot in the Fade comes undone' +
-        " The Warden yields 60 coin, their signet, and a Clerk's Silver Nib" +
+        " The Warden yields 60 coin, their Unbroken Clasp, and a Clerk's Silver Nib" +
         ' — drawn by the lantern\'s light. The second wick catches.',
     );
 
