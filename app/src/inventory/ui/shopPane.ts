@@ -5,7 +5,7 @@
  * keyboard-quiet wrap.
  */
 import { services } from '../../game/contracts';
-import { CATALOG, RARITY_META, shopStock, type ItemDef } from '../catalog';
+import { CATALOG, dateKeyOf, RARITY_META, shopStock, type ItemDef } from '../catalog';
 import { sellPrice } from '../economy';
 import { iconUrl } from '../icons';
 import { el, openPane } from './dom';
@@ -144,7 +144,9 @@ export function openShopPane(): Promise<void> {
       goldEl.textContent = `⟡ ${snap.gold}`;
 
       const rows: Array<Node | string> = [el('div', { class: 'inv-section-title', text: 'Buy' })];
-      rows.push(...shopStock().map((item) => buyRow(item, snap.gold)));
+      // Concordance Ch. IX rotation law — the pane stays presentation-only: it reads the
+      // clock, the stock decision (staples + which two rotators) lives in catalog.ts.
+      rows.push(...shopStock(dateKeyOf(new Date())).map((item) => buyRow(item, snap.gold)));
 
       rows.push(el('div', { class: 'inv-section-title', text: 'Sell' }));
       const owned = CATALOG.filter((i) => i.type === 'trinket' && (snap.stacks[i.id] ?? 0) > 0);

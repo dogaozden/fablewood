@@ -86,11 +86,16 @@ export interface LootRoll {
  * Normal room clear: ~12-18 gold in the first room, +6 per room deeper, and a
  * 35% chance of a trinket. rng consumption order (tests depend on it):
  * gold jitter → trinket chance → rarity → tier pick.
+ *
+ * `edged` — Concordance Ch. IX: true while the Warden Signet of Terms is borne. Folds into
+ * the SAME `rollRarityEdged` call as `edge` (never a second roll pair, never stacks with an
+ * already-active `edge`) — `edge` wins when it's already something other than 'none'.
  */
-export function roomClearLoot(roomIndex: number, rng: Rng, edge: Edge = 'none'): LootRoll {
+export function roomClearLoot(roomIndex: number, rng: Rng, edge: Edge = 'none', edged = false): LootRoll {
   const gold = 12 + roomIndex * 6 + Math.floor(rng() * 7);
   if (rng() >= 0.35) return { gold, trinketId: null };
-  return { gold, trinketId: pickTrinket(rollRarityEdged(rng, RARITY_WEIGHTS, edge), rng) };
+  const finalEdge: Edge = edge !== 'none' ? edge : edged ? 'advantage' : 'none';
+  return { gold, trinketId: pickTrinket(rollRarityEdged(rng, RARITY_WEIGHTS, finalEdge), rng) };
 }
 
 export interface BossLoot {
@@ -99,12 +104,14 @@ export interface BossLoot {
   relicId: string;
 }
 
-/** Boss bounty: 60-100 gold, a boss-weighted trinket, and always the Warden's signet. */
-export function bossLoot(rng: Rng, edge: Edge = 'none'): BossLoot {
+/** Boss bounty: 60-100 gold, a boss-weighted trinket, and always the Warden's signet.
+ *  `edged` — see roomClearLoot's own doc: the Signet's Ch. IX passive, same fold-in rule. */
+export function bossLoot(rng: Rng, edge: Edge = 'none', edged = false): BossLoot {
   const gold = 60 + Math.floor(rng() * 41);
+  const finalEdge: Edge = edge !== 'none' ? edge : edged ? 'advantage' : 'none';
   return {
     gold,
-    trinketId: pickTrinket(rollRarityEdged(rng, BOSS_RARITY_WEIGHTS, edge), rng),
+    trinketId: pickTrinket(rollRarityEdged(rng, BOSS_RARITY_WEIGHTS, finalEdge), rng),
     relicId: 'warden-signet-of-terms',
   };
 }

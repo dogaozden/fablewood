@@ -664,7 +664,10 @@ export class DungeonScene extends Phaser.Scene {
     const roomIndex = this.spec.rooms.findIndex((r) => r.id === room.id);
     const rng = mulberry32((this.seed + roomIndex * 7919 + 1) >>> 0);
     const edge = await this.offerLantern(room.name);
-    const loot = roomClearLoot(roomIndex, rng, edge);
+    // Concordance Ch. IX — the Warden Signet of Terms edges every loot roll while borne,
+    // independent of (and never stacking with) the Lantern-light choice above.
+    const edged = services.inventory.bornRelic() === 'warden-signet-of-terms';
+    const loot = roomClearLoot(roomIndex, rng, edge, edged);
     await services.inventory.addGold(loot.gold);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
@@ -813,7 +816,9 @@ export class DungeonScene extends Phaser.Scene {
     const edge = await this.offerLantern("the Warden's trove");
     // Boss bounty: gold + the guaranteed Warden Signet + a boss-weighted trinket (inventory-handoff §4).
     const rng = mulberry32((this.seed + 104729) >>> 0);
-    const loot = bossLoot(rng, edge);
+    // Concordance Ch. IX — the Warden Signet of Terms edges every loot roll while borne.
+    const edged = services.inventory.bornRelic() === 'warden-signet-of-terms';
+    const loot = bossLoot(rng, edge, edged);
     await services.inventory.addGold(loot.gold);
     await services.inventory.grantItem(loot.relicId);
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);

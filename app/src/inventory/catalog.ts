@@ -156,7 +156,66 @@ export function itemById(id: string): ItemDef | undefined {
   return BY_ID.get(id);
 }
 
-/** Mira's shop stock: the eight wares (3 draughts + 2 glow + 3 tools), catalog order. */
-export function shopStock(): ItemDef[] {
-  return CATALOG.filter((i) => i.type === 'consumable' || i.type === 'tool');
+/** Ids of the wares Mira's shelf never rotates off (Concordance Ch. IX rotation law — "the
+ *  eight staples stand forever"): the shipped 3 heals + 2 glow + 3 trial tools, catalog order. */
+const STAPLE_IDS: readonly string[] = [
+  'embermend-draught',
+  'lanternoil-tonic',
+  'wardancers-restorative',
+  'wick-tallow',
+  'lantern-brand',
+  'scriveners-hint',
+  'second-wind-seal',
+  'ward-of-focus',
+];
+
+/** The rotating-ware pool (Concordance Ch. IX): grows over time without touching the rotation
+ *  law itself — `pickRotatingWares` below is written for any pool size, not just today's two. */
+const ROTATING_POOL_IDS: readonly string[] = ['superior-draught', 'sealed-page-geyser'];
+
+/** Two shelf slots re-lay each calendar day (Concordance Ch. IX). */
+const ROTATING_SLOTS = 2;
+
+/** Same tiny deterministic PRNG as the rest of the house — economy.ts's own local copy (house
+ *  RNG rule: each domain copies the primitive rather than sharing an import). catalog.ts sits
+ *  BELOW economy.ts (economy.ts imports CATALOG from here), so importing economy.ts's copy back
+ *  would cycle; this module gets its own. */
+function mulberry32(seed: number): () => number {
+  let a = seed | 0;
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Pick exactly `min(slots, pool.length)` distinct ids from `pool`, seeded by `dateKey` — same
+ *  day, same shelf. A seeded partial Fisher-Yates, general over any pool size, so the rotating
+ *  pool can grow past two wares later without this function changing. Pool no bigger than the
+ *  slot count (today's case) just returns the whole pool, in pool order. */
+export function pickRotatingWares(pool: readonly string[], slots: number, dateKey: number): string[] {
+  if (pool.length <= slots) return [...pool];
+  const rng = mulberry32(dateKey);
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, slots);
+}
+
+/** Local-calendar-date key for the rotation law — mirrors rest/embers.ts's `canRestTonight`
+ *  day-boundary math (local year/month/date fields, never UTC/epoch), so "today" means the
+ *  same day here as it does for the Hearth. */
+export function dateKeyOf(now: Date): number {
+  return now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+}
+
+/** Mira's shop stock (Concordance Ch. IX rotation law): the eight staples, forever, plus
+ *  exactly two rotating shelf slots re-laid each calendar day from the rotating-ware pool. */
+export function shopStock(dateKey: number): ItemDef[] {
+  const staples = STAPLE_IDS.map((id) => itemById(id)!);
+  const rotating = pickRotatingWares(ROTATING_POOL_IDS, ROTATING_SLOTS, dateKey).map((id) => itemById(id)!);
+  return [...staples, ...rotating];
 }
