@@ -38,7 +38,7 @@ import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId } from './status';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
-import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
+import { fixtureLaunch, parseEnemiesParam, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
@@ -367,7 +367,12 @@ export class CombatScene extends Phaser.Scene {
       this.launch = data as CombatLaunch;
     } else {
       const seed = (data && 'seed' in data && typeof data.seed === 'number') ? data.seed : 1;
-      this.launch = fixtureLaunch(seed, params.get('boss') === '1', params.get('kit') === '1');
+      this.launch = fixtureLaunch(
+        seed, params.get('boss') === '1', params.get('kit') === '1',
+        // Ch. VIII Task 6 — `?enemies=lurker,husk,pall`: packless archetype selection for the
+        // dev/e2e harness, beside the three existing hardcoded fixture flags.
+        parseEnemiesParam(params.get('enemies')),
+      );
     }
   }
 

@@ -35,7 +35,7 @@ import {
   nodeState,
   type DungeonProgress,
 } from './roomFlow';
-import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText, rewardXp } from './specResolve';
+import { candidateDungeonFiles, isDungeonSpec, bossQuest, rewardText, rewardXp, archetypeError } from './specResolve';
 import { VaultView, type NodeHandlers } from './VaultView';
 import { FIXTURE_PACK_ID } from '../../combat/fixtures';
 import devSpecJson from './__fixtures__/dev.dungeon.json';
@@ -248,6 +248,12 @@ export class DungeonScene extends Phaser.Scene {
         `The archive holds no charted map for "${this.packId}" — its vaults remain unmarked.`,
       );
     }
+    // Ch. VIII — archetype-id validation at LOAD time. Without this a typo'd archetype rides the
+    // room all the way into makeEnemy and dies there (ENEMY_STATS[typo].hp on undefined) as an
+    // unexplained crash at combat launch. Thrown, not skipped: the file IS the right map and IS
+    // well-formed — the author needs the offending word named, not their map quietly dropped.
+    const archetypeProblem = archetypeError(spec, this.packId);
+    if (archetypeProblem) throw new Error(archetypeProblem);
     this.spec = spec;
   }
 
