@@ -246,8 +246,15 @@ export function relicError(spec: DungeonSpec, packId: string): string | null {
  *  load-time gate (DungeonScene.loadSpec/useFixture): a defined return is guaranteed to be a
  *  real catalog relic id, so bossVictory can pass it straight to bossLoot with no second
  *  lookup. undefined means "the spec names none" — Provenance's own fallback case, not an
- *  error; bossLoot's own `relicId?` parameter supplies the Signet default for it. */
+ *  error; bossLoot's own `relicId?` parameter supplies the Signet default for it.
+ *
+ * Reads the typed `BossSpec.relicId` field directly (contracts.ts) now that it's declared —
+ * unlike `unknownRelicIds`/`relicError` above, this accessor is only ever called on a spec
+ * that already passed the load-time gate, so it has no malformed-JSON case left to tolerate.
+ * The tolerant `rawBossRelicId` unknown-cast stays put for the validation pair, which DOES
+ * still need to catch a relicId that doesn't type-check (e.g. a number in raw pack JSON) —
+ * the same declared-and-still-tolerantly-validated duality `EnemySpec.archetype` and
+ * `unknownArchetypes` already keep. */
 export function bossRelicId(room: DungeonRoom): string | undefined {
-  const relicId = rawBossRelicId(room);
-  return typeof relicId === 'string' ? relicId : undefined;
+  return room.boss?.relicId;
 }

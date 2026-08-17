@@ -110,6 +110,9 @@ export interface BossSpec {
    *  packs should mirror each label in their metaphor_map. Keys are combat/boss.ts's
    *  WardenMove union. */
   moveLabels?: { seizure?: string; injunction?: string; summon?: string };
+  /** Ch. IX Provenance — the relic this boss grants on defeat (a catalog id of type 'relic').
+   *  Validated at load by specResolve's relicError; absent = the Warden's Signet fallback. */
+  relicId?: string;
 }
 
 export interface DungeonRoom {
