@@ -17,6 +17,7 @@
 import type { Bridge } from '../srs/store';
 import { getState, putState } from '../bridge/client';
 import { STARTING_GOLD } from './economy';
+import { itemById } from './catalog';
 
 const INV_FILE = 'inventory.json';
 
@@ -26,11 +27,15 @@ export interface InventoryData extends Record<string, unknown> {
   version: 1;
   gold: number;
   stacks: Record<string, number>;
+  /** the one relic whose passive is live, or null if none borne (Concordance Ch. IX).
+   *  Additive: absent on pre-Ch.IX saves, which normalize() fills to null. */
+  bornRelicId: string | null;
 }
 
 interface Wallet {
   gold: number;
   stacks: Record<string, number>;
+  bornRelicId: string | null;
 }
 
 function isPlainObject(x: unknown): x is Record<string, unknown> {
@@ -60,7 +65,7 @@ function cleanStacks(raw: Record<string, unknown>): Record<string, number> {
 }
 
 function defaults(): InventoryData {
-  return { version: 1, gold: STARTING_GOLD, stacks: {} };
+  return { version: 1, gold: STARTING_GOLD, stacks: {}, bornRelicId: null };
 }
 
 export class InventoryStore {
@@ -109,7 +114,15 @@ export class InventoryStore {
 
   /** Read-only copy of the cached wallet (safe to hold across renders). */
   snapshot(): Wallet {
-    return { gold: this.cache.gold, stacks: { ...this.cache.stacks } };
+    return { gold: this.cache.gold, stacks: { ...this.cache.stacks }, bornRelicId: this.bornRelic() };
+  }
+
+  /** The currently borne relic id, or null. Defensive at read time: if the id somehow
+   *  isn't in stacks (relics can't be sold or wiped today, but a hand-edited save could
+   *  drift), it reads as null rather than trusting the stale field. */
+  bornRelic(): string | null {
+    const id = this.cache.bornRelicId;
+    return id !== null && (this.cache.stacks[id] ?? 0) > 0 ? id : null;
   }
 
   /**
@@ -125,10 +138,16 @@ export class InventoryStore {
       const base: InventoryData = isInventoryData(remote)
         ? this.normalize(remote)
         : this.cache; // null/corrupt mid-run → build on our cache, don't lose the write
-      const next = fn({ gold: base.gold, stacks: { ...base.stacks } });
+      const next = fn({ gold: base.gold, stacks: { ...base.stacks }, bornRelicId: base.bornRelicId });
       if (next === null) return;
       applied = true;
-      const merged: InventoryData = { ...base, version: 1, gold: next.gold, stacks: next.stacks };
+      const merged: InventoryData = {
+        ...base,
+        version: 1,
+        gold: next.gold,
+        stacks: next.stacks,
+        bornRelicId: next.bornRelicId,
+      };
       const ok = await this.bridge.putState(INV_FILE, merged);
       if (!ok) this.warnOnce();
       this.cache = merged; // cache reflects the latest, persisted or not
@@ -201,6 +220,27 @@ export class InventoryStore {
       if (held === n) delete cur.stacks[id];
       else cur.stacks[id] = held - n;
       return { ...cur, gold: cur.gold + price };
+    });
+  }
+
+  /**
+   * Choose the one live relic passive, or pass null to set it down (Concordance Ch. IX:
+   * "swap costs nothing"). Reads the catalog (type === 'relic') and the freshest live
+   * stacks INSIDE the mutate() call, same freshness guarantee as buy/sell; an id that
+   * isn't an owned relic REJECTS the returned promise (thrown before any write — unlike
+   * the boolean-return refusals above, this is a caller error, not a "can't afford it").
+   * Bearing null always succeeds.
+   */
+  async bearRelic(id: string | null): Promise<void> {
+    await this.mutate((cur) => {
+      if (id !== null) {
+        const def = itemById(id);
+        const owned = (cur.stacks[id] ?? 0) > 0;
+        if (!def || def.type !== 'relic' || !owned) {
+          throw new Error(`bearRelic: '${id}' is not an owned relic`);
+        }
+      }
+      return { ...cur, bornRelicId: id };
     });
   }
 

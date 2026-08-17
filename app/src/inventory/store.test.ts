@@ -46,7 +46,7 @@ describe('fresh satchel — defaults', () => {
     const s = new InventoryStore(new FakeBridge());
     await s.ready();
     expect(s.getGold()).toBe(STARTING_GOLD);
-    expect(s.snapshot()).toEqual({ gold: STARTING_GOLD, stacks: {} });
+    expect(s.snapshot()).toEqual({ gold: STARTING_GOLD, stacks: {}, bornRelicId: null });
     expect(s.countOf('embermend-draught')).toBe(0);
   });
 
