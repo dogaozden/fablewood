@@ -221,8 +221,11 @@ test('boss hoard: a borne Warden Signet of Terms edges the loot-rarity roll, wit
 
 // Task 10 (the wave sweep) — the Signet was the one relic of five missing its "without borne"
 // regression pair (Heel/Lamp/Clasp/Wick each have one; this closes the asymmetry, same rig and
-// seed as the borne test above, `stacks: {}, bornRelicId: null` matching every other relic's
-// own regression convention, e.g. the Clasp's at line ~1170).
+// seed as the borne test above, `stacks: {}, bornRelicId: null` — matching the Clasp's own
+// regression exactly (explicit null); Heel/Lamp/Wick's regressions omit the field entirely
+// instead, which normalize()'s defaults-merge makes behaviorally equivalent, not textually
+// identical — fix-round-1 correction (M2): this comment previously overclaimed "every other
+// relic," which was true of the runtime behavior but not the literal seed shape.
 test('without the Warden Signet of Terms borne: the loot-rarity roll is NOT edged — regression (Ch. IX)', async ({
   page,
 }) => {
@@ -546,9 +549,10 @@ async function installedFactIds(page: Page): Promise<string[]> {
 // seed/rank/tier combination does. Verified directly against packs/vc-law/pack.json: two
 // PREREQ-FREE facts that resolve to two GENUINELY DISTINCT mcq encounters —
 // vc.econ.valuation.pre-vs-post-money -> enc.mcq.pre-post-money, and
-// vc.econ.vesting.four-year-one-year-cliff -> enc.mcq.vesting-standard (the only two mcq
-// encounters reachable by a prereq-free fact in the whole pack, so both are eligible on a cold
-// save with zero history). Seeding BOTH as far-more-overdue than anything else installed
+// vc.econ.vesting.four-year-one-year-cliff -> enc.mcq.vesting-standard (both eligible on a cold
+// save with zero history — see the Task 10 fix-round-1 correction on the docstring below
+// seedWickCastFacts for exactly why this pair resolves distinctly). Seeding BOTH as
+// far-more-overdue than anything else installed
 // (miras-stall.spec.ts's own seedSrsBaseline idiom: seed every installed fact at a baseline,
 // override the two targets to win "most overdue" deterministically) removes the redraw pool's
 // dependence on ambient .state-e2e history entirely — the shown fact and the redraw target are
@@ -581,16 +585,34 @@ async function seedWickCastFacts(page: Page): Promise<void> {
  * assertion fails here, loudly and first — never masquerading as a wiring failure three steps
  * later at a bannerText() mismatch.
  *
- * Task 10 (the wave sweep) addendum — the fragility spelled out in numbers, independently
- * re-counted against the live pack rather than taken on trust from an earlier report:
- * packs/vc-law/pack.json carries 42 facts total; exactly 7 are prerequisite-free; of those 7,
- * exactly 2 resolve to ANY mcq encounter at all — WICK_CAST_FACT_A
- * ('vc.econ.valuation.pre-vs-post-money' -> 'enc.mcq.pre-post-money') and WICK_CAST_FACT_B
- * ('vc.econ.vesting.four-year-one-year-cliff' -> 'enc.mcq.vesting-standard'). The other 5
- * prerequisite-free facts resolve to non-mcq encounters or none at all. So this named pair
- * isn't merely today's convenient choice — it is the pack's ONLY possible prerequisite-free,
- * distinct-mcq pair, which is exactly why this assertion (not a comment, not a one-off probe)
- * has to be the thing that catches a future pack edit that closes the gap.
+ * Task 10 (the wave sweep) addendum, corrected at fix-round-1 (2026-08-18) — the fragility
+ * spelled out in numbers, verified by actually CALLING pick() against every prerequisite-free
+ * fact in the pack, not by reading pack.json's raw fields (which is as far as the paragraph
+ * this replaces went, and which is exactly how it went wrong — see the correction note below).
+ * packs/vc-law/pack.json carries 42 facts total; exactly 7 are prerequisite-free. pick() has a
+ * fallback that matters here (engine.ts, the `if (candidates.length) return candidates[0];`
+ * line): when NO mcq-kind encounter's fact_ids includes the requested fact, pick() does not
+ * return null — it silently returns candidates[0], the pack's first mcq-kind encounter in
+ * array order ('enc.mcq.pre-post-money' in this pack). Five of the seven prerequisite-free
+ * facts have no mcq encounter of their own and reach 'enc.mcq.pre-post-money' only through
+ * that fallback — the SAME id WICK_CAST_FACT_A resolves to genuinely (its own dedicated
+ * encounter happens to BE the pack's first-listed mcq one). WICK_CAST_FACT_B is the one fact
+ * of the seven whose own dedicated encounter ('enc.mcq.vesting-standard') genuinely differs
+ * from that value. So this pair is NOT uniquely forced: any of the other 5 prerequisite-free
+ * facts would pair distinctly against FACT_B exactly as well (verified directly: 6 of the 21
+ * possible pairs among the 7 facts resolve distinctly, and all 6 involve FACT_B). What this
+ * assertion actually needs, and correctly guards, is narrower than "this exact pair is
+ * forced": that FACT_B keeps its own dedicated mcq encounter, genuinely different from
+ * whatever the pack's first-listed mcq encounter resolves to. A pack edit that broke that is
+ * exactly what this assertion would catch — the guard was always sound; only its stated
+ * justification below wasn't.
+ *
+ * Correction note: the paragraph this replaces claimed the pair was "the pack's ONLY possible
+ * prerequisite-free, distinct-mcq pair" and called that "independently re-verified." Only the
+ * 42/7 fact-and-prereq count was actually independently run (a direct node script against
+ * pack.json's own prereqs field). The "exactly 2 resolve to mcq, and that makes them the only
+ * pair" claim was carried over from an earlier report's prose without ever calling the real
+ * pick() to check it — T10's own fix-round-1 review caught this by doing exactly that.
  */
 async function assertWickCastFactsResolveToDistinctEncounters(page: Page): Promise<void> {
   const res = await page.request.get('/api/packs');
