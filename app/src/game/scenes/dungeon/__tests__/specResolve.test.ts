@@ -10,8 +10,11 @@ import {
   isDungeonSpec,
   unknownArchetypes,
   archetypeError,
+  unknownRelicIds,
+  relicError,
+  bossRelicId,
 } from '../specResolve';
-import type { DungeonSpec } from '../../../contracts';
+import type { DungeonSpec, DungeonRoom } from '../../../contracts';
 import devDungeon from '../__fixtures__/dev.dungeon.json';
 
 const quest = (id: string, title: string, region: string, reward?: Quest['reward']): Quest => ({
@@ -179,5 +182,104 @@ describe('archetype validation (Ch. VIII)', () => {
     } as unknown as DungeonSpec;
     expect(() => unknownArchetypes(odd)).not.toThrow();
     expect(unknownArchetypes(odd)).toEqual(['7']);
+  });
+});
+
+// Ch. IX (Provenance) — Task 8: "each boss carries its own [relic] — the pack's boss spec
+// names a relicId from the engine catalog, the Vault-Warden's falling back to the Signet".
+// Same gap shape as archetype validation above: a typo'd relicId passes isDungeonSpec's shape
+// check untouched (it never looks at `boss` at all) and store.grant(id) never validates its
+// argument either (app/src/inventory/store.ts:171 — any string is happily stacked), so an
+// unvalidated typo would otherwise ship silently into a player's Satchel as a nameless,
+// icon-less row. These two functions (mirroring unknownArchetypes/archetypeError exactly)
+// move that failure to load time and name it.
+describe('relic-id validation (Ch. IX Provenance)', () => {
+  const bossSpec = (roomId: string, bossExtra: Record<string, unknown> = {}): DungeonSpec =>
+    ({
+      id: 'd', name: 'D',
+      rooms: [
+        { id: roomId, name: 'Room', enemies: [], boss: { name: 'B', shields: 3, phases: [], ...bossExtra } },
+      ],
+    } as unknown as DungeonSpec);
+
+  it("accepts a boss room with no relicId at all — Provenance's own fallback default", () => {
+    const s = bossSpec('r1');
+    expect(unknownRelicIds(s)).toEqual([]);
+    expect(relicError(s, 'vc-law')).toBeNull();
+  });
+
+  it('accepts every relic id the catalog knows', () => {
+    for (const id of ['warden-signet-of-terms', 'unbroken-clasp', 'waymark-heel', 'margin-lamp', 'second-wick']) {
+      const s = bossSpec('r1', { relicId: id });
+      expect(unknownRelicIds(s)).toEqual([]);
+      expect(relicError(s, 'vc-law')).toBeNull();
+    }
+  });
+
+  it('rejects a relicId that is not in the catalog at all', () => {
+    const s = bossSpec('under-boss', { relicId: 'ring-of-typos' });
+    expect(unknownRelicIds(s)).toEqual(['ring-of-typos']);
+    const msg = relicError(s, 'vc-law');
+    expect(msg).not.toBeNull();
+    expect(msg).toContain('"ring-of-typos"');
+    expect(msg).toContain('vc-law');
+    expect(msg).toContain('under-boss');
+    // tells an author what they MAY write, not only what they may not
+    expect(msg).toContain('warden-signet-of-terms');
+    expect(msg).toContain('unbroken-clasp');
+  });
+
+  it('rejects a relicId that IS a real catalog id but the wrong type (a trinket/consumable/tool typo\'d into the boss slot)', () => {
+    const s = bossSpec('r1', { relicId: 'embermend-draught' }); // real id, type:'consumable'
+    expect(unknownRelicIds(s)).toEqual(['embermend-draught']);
+    expect(relicError(s, 'vc-law')).not.toBeNull();
+  });
+
+  it('collects unknown relic ids, de-duplicated in first-seen order, across every room', () => {
+    const bad = {
+      id: 'd', name: 'D',
+      rooms: [
+        { id: 'r1', name: 'One', enemies: [], boss: { name: 'B1', shields: 3, phases: [], relicId: 'ring-a' } },
+        { id: 'r2', name: 'Two', enemies: [], boss: { name: 'B2', shields: 3, phases: [], relicId: 'ring-b' } },
+        { id: 'r3', name: 'Three', enemies: [], boss: { name: 'B3', shields: 3, phases: [], relicId: 'ring-a' } },
+      ],
+    } as unknown as DungeonSpec;
+    expect(unknownRelicIds(bad)).toEqual(['ring-a', 'ring-b']);
+  });
+
+  it('tolerates a room with no boss at all, and a non-string relicId', () => {
+    const odd = {
+      id: 'd', name: 'D',
+      rooms: [
+        { id: 'r1', name: 'One', enemies: [] }, // no boss
+        { id: 'r2', name: 'Two', enemies: [], boss: { name: 'B', shields: 3, phases: [], relicId: 7 } },
+      ],
+    } as unknown as DungeonSpec;
+    expect(() => unknownRelicIds(odd)).not.toThrow();
+    expect(unknownRelicIds(odd)).toEqual(['7']);
+  });
+
+  // Same fix-round-1 discipline as the archetype suite's own dev-fixture pin: the one map that
+  // ships IN this repo (every ?dev=1 run, a dozen e2e specs) must itself pass the gate it sets.
+  it('the shipped dev fixture names a real catalog relic on its boss room', () => {
+    expect(unknownRelicIds(devDungeon as unknown as DungeonSpec)).toEqual([]);
+    expect(relicError(devDungeon as unknown as DungeonSpec, 'dev-fixture')).toBeNull();
+  });
+
+  // bossRelicId is the typed accessor DungeonScene.bossVictory reads (specResolve.ts) — a
+  // defined return is trustworthy with no second catalog lookup at the call site because
+  // relicError has already gated the spec by the time any room is played.
+  describe('bossRelicId — the typed accessor bossVictory reads', () => {
+    it('returns the relicId string when the boss names one', () => {
+      const s = bossSpec('r1', { relicId: 'unbroken-clasp' });
+      expect(bossRelicId(s.rooms[0])).toBe('unbroken-clasp');
+    });
+    it('returns undefined when the boss names none', () => {
+      expect(bossRelicId(bossSpec('r1').rooms[0])).toBeUndefined();
+    });
+    it('returns undefined for a room with no boss at all', () => {
+      const room = { id: 'r1', name: 'R', enemies: [] } as unknown as DungeonRoom;
+      expect(bossRelicId(room)).toBeUndefined();
+    });
   });
 });

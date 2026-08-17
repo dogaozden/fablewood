@@ -130,6 +130,7 @@ interface Harness {
   save: () => SaveData;
   gateQuality: { value: Quality };
   addGoldGate: { hold: boolean; calls: number; release: () => void };
+  grantedItems: () => string[];
 }
 
 function installServices(initial: Partial<SaveData>): Harness {
@@ -137,6 +138,7 @@ function installServices(initial: Partial<SaveData>): Harness {
   const gateQuality = { value: 0 as Quality };
   const firstGold = deferred<void>();
   const addGoldGate = { hold: false, calls: 0, release: () => { firstGold.resolve(); } };
+  const grantedItems: string[] = [];
 
   services.save = {
     ready: async () => {},
@@ -163,7 +165,7 @@ function installServices(initial: Partial<SaveData>): Harness {
       return 0;
     },
     spendGold: async () => true,
-    grantItem: async () => {},
+    grantItem: async (id) => { grantedItems.push(id); },
     removeItem: async () => true,
     countOf: () => 0,
     useItem: async () => ({ ok: true, message: '' }),
@@ -192,7 +194,7 @@ function installServices(initial: Partial<SaveData>): Harness {
   services.showAmendment = async () => {};
   services.showLevelUp = async () => {};
 
-  return { save: () => data, gateQuality, addGoldGate };
+  return { save: () => data, gateQuality, addGoldGate, grantedItems: () => grantedItems };
 }
 
 function setSearch(search: string): void {
@@ -700,5 +702,32 @@ describe('the Second Wick composes into the loot message, not a second toast (Ch
 
     expect(h.save().wickCaught, 'the catch fired').toBe(true);
     expect(h.save().lanternLight, 'the light re-banked at once — still held, not cleared').toBe(true);
+  });
+});
+
+// Ch. IX (Provenance) — Task 8: "each boss carries its own [relic]". The shipped dev fixture's
+// under-boss room names relicId:'unbroken-clasp' (specResolve.test.ts pins this fixture clean
+// against relicError); this proves the WIRING, not just the pure functions either side of it —
+// resolveCombat -> bossVictory -> bossLoot actually reads the room's own relicId and grants
+// THAT, rather than silently falling back to the hardcoded Signet the way a plumbing gap would.
+describe("bossVictory reads the room's relicId (Ch. IX Provenance — Task 8)", () => {
+  it("the dev fixture's boss room names unbroken-clasp; bossVictory grants exactly that, not the Signet fallback", async () => {
+    setSearch('?dev=1&sim=1&auto=win');
+    const h = installServices({
+      hp: 16,
+      dungeon: { roomIndex: 4, cleared: ['under-1', 'under-2', 'under-3', 'under-bestiary'] },
+    });
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => vv.log.some((l) => l.startsWith('vaultOpens:')), 'the boss victory beat');
+
+    expect(h.grantedItems(), "the spec's own relicId was granted").toContain('unbroken-clasp');
+    expect(h.grantedItems(), 'never the hardcoded Signet fallback when the spec names one').not.toContain(
+      'warden-signet-of-terms',
+    );
   });
 });

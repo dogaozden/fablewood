@@ -165,6 +165,25 @@ describe('bossLoot — 60-100 bounty, boss-weighted trinket, always the signet',
   });
 });
 
+describe('bossLoot relicId (Ch. IX Provenance — "each boss carries its own")', () => {
+  it("grants the spec's relicId when one is given", () => {
+    expect(bossLoot(seq(0), 'none', false, 'unbroken-clasp').relicId).toBe('unbroken-clasp');
+    expect(bossLoot(seq(0), 'none', false, 'waymark-heel').relicId).toBe('waymark-heel');
+  });
+
+  it('falls back to the Signet when relicId is omitted — old packs, and the Vault-Warden itself, keep working', () => {
+    expect(bossLoot(seq(0)).relicId).toBe('warden-signet-of-terms');
+    expect(bossLoot(seq(0), 'none', false, undefined).relicId).toBe('warden-signet-of-terms');
+  });
+
+  it('relicId never consumes an rng() call — same gold/trinket outcome with or without it', () => {
+    expect(bossLoot(mulberry32(42), 'none', false, 'unbroken-clasp')).toEqual({
+      ...bossLoot(mulberry32(42)),
+      relicId: 'unbroken-clasp',
+    });
+  });
+});
+
 describe('sellPrice — trinkets fence at half value, floored', () => {
   it('halves and floors', () => {
     expect(sellPrice(itemById('mossbound-locket')!)).toBe(20);
