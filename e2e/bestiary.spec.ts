@@ -193,6 +193,24 @@ async function passUntilUnitAt(page: Page, id: string, c: number, r: number, tim
   return false;
 }
 
+/** Same idiom again, but watches `id`'s OWN status list instead of position or whose turn it
+ *  is — used to catch the moment a status is consumed at that unit's turn-start tick even
+ *  though the unit never becomes the harness-visible ACTIVE unit that turn (Ch. VIII fix round,
+ *  I2: a Staggered turn is skipped entirely — tickTurnStart clears it and advanceTurn returns
+ *  before ever calling beginPlayerTurn, so `state`/`activeId` never reflect it). Still presses
+ *  Mira's End Turn if she comes up first, same as passUntilUnitAt. */
+async function passUntilStatusGone(page: Page, id: string, statusId: string, timeout = 20_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    const st = await unitState(page, id);
+    if (st && !st.statuses.some((s) => s.id === statusId)) return true;
+    const s = await snap(page);
+    if (s?.state === 'playerMove' && s.activeId === 'mira') await page.keyboard.press('7');
+    await page.waitForTimeout(150);
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------------------
 // Scenario a (toll + consumption + restoration): fixture a Toppled Keeper. The rise doesn't
 // fire until the Keeper's OWN next turn start (applying it mid-turn-1 lands it on turn 2).
@@ -332,6 +350,69 @@ test('bestiary scenario a: a Bound-and-Toppled unit rises with ZERO movement —
 
   const tiles = await reachable(page);
   expect(tiles, 'no legal move tile exists at budget 0').toEqual([]);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario a, fix round (I2) — "Staggered defers the rise" is a stated chapter law
+// (docs/superpowers/specs/2026-08-02-concordance.md Ch. VIII) that held only by statement
+// ordering inside advanceTurn (the staggered branch `return`s before the toppled-rise block)
+// with zero test coverage: nothing anywhere put `toppled` and `staggered` on the same unit.
+// A unit both Toppled and Staggered must lose its NEXT turn to the stagger with Toppled
+// untouched — not consumed, no toll paid — and then rise normally, toll and all, the turn
+// after that. Same hermetic seed=7/Kindled-kill/exile fixture as scenario a's own rise test
+// above. The Keeper's staggered turn never becomes the harness-visible ACTIVE unit (advanceTurn
+// returns before beginPlayerTurn), so this drives on the Keeper's own status list via
+// passUntilStatusGone rather than waiting on `state`/`activeId`.
+//
+// Staggered is fixtured with turns=2, not the real game's own turns=1 grant (Parley-good's own
+// Staggered(1)): unlike Toppled, Staggered is a REAL duration status (decays at the OWNER's own
+// turn end, status.ts's NO_TURN_END_DECAY does not cover it), and this harness applies it while
+// the Keeper's turn 1 is already active, immediately followed by ending that SAME turn — in
+// normal play a unit is staggered by an opposing action mid-round, never by itself the instant
+// before its own turn ends, so this same-turn ordering is a debug-harness artifact, not a live
+// case. turns=1 would decay to 0 at that same end-of-turn-1 decay and be gone before turn 2's
+// tick ever ran, silently testing "Staggered already expired" instead of "Staggered defers the
+// rise" (caught by temporarily hoisting the rise block before the stagger check and observing
+// this test still passed at turns=1 — the mutation never surfaced, proving the fixture, not the
+// law, was untested).
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario a: Staggered defers the rise — Toppled survives a stagger-skipped turn untouched, then rises normally the turn after (fix round, I2)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2); // dies at its own turn-start tick (hp 2)
+  await applyStatus(page, 'wraith-2', 'kindled', 1, 3); // dies at its own turn-start tick (hp 3)
+  await setPos(page, 'wisp-1', 11, 7); // exiled — melee-only, can't close the distance in time
+
+  // Fixture the Toppled-and-Staggered Keeper. Applying mid-turn-1 lands both effects on turn 2
+  // (scenario a's own "applying it mid-turn-1 lands it on turn 2" idiom, above). Staggered's
+  // turns=2 (not the real game's turns=1) survives the Keeper's own turn-1-end decay — see the
+  // header note.
+  await applyStatus(page, 'keeper', 'toppled', 1, 1);
+  await applyStatus(page, 'keeper', 'staggered', 2);
+
+  await page.keyboard.press('7'); // end turn 1
+
+  // Turn 2: the stagger consumes at tick and the turn ends there — wait for THAT (not for the
+  // Keeper to become ACTIVE, which never happens this turn) — then check Toppled mid-skip.
+  const clearedInTime = await passUntilStatusGone(page, 'keeper', 'staggered');
+  expect(clearedInTime, "the Keeper's own turn 2 tick to consume Staggered").toBe(true);
+
+  const midSkip = await unitState(page, 'keeper');
+  expect(
+    midSkip?.statuses.some((st) => st.id === 'toppled'),
+    'Ch. VIII: Staggered defers the rise — Toppled survives the skipped turn untouched (not consumed, no toll paid), because the staggered branch returns before the toppled-rise block ever runs',
+  ).toBe(true);
+
+  // Turn 3 (the Keeper's real next active turn): the rise now fires normally, toll and all.
+  const risen = await passUntilKeeper(page);
+  expect(risen.activeId).toBe('keeper');
+  expect(risen.budget.total, 'the deferred rise pays its toll on the turn it actually gets: tollRise(4) = 2').toBe(2);
+
+  const afterRise = await unitState(page, 'keeper');
+  expect(afterRise?.statuses.some((st) => st.id === 'toppled'), 'Toppled is now consumed by the (deferred) rise').toBe(false);
 });
 
 // ---------------------------------------------------------------------------------------
