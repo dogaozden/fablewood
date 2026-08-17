@@ -180,6 +180,18 @@ describe('Ch. VIII — the rise toll (tollRise): a Toppled unit\'s turn-start mo
     'is 0 before the toll ever runs, and the toll must not resurrect that zero', () => {
     expect(tollRise(effectiveMove(4, [{ id: 'bound', turnsLeft: 1, magnitude: 0 }]))).toBe(0);
   });
+
+  describe('Ch. IX — the Waymark Heel (+1 party move base) composes over the SAME pure functions, ' +
+    'unmodified: the relic only changes the BASE spawnUnits hands them, never their own math', () => {
+    it('the zero-preserving floor still holds with a Heel\'d base: a Bound party unit (base 4+1=5) ' +
+      'still moves 0 — effectiveMove\'s bound check short-circuits before the base value ever matters', () => {
+      expect(tollRise(effectiveMove(5, [{ id: 'bound', turnsLeft: 1, magnitude: 0 }]))).toBe(0);
+    });
+
+    it('a Heel\'d base composes normally with the rise toll: tollRise(5) = max(1, floor(5/2)) = 2', () => {
+      expect(tollRise(effectiveMove(5, []))).toBe(2);
+    });
+  });
 });
 
 describe('Ch. VIII compose law — rise-toll first, stance second: Ch. VI\'s Careful Step + Press On ' +

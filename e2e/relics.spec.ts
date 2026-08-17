@@ -797,3 +797,219 @@ test("CombatScene Death's Door site: the catch notice is the exact verbatim stri
     await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });
+
+// ---------------------------------------------------------------------------------------
+// Task 5 — the two spawn passives: the Waymark Heel (+1 party move base) and the Margin Lamp
+// (enemies begin combat already written). Both land at ONE seam, CombatScene.spawnUnits — the
+// budget/move-field/rise-toll/stance math (turnBudget.ts/status.ts, unmodified) and the
+// Unwritten lifecycle (status.ts/CombatScene's damage-seam clear, unmodified) already read
+// unit.move/unit.statuses fresh, so nothing downstream needed to learn either relic exists.
+//
+// These launch bare `?scene=combat` (bestiary.spec.ts's own standalone-combat idiom — this file's
+// header notes CombatScene is "testable standalone" precisely for this), which — unlike the
+// dungeon/hamlet flow — never warms services.inventory before spawnUnits() reads bornRelic()
+// synchronously. spawnUnits() calls applyBornRelicSpawnState() (idempotent) once at spawn AND
+// loadContent() calls it again once services.inventory.ready() has genuinely resolved, so the
+// standalone harness (this suite) and real play (already-warm store) both land correct.
+//
+// Own-file local debug helpers, richer than combatSnap()/CombatSnap above (T3's minimal
+// {state}-only shape, still used by every earlier test in this file) — same "own-file local
+// copy" convention bestiary.spec.ts/measured-turn.spec.ts each follow for their own combat debug
+// surface, ported here rather than risking a shared-type edit against 12 already-green tests.
+// ---------------------------------------------------------------------------------------
+
+const HEEL_ID = 'waymark-heel';
+const LAMP_ID = 'margin-lamp';
+
+type Budget = { total: number; left: number; legSpent: boolean; actionSpent: boolean; pressedOn: boolean };
+type BudgetSnap = { state: string; activeId: string; budget: Budget } | null;
+
+async function budgetSnap(page: Page): Promise<BudgetSnap> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { combatSnapshot?(): unknown } | undefined;
+    return (s?.combatSnapshot?.() ?? null) as BudgetSnap;
+  });
+}
+
+/** Presses End Turn for whichever party unit is up but isn't `id`, and otherwise just waits
+ *  (enemy turns play themselves) — until it's `id`'s own turn. Generalizes this file's own
+ *  waitForKeeperTurn (state-only) / bestiary.spec.ts's passUntilKeeper (Keeper-only) to either
+ *  party unit, since the Heel scenario below needs to prove the bonus on BOTH. */
+async function passUntilPartyTurn(page: Page, id: 'keeper' | 'mira', timeout = 30_000): Promise<NonNullable<BudgetSnap>> {
+  const start = Date.now();
+  let last: BudgetSnap = null;
+  while (Date.now() - start < timeout) {
+    last = await budgetSnap(page);
+    if (last && last.state === 'playerMove') {
+      if (last.activeId === id) return last;
+      if (last.activeId === 'keeper' || last.activeId === 'mira') await page.keyboard.press('7'); // End Turn
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`relics T5: timed out waiting for ${id}'s turn; last snapshot=${JSON.stringify(last)}`);
+}
+
+/** The party panel's rendered raw text (CombatScene.hudPartyText, wrapping CombatHud's own
+ *  partyPanelText — measured-turn.spec.ts's own idiom for reading the "Move N/M" readout). */
+async function partyPanelText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { hudPartyText?(): string } | undefined;
+    return s?.hudPartyText?.() ?? '';
+  });
+}
+
+/** Full e2e read of a unit's live statuses (CombatScene.unitDebug — bestiary.spec.ts's own idiom;
+ *  needed here to prove the Lurker's spawn statuses directly, without fighting canvas chip
+ *  pixels: drawStatusChips renders straight off this same array, so it's the ground truth). */
+async function unitState(
+  page: Page,
+  id: string,
+): Promise<{ hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as
+      | { unitDebug?(id: string): { hp: number; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null }
+      | undefined;
+    return s?.unitDebug?.(uid) ?? null;
+  }, id);
+}
+
+/** Valid target ids for `action` from the ACTIVE unit (CombatScene.validTargetsDebug —
+ *  bestiary.spec.ts's own idiom for observing Strike's Unwritten exclusion without menu-click
+ *  geometry). */
+async function validTargets(page: Page, action: string): Promise<string[]> {
+  return page.evaluate((a) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { validTargetsDebug?(action: string): string[] } | undefined;
+    return s?.validTargetsDebug?.(a) ?? [];
+  }, action);
+}
+
+/** Apply a status directly (CombatScene.debugApplyStatus — bestiary.spec.ts's own idiom); used
+ *  below to prove the Unwritten lifecycle is untouched by the Lamp — only its spawn-time GRANT
+ *  is gated, never the general apply/exclude machinery. */
+async function debugApplyStatus(page: Page, id: string, statusId: string, turns = 1, magnitude = 1): Promise<void> {
+  await page.evaluate(
+    ({ id, statusId, turns, magnitude }) => {
+      const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+      const s = g?.scene?.getScene?.('combat') as
+        | { debugApplyStatus?(id: string, statusId: string, turns: number, magnitude?: number): void }
+        | undefined;
+      s?.debugApplyStatus?.(id, statusId, turns, magnitude);
+    },
+    { id, statusId, turns, magnitude },
+  );
+}
+
+async function restoreInventoryOnly(page: Page, inv: LootInventory | null): Promise<void> {
+  await page.request.put('/api/state/inventory.json', { data: inv ?? { version: 1, gold: 0, stacks: {} } });
+}
+
+test("the Waymark Heel borne: every party unit's Move N/M HUD readout shows base+1 at combat start (Ch. IX)", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [HEEL_ID]: 1 }, bornRelicId: HEEL_ID },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+
+    const keeperTurn = await passUntilPartyTurn(page, 'keeper');
+    expect(keeperTurn.budget.total, "the Keeper's fresh budget: base 4 +1 Heel = 5").toBe(5);
+    expect(keeperTurn.budget.left).toBe(5);
+    expect(await partyPanelText(page), 'the rendered HUD readout shows the Heel\'d total, not the plain base').toContain('Move 5/5');
+
+    await page.keyboard.press('7'); // End the Keeper's turn 1.
+    const miraTurn = await passUntilPartyTurn(page, 'mira');
+    expect(miraTurn.budget.total, "the Heel reads 'every party unit', not just the Keeper — Mira's own base 4 +1 = 5").toBe(5);
+    expect(miraTurn.budget.left).toBe(5);
+  } finally {
+    await restoreInventoryOnly(page, beforeInv);
+  }
+});
+
+test('without the Waymark Heel borne: Move N/M reads the plain base — regression', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 0, stacks: {} } });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+
+    const keeperTurn = await passUntilPartyTurn(page, 'keeper');
+    expect(keeperTurn.budget.total, 'no relic borne: the Keeper\'s plain base').toBe(4);
+    expect(await partyPanelText(page)).toContain('Move 4/4');
+  } finally {
+    await restoreInventoryOnly(page, beforeInv);
+  }
+});
+
+test('the Margin Lamp borne: the Lurker begins combat already written, is immediately Strike-targetable, and the Unwritten lifecycle still works normally afterward (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [LAMP_ID]: 1 }, bornRelicId: LAMP_ID },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=lurker');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    // The spawn grant never landed.
+    const atSpawn = await unitState(page, 'lurker-0');
+    expect(atSpawn?.statuses.some((s) => s.id === 'unwritten'), 'the Lamp: no Unwritten at spawn').toBe(false);
+
+    // Immediately Strike-targetable — no waiting for it to act or take damage first.
+    await debugSetPos(page, 'lurker-0', 6, 1);
+    await debugSetPos(page, 'keeper', 5, 1);
+    const targets = await validTargets(page, 'strike');
+    expect(targets, 'Strike-targetable from the very first turn, with no reveal trigger needed').toContain('lurker-0');
+
+    // The reveal-on-act/damage LIFECYCLE is untouched: the Lamp only ever gated the spawn grant.
+    // A status applied through the normal machinery still behaves exactly as it always has,
+    // Lamp or no Lamp — proving this isn't a blanket disable of Unwritten while the Lamp is held.
+    await debugApplyStatus(page, 'lurker-0', 'unwritten', 1, 1);
+    const reapplied = await unitState(page, 'lurker-0');
+    expect(reapplied?.statuses.some((s) => s.id === 'unwritten'), 'the general apply machinery is untouched').toBe(true);
+    const targetsAfter = await validTargets(page, 'strike');
+    expect(targetsAfter, 'and Strike\'s own exclusion still honors it, same as ever').not.toContain('lurker-0');
+  } finally {
+    await restoreInventoryOnly(page, beforeInv);
+  }
+});
+
+test('without the Margin Lamp borne: the Lurker still begins combat Unwritten — regression', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 0, stacks: {} } });
+
+    await page.goto('/?scene=combat&seed=7&enemies=lurker');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    const atSpawn = await unitState(page, 'lurker-0');
+    expect(atSpawn?.statuses.some((s) => s.id === 'unwritten'), 'no relic borne: the shipped Ch. VIII spawn grant stands').toBe(true);
+
+    await debugSetPos(page, 'lurker-0', 6, 1);
+    await debugSetPos(page, 'keeper', 5, 1);
+    const targets = await validTargets(page, 'strike');
+    expect(targets, 'still excluded from Strike until it acts or takes damage').not.toContain('lurker-0');
+  } finally {
+    await restoreInventoryOnly(page, beforeInv);
+  }
+});
