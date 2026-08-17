@@ -46,6 +46,13 @@ export async function canvasClick(page: Page, ix: number, iy: number): Promise<v
   await page.mouse.click(box.x + (ix / 960) * box.width, box.y + (iy / 540) * box.height);
 }
 
+/** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 — the formula every combat spec uses to turn
+ *  a board tile into a click point (boss-victory/boss-reforged/fixwave-combat's own former
+ *  per-file copies of this exact helper, built on canvasClick above). */
+export async function tileClick(page: Page, c: number, r: number): Promise<void> {
+  await canvasClick(page, 192 + c * 48 + 24, 48 + r * 48 + 24);
+}
+
 /** Hold a key down for a duration (real key-repeat, drives Phaser movement). */
 export async function holdKey(page: Page, key: string, ms: number): Promise<void> {
   await page.keyboard.down(key);
@@ -256,6 +263,56 @@ export async function waitForState<T = Record<string, unknown>>(
     true,
   );
   return last;
+}
+
+/** Poll a live value until `pred` holds — the loud form: on timeout, `expect.poll`'s own
+ *  failure output reports the last polled value alongside `message`, unlike a silent while-loop
+ *  that just returns whatever it last saw and leaves a later assertion to explain why. Shared by
+ *  every boss e2e spec that waits on a live CombatScene snapshot (boss-victory/boss-reforged/
+ *  fixwave-combat's own former per-file copies of this exact helper). */
+export async function waitForCombat<T>(
+  read: () => Promise<T>,
+  pred: (v: T) => boolean,
+  message: string,
+  timeout = 40_000,
+): Promise<T> {
+  await expect.poll(async () => (pred(await read()) ? 'yes' : 'no'), { message, timeout }).toBe('yes');
+  return read();
+}
+
+/** The vc-law pack's own authored correct-branch text per Vault-Warden boss phase
+ *  (packs/vc-law/pack.json) — a distinctive prefix of each `correct:true` branch's label.
+ *  encounters/engine.ts's reskin() seed-shuffles branches[] order on every runEncounter
+ *  (anti-staleness), so the FIRST rendered `.fw-optlabel` is never reliably the authored correct
+ *  one — match by this text content, never by slot or hotkey. Shared by every boss e2e spec that
+ *  drives a Parley (boss-victory/boss-reforged/fixwave-combat's own former per-file copies). */
+export const CORRECT_BRANCH_PREFIX = [
+  'Cite the standard',           // enc.sb.boss1-preference-multiple
+  'Counter to nonparticipating', // enc.sb.boss2-participation-cap
+  'Counter both terms',          // enc.sb.boss3-antidilution-pool
+];
+
+/** After a debug-teleport-and-Cast on the Warden, close the turn if it's still open. Step 0c (T6
+ *  boss-cluster bisect): debugSetPos is a teleport that never spends the movement leg
+ *  (turnBudget.ts), so post-T2 (move·act·move, End Turn) the turn stays open ("Steps remain")
+ *  after a single Cast — advanceTurn() (the only place that consumes pendingBossPhase and opens
+ *  the next Parley) never runs otherwise. Press End Turn like a real player standing still with
+ *  movement left over would (boss-cluster-diagnosis.md) — never touches debugSetPos itself. The
+ *  scene briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
+ *  (CombatScene.ts's Phase type) — wait it out before deciding whether the turn is still open.
+ *  Shared by every boss e2e spec that drives a Cast via debugSetPos (boss-victory/boss-reforged/
+ *  fixwave-combat's own former per-file copies of this exact snippet). */
+export async function closeCastTurnIfOpen(
+  read: () => Promise<{ state: string } | null>,
+  page: Page,
+): Promise<void> {
+  const afterCast = await waitForCombat(
+    read, (s) => s?.state !== 'resolving', 'the post-Cast state settled (left "resolving")', 5_000,
+  );
+  if (afterCast?.state === 'playerMove') {
+    await page.keyboard.press('7'); // End Turn
+    await page.waitForTimeout(400);
+  }
 }
 
 // --- minimal window typing for the harness surfaces (kept local to e2e) -------

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, readState } from './helpers';
+import { waitReady, readState, waitForCombat, tileClick, CORRECT_BRANCH_PREFIX, closeCastTurnIfOpen } from './helpers';
 
 // magic-combat-depth.md Phase 3 (§9) — the Vault-Warden reforged, driven live.
 //
@@ -17,7 +17,7 @@ import { waitReady, readState } from './helpers';
 // boss.name 'The Vault-Warden', shields 3, one trash wisp ('wisp-0'). CombatScene's
 // routeFixtureBossToInstalledPack swaps the fixture's placeholder phases for the installed
 // vc-law pack's real enc.sb.boss1/2/3, so the Parley CONTENT here is the pack's own (hence
-// CORRECT_BRANCH_PREFIX below, lifted from boss-victory.spec.ts). It copies only `phases`,
+// CORRECT_BRANCH_PREFIX, shared via helpers.ts). It copies only `phases`,
 // NOT `moveLabels` — so this fixture path deliberately exercises the ENGINE-GENERIC move
 // labels ("Writ of Seizure", "Call the Clause"), which is exactly what an engine spec should
 // assert. The pack's relabels are covered by pipeline/validate_dungeon.test.mjs.
@@ -138,32 +138,6 @@ async function debugSetPos(page: Page, id: string, c: number, r: number): Promis
   );
 }
 
-/** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 (same formula boss-victory.spec.ts uses). */
-async function clickTile(page: Page, c: number, r: number): Promise<void> {
-  const canvas = page.locator('canvas').first();
-  const box = await canvas.boundingBox();
-  if (!box) throw new Error('canvas has no bounding box');
-  const ix = 192 + c * 48 + 24;
-  const iy = 48 + r * 48 + 24;
-  await page.mouse.click(box.x + (ix / 960) * box.width, box.y + (iy / 540) * box.height);
-}
-
-/** Poll the live combat snapshot until `pred` holds. expect.poll so a slow frame under a
- *  parallel fleet extends the wait instead of failing it. */
-async function waitForCombat(page: Page, pred: (s: Snap) => boolean, message: string, timeout = 40_000): Promise<Snap> {
-  await expect.poll(async () => (pred(await snap(page)) ? 'yes' : 'no'), { message, timeout }).toBe('yes');
-  return snap(page);
-}
-
-// The pack's own authored correct-branch text per boss phase (packs/vc-law/pack.json).
-// encounters/engine.ts's reskin() seed-shuffles branch ORDER, so options are matched BY TEXT,
-// never by slot or hotkey (the hard-won lesson recorded in boss-victory.spec.ts's header).
-const CORRECT_BRANCH_PREFIX = [
-  'Cite the standard',           // enc.sb.boss1-preference-multiple
-  'Counter to nonparticipating', // enc.sb.boss2-participation-cap
-  'Counter both terms',          // enc.sb.boss3-antidilution-pool
-];
-
 /**
  * Drive one automatic boss Parley. `pick: 'correct'` clicks the pack's authored correct branch
  * (shield shatters); `pick: 'wrong'` clicks any OTHER rendered branch, which leaves the shields
@@ -195,7 +169,7 @@ async function driveParley(page: Page, phaseNum: number, pick: 'correct' | 'wron
   }
   // The post-branch effect lands inside a delayedCall(900); wait for the board to actually be
   // playable (or the fight to be over) rather than sleeping through it.
-  await waitForCombat(page, (s) => s?.state === 'playerMove' || s?.state === 'over',
+  await waitForCombat(() => snap(page), (s) => s?.state === 'playerMove' || s?.state === 'over',
     `phase ${phaseNum} handed control back (or ended the fight)`);
 }
 
@@ -203,7 +177,7 @@ async function driveParley(page: Page, phaseNum: number, pick: 'correct' | 'wron
  *  phaseIndex and re-arms the next Parley (answerCast idiom from boss-victory.spec.ts). */
 async function driveCastOnWarden(page: Page): Promise<void> {
   for (let guard = 0; guard < 8; guard++) {
-    const s = await waitForCombat(page, (x) => x?.state === 'playerMove', 'a party turn opened for manual control');
+    const s = await waitForCombat(() => snap(page), (x) => x?.state === 'playerMove', 'a party turn opened for manual control');
     const active = s!.activeId;
 
     await debugSetPos(page, active, 5, 3);
@@ -214,7 +188,7 @@ async function driveCastOnWarden(page: Page): Promise<void> {
     await expect.poll(async () => (await snap(page))?.state, { message: 'Cast entered targeting', timeout: 10_000 })
       .toBe('playerTarget');
 
-    await clickTile(page, 6, 3);
+    await tileClick(page, 6, 3);
     await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 20_000 });
     await page.waitForTimeout(450); // overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-textarea').fill(
@@ -234,19 +208,7 @@ async function driveCastOnWarden(page: Page): Promise<void> {
     // Whatever comes next (a Parley overlay, or ordinary turns) waits on its own condition.
     await page.locator('.fw-textarea').waitFor({ state: 'detached', timeout: 20_000 });
 
-    // Step 0c (T6 boss-cluster bisect): debugSetPos never spends the movement leg, so post-T2
-    // (move·act·move, End Turn) the turn stays open ("Steps remain") after this single Cast —
-    // advanceTurn() (the only place that consumes pendingBossPhase and opens the next Parley)
-    // never runs otherwise. Press End Turn like a real player standing still with movement left
-    // over would (boss-cluster-diagnosis.md) — never touches debugSetPos itself. The scene
-    // briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
-    // (CombatScene.ts's Phase type) — wait it out before deciding whether the turn is open.
-    const afterCast = await waitForCombat(page, (s) => s?.state !== 'resolving',
-      'the post-Cast state settled (left "resolving")', 5_000);
-    if (afterCast?.state === 'playerMove') {
-      await page.keyboard.press('7'); // End Turn
-      await page.waitForTimeout(400);
-    }
+    await closeCastTurnIfOpen(() => snap(page), page); // Step 0c — see helpers.ts's own doc comment
     return;
   }
   throw new Error('driveCastOnWarden: could not land a Cast on the Warden after 8 attempts');
@@ -286,7 +248,7 @@ test('§9.3 Objection! — a free Strike at the Warden is overruled and riposted
     // Phase 1's Parley opens automatically; answer it to reach ordinary turns.
     await driveParley(page, 1, 'correct');
 
-    const s = await waitForCombat(page, (x) => x?.state === 'playerMove', 'a party turn opened');
+    const s = await waitForCombat(() => snap(page), (x) => x?.state === 'playerMove', 'a party turn opened');
     const active = s!.activeId;
     const wardenBefore = await unitDebug(page, 'warden');
     expect(wardenBefore, 'the boss unit is readable').not.toBeNull();
@@ -301,7 +263,7 @@ test('§9.3 Objection! — a free Strike at the Warden is overruled and riposted
     await page.keyboard.press('1');
     await expect.poll(async () => (await snap(page))?.state, { message: 'Strike entered targeting', timeout: 10_000 })
       .toBe('playerTarget');
-    await clickTile(page, 6, 3);
+    await tileClick(page, 6, 3);
 
     // THE VERDICT: the banner reads exactly the spec's word.
     await expectBannerSeen(page, 'Overruled.', '§9.3 — the free Strike is Objected with "Overruled."', 20_000);
@@ -380,7 +342,7 @@ test('§9.4 Call the Clause — a clause-wisp spawns and is appended to the init
     expect(summons, 'Call the Clause is once per battle').toBe(1);
 
     // The order stayed wrap-safe: the loop kept running and reached a party turn again.
-    await waitForCombat(page, (s) => s?.state === 'playerMove' || s?.state === 'over',
+    await waitForCombat(() => snap(page), (s) => s?.state === 'playerMove' || s?.state === 'over',
       'the turn loop keeps running with the appended unit in the order', 90_000);
   } finally {
     await restoreState(page, beforeSave, beforeInv);
@@ -407,7 +369,7 @@ test('the full negotiation still completes — three correct Parleys open the va
     await driveCastOnWarden(page);
     await driveParley(page, 3, 'correct'); // shields 1 -> 0 -> victory
 
-    const dead = await waitForCombat(page, (s) => s?.state === 'over',
+    const dead = await waitForCombat(() => snap(page), (s) => s?.state === 'over',
       'the third shield broke and combat resolved', 40_000);
     await page.screenshot({ path: `${EV}/e2e-boss-reforged-negotiation-victory.png` });
     expect(dead!.partyHp, 'the party survived with HP to spare').toBeGreaterThan(0);

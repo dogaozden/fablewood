@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, currentScene, readState } from './helpers';
+import { waitReady, currentScene, readState, waitForCombat, tileClick, CORRECT_BRANCH_PREFIX, closeCastTurnIfOpen } from './helpers';
 // The dev fixture's own spec, so "every room got cleared" stays a statement about the fixture
 // rather than a hardcoded count that silently rots the next time a room is added — which is
 // exactly what happened when Ch. VIII's "under-bestiary" made this a 5-room dungeon.
@@ -29,7 +29,8 @@ const devDungeon = JSON.parse(
 // Both routes' Parley CONTENT is identical regardless: CombatScene.ts's routeFixtureBossToInstalledPack
 // swaps a packless fixture's placeholder boss phases for the installed vc-law pack's real
 // enc.sb.boss1/2/3 phases whenever a real pack is present (it is, here) — so both tests drive the
-// same 3 real phases and share driveParley/CORRECT_BRANCH_PREFIX below.
+// same 3 real phases and share driveParley below (CORRECT_BRANCH_PREFIX is now shared via
+// helpers.ts, alongside every other boss e2e spec).
 //
 // The fight's rhythm (boss.ts, units.ts, CombatScene.ts, read directly): shields:3/phases:3. Each
 // phase opens an automatic Parley (scenario_branch) whose authored branches[] include exactly one
@@ -117,26 +118,6 @@ async function debugSetPos(page: Page, id: string, c: number, r: number): Promis
   );
 }
 
-/** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 (same formula combat-magic.spec.ts uses). */
-async function clickTile(page: Page, c: number, r: number): Promise<void> {
-  const canvas = page.locator('canvas').first();
-  const box = await canvas.boundingBox();
-  if (!box) throw new Error('canvas has no bounding box');
-  const ix = 192 + c * 48 + 24;
-  const iy = 48 + r * 48 + 24;
-  await page.mouse.click(box.x + (ix / 960) * box.width, box.y + (iy / 540) * box.height);
-}
-
-async function waitForCombatState(page: Page, pred: (s: Snap) => boolean, timeout = 25_000): Promise<Snap> {
-  const start = Date.now();
-  let s = await snap(page);
-  while (!pred(s) && Date.now() - start < timeout) {
-    await page.waitForTimeout(150);
-    s = await snap(page);
-  }
-  return s;
-}
-
 /** Heal via the Satchel if the party pool is getting dangerously low (fairness safety valve,
  *  not part of the kill proof itself — the fight can and does hit the party). */
 async function healIfLow(page: Page): Promise<void> {
@@ -155,15 +136,6 @@ async function healIfLow(page: Page): Promise<void> {
     }
   }
 }
-
-// The pack's own authored correct-branch text per boss phase (packs/vc-law/pack.json) — a
-// distinctive prefix of each `correct:true` branch's label, matched against whichever
-// `.fw-optlabel` reskin's seeded shuffle actually rendered it under (never assume position).
-const CORRECT_BRANCH_PREFIX = [
-  'Cite the standard',                    // enc.sb.boss1-preference-multiple
-  'Counter to nonparticipating',          // enc.sb.boss2-participation-cap
-  'Counter both terms',                   // enc.sb.boss3-antidilution-pool
-];
 
 /** Drive one automatic boss Parley to completion, clicking whichever rendered option's label
  *  matches the pack's authored correct-branch text (reskin() shuffles branch ORDER per seed —
@@ -214,7 +186,9 @@ async function driveParley(page: Page, phaseNum: number, shotPrefix: string): Pr
 async function driveCastOnWarden(page: Page, parkMobId: string): Promise<void> {
   for (let guard = 0; guard < 8; guard++) {
     await healIfLow(page);
-    const s = await waitForCombatState(page, (x) => x?.state === 'playerMove', 25_000);
+    const s = await waitForCombat(
+      () => snap(page), (x) => x?.state === 'playerMove', 'a party turn opened for manual control', 25_000,
+    );
     expect(s?.state, 'a party turn opened for manual control').toBe('playerMove');
     const active = s!.activeId;
 
@@ -230,7 +204,7 @@ async function driveCastOnWarden(page: Page, parkMobId: string): Promise<void> {
       continue;
     }
 
-    await clickTile(page, 6, 3); // the Warden's own tile — never the mob's
+    await tileClick(page, 6, 3); // the Warden's own tile — never the mob's
     await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 10_000 });
     await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms answer guard
     await page.locator('.fw-textarea').fill(
@@ -246,21 +220,7 @@ async function driveCastOnWarden(page: Page, parkMobId: string): Promise<void> {
     } catch { /* a full auto-resolving pass needs no continue click */ }
     await page.waitForTimeout(500);
 
-    // Step 0c (T6 boss-cluster bisect): debugSetPos is a teleport that never spends the
-    // movement leg (turnBudget.ts), so post-T2 (move·act·move, End Turn) `turnExhausted` is
-    // false after this single Cast and the turn stays open ("Steps remain") instead of
-    // auto-ending — advanceTurn() (the only place that consumes pendingBossPhase and opens the
-    // next Parley) never runs. Press End Turn like a real player standing still with movement
-    // left over would. Never touches debugSetPos itself — a teleport that also spent budget
-    // would make the tests lie about the movement economy (boss-cluster-diagnosis.md).
-    // The scene briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
-    // (CombatScene.ts's Phase type) — a same-instant read can still catch that transitional
-    // value, so wait it out before deciding whether the turn is actually still open.
-    const afterCast = await waitForCombatState(page, (x) => x?.state !== 'resolving', 5_000);
-    if (afterCast?.state === 'playerMove') {
-      await page.keyboard.press('7'); // End Turn
-      await page.waitForTimeout(400);
-    }
+    await closeCastTurnIfOpen(() => snap(page), page); // Step 0c — see helpers.ts's own doc comment
     return;
   }
   throw new Error('driveCastOnWarden: could not land a Cast on the Warden after 8 attempts');
@@ -328,7 +288,7 @@ test('boss-victory (fixture path): standalone Vault-Warden kill — all 3 shield
 
     await driveParley(page, 3, 'e2e-boss-victory-fixture'); // shields 1 -> 0 -> victory fires inside the post-Parley checkEnd
 
-    const dead = await waitForCombatState(page, (s) => s?.state === 'over', 15_000);
+    const dead = await waitForCombat(() => snap(page), (s) => s?.state === 'over', 'combat resolved to "over"', 15_000);
     expect(dead?.state, 'combat resolved to "over" after the third shield broke (shields<=0)').toBe('over');
     await page.screenshot({ path: `${EV}/e2e-boss-victory-fixture-kill-screen.png` });
 
@@ -392,7 +352,7 @@ test('boss-victory (real dungeon path): Vault-Warden kill via auto=boss, persist
     await driveCastOnWarden(page, 'warden-0');
     await driveParley(page, 3, 'e2e-boss-victory-dungeon'); // shields -> 0, victory fires in the post-Parley checkEnd
 
-    const dead = await waitForCombatState(page, (s) => s?.state === 'over', 15_000);
+    const dead = await waitForCombat(() => snap(page), (s) => s?.state === 'over', 'combat resolved to "over"', 15_000);
     expect(dead?.state, 'combat resolved to "over" after the third shield broke').toBe('over');
     await page.screenshot({ path: `${EV}/e2e-boss-victory-dungeon-kill-screen.png` });
     expect(Number.isFinite(dead?.partyHp), 'partyHp is finite, not NaN').toBe(true);
