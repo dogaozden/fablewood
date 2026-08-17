@@ -275,11 +275,6 @@ export class CombatScene extends Phaser.Scene {
    *  unit's own next turn lands mid the FOLLOWING round, after that round's earlier actors
    *  already moved, so a bulk clear at round-wrap would re-arm its latch one slot too early). */
   private midRiseIds = new Set<string>();
-  /** Ch. VIII Task 3 — e2e-only override: unit ids Shove should treat as toppleable regardless
-   *  of their real archetype stat (units.ts ENEMY_STATS — none of the four shipped archetypes
-   *  are toppleable yet; Task 6's Husk lands the real toppleable:true entry). Consulted by
-   *  isToppleable, populated only via the debugForceToppleable hook below. */
-  private debugToppleableIds = new Set<string>();
   /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
   private hoveredStatusUnitId: string | null = null;
 
@@ -432,7 +427,6 @@ export class CombatScene extends Phaser.Scene {
     this.carefulStepOn = false;
     this.tolledMoveBase = null;
     this.midRiseIds.clear();
-    this.debugToppleableIds.clear();
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
@@ -547,7 +541,14 @@ export class CombatScene extends Phaser.Scene {
     const enemies = this.launch.room.enemies ?? [];
     enemies.forEach((spec, i) => {
       const at = es[i % es.length] ?? { c: GRID_W - 2, r: 2 + i };
-      this.units.push(makeEnemy(spec, i, at.c, at.r));
+      const enemy = makeEnemy(spec, i, at.c, at.r);
+      // Ch. VIII — the Lurker "begins combat Unwritten" (the chapter's own words), so the status
+      // is granted at SPAWN, before initiative is even built: it is not something the entry does
+      // on its first turn, it is the state it is discovered in. Everything after this is the
+      // shipped Unwritten lifecycle — untargetable by Strike/Shove, +1 on its opening act,
+      // consumed by acting or by taking damage — with no Lurker-specific branch anywhere.
+      if (enemy.kind === 'lurker') enemy.statuses = applyStatus(enemy, 'unwritten', 1, 1);
+      this.units.push(enemy);
     });
 
     if (this.launch.room.boss) {
@@ -701,12 +702,21 @@ export class CombatScene extends Phaser.Scene {
   private drawStatusChips(u: UnitState, v: UnitView, chipY: number): void {
     for (const c of v.chips) c.destroy();
     v.chips = [];
-    if (!u.statuses.length) return;
+    // Ch. VIII Task 6 (carried cosmetic) — an INERT Daunted carries no chip. When the source
+    // falls the daunt lifts immediately in every way that matters (computeHit's penalty, the
+    // move-field filter, the AI's own read all gate on source-alive), but the status INSTANCE
+    // stays on the unit — the chapter consumes it by event, not by decay — so the row went on
+    // advertising a fear that had stopped applying. Hidden, not cleared: removing the instance
+    // would be a mechanical change, and this seam is presentation only. Everything downstream
+    // (MAX, the overflow '+') reads the filtered list, so a hidden chip can't leave a phantom
+    // slot or a '+' counting something invisible.
+    const visible = u.statuses.filter((s) => s.id !== 'daunted' || this.dauntedSourceAlive(u));
+    if (!visible.length) return;
     const SIZE = 10;
     const GAP = 2;
     const MAX = 3;
-    const shown = u.statuses.slice(0, MAX);
-    const overflow = u.statuses.length > MAX;
+    const shown = visible.slice(0, MAX);
+    const overflow = visible.length > MAX;
     const n = shown.length + (overflow ? 1 : 0);
     let cx = -(n * SIZE + (n - 1) * GAP) / 2 + SIZE / 2;
     for (const s of shown) {
@@ -1266,14 +1276,20 @@ export class CombatScene extends Phaser.Scene {
     this.showMenu(unit);
   }
 
-  /** Ch. VIII — can a LANDED Shove knock `target` Toppled: either its archetype is really
-   *  toppleable (units.ts ENEMY_STATS — none of the four shipped archetypes are yet) or it's
-   *  been marked via the e2e-only debugForceToppleable seam (Task 3's stand-in for Task 6's
-   *  Husk, which lands the real toppleable:true entry). `target.kind` narrows to EnemyArchetype
-   *  once 'keeper'/'mira' are excluded — safe to index ENEMY_STATS with directly after that. */
+  /** Ch. VIII — can a LANDED push knock `target` Toppled. Two answers, and the asymmetry is the
+   *  chapter's, not an oversight:
+   *   - The RETINUE always can. The chapter's symmetry clause is explicit — "the Husk's blow can
+   *     Topple the retinue" — and the Keeper and Mira carry no `toppleable` stat because they
+   *     are not bestiary entries, not because they are immovable. (Shove can never reach them:
+   *     validTargets' shove case is enemies-only, so this branch serves the Husk's heave alone.)
+   *   - An ENEMY answers from its own per-entry stat (units.ts ENEMY_STATS). Today exactly one
+   *     entry says yes: the Husk. `target.kind` narrows to EnemyArchetype once 'keeper'/'mira'
+   *     are excluded, so ENEMY_STATS indexes directly after that.
+   *  Task 3's debugForceToppleable hook is gone with this: it existed only to fake a toppleable
+   *  entry before one existed, and the real one is here now. */
   private isToppleable(target: UnitState): boolean {
-    if (this.debugToppleableIds.has(target.id)) return true;
-    return target.kind !== 'keeper' && target.kind !== 'mira' && ENEMY_STATS[target.kind].toppleable;
+    if (target.kind === 'keeper' || target.kind === 'mira') return true;
+    return ENEMY_STATS[target.kind].toppleable;
   }
 
   /** Ch. VIII — Unwritten cannot be TARGETED by Strikes (and Shove) while it holds; spells and
@@ -1297,8 +1313,21 @@ export class CombatScene extends Phaser.Scene {
    *  the set's members — i.e. every unit, every turn, until Task 6's Lurker exists. */
   private consumeOnOwnAction(unit: UnitState): void {
     if (unit.statuses.some((s) => CONSUMED_ON_OWN_ACTION.has(s.id))) {
+      const wasUnwritten = hasStatus(unit.statuses, 'unwritten');
       unit.statuses = unit.statuses.filter((s) => !CONSUMED_ON_OWN_ACTION.has(s.id));
+      // Ch. VIII Task 6 (carried cosmetic) — trigger 1's half of the reveal notice; trigger 2's
+      // lives in damageUnit. Kept specific to 'unwritten' rather than firing for any future
+      // member of CONSUMED_ON_OWN_ACTION, whose reveal would want its own words.
+      if (wasUnwritten) this.revealNotice(unit);
     }
+  }
+
+  /** Ch. VIII Task 6 (carried cosmetic) — the beat where a thing stops being Unwritten and
+   *  enters the Ledger. One word, parchment-toned, floated off the revealed unit: the entry is
+   *  no longer un-entered. Both triggers route here so the reveal never differs by cause. */
+  private revealNotice(unit: UnitState): void {
+    if (this.destroyed || !unit.alive) return;
+    this.floatText(unit, 'Written.', P.parchment);
   }
 
   /** Ch. VIII Task 4 — if `unit` is actively Daunted (carries the status AND its source is
@@ -3102,15 +3131,22 @@ export class CombatScene extends Phaser.Scene {
 
     const flank = !attacker.ranged && isFlanked(attacker, target, attacker.team, this.units);
     let bumpBonus = 0;
+    // Ch. VIII — did the Husk's heave actually MOVE its target (as opposed to bouncing it off a
+    // wall)? Only a landed push knocks Toppled, so the knock below needs this one bit, and it
+    // can only be learned here, inside the push branch.
+    let heaveLanded = false;
     // §8 construct Vault-Slam and §9.4 the Warden's Writ of Seizure are the same primitive: a
-    // melee hit that pushes 1, +1 bump damage when the destination is blocked.
-    if (attacker.kind === 'construct' || attacker.isBoss) {
+    // melee hit that pushes 1, +1 bump damage when the destination is blocked. Ch. VIII — the
+    // Husk's heave is that SAME primitive, bump and all: "push 1 (with the ordinary bump on
+    // blocked)". The no-damage rule belongs to Shove alone, never to an enemy's blow.
+    if (attacker.kind === 'construct' || attacker.kind === 'husk' || attacker.isBoss) {
       const dir = this.dirTo(attacker, target);
       if (dir) {
         const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
         const res = forceMove(target, dir, board);
         if (res.moved) {
           target.c = res.to.c; target.r = res.to.r;
+          heaveLanded = true;
           const v = this.views.get(target.id);
           if (v) {
             const p = this.tileToScreen(target);
@@ -3142,7 +3178,26 @@ export class CombatScene extends Phaser.Scene {
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {
       target.statuses = applyStatus(target, 'dimmed', 1);
     }
+    // Ch. VIII — the Pall's touch Daunts, and the daunt carries its source: `attacker.id`, so
+    // the shipped source-alive gate (computeHit's attackerDauntedSourceAlive, the move-field
+    // filter, the lift-on-fell seam) all resolve against the Pall itself with no new plumbing.
+    // Gated on real damage, like the wraith's Dimmed above: a blow fully soaked by a Ward never
+    // landed, so it never marked anyone. Re-touching an already-daunted foe runs T1's refresh
+    // rule (overwrite-same source, keep the larger magnitude) rather than stacking a second −1.
+    if (attacker.kind === 'pall' && result.hpDamage > 0) {
+      target.statuses = applyStatus(target, 'daunted', 1, 1, attacker.id);
+    }
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, P.berry);
+    // Ch. VIII — the heave's knock. Deliberately mirrors shove()'s own gate line for line
+    // (landed && alive && isToppleable) because it IS the same law seen from the other side of
+    // the board, and enemyStrike's push is a separate code path from the party's pushUnit
+    // wrapper — there is no shared seam to inherit it from. Placed after damageUnit so a blow
+    // that fells its target never also topples a corpse.
+    if (heaveLanded && attacker.kind === 'husk' && target.alive && this.isToppleable(target)) {
+      target.statuses = applyStatus(target, 'toppled', 1, 1);
+      this.drawHpBar(target); // a fully-Warded heave deals 0, so damageUnit's own redraw may not have run
+      this.floatText(target, STATUS_DEFS.toppled.label, STATUS_DEFS.toppled.tint);
+    }
     if (bumpBonus > 0) this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
     // Ch. VIII Task 5 — trigger 1 (own action): `attacker` just took ITS action, so this is
     // where Unwritten (if it still holds) is consumed. Must run AFTER the computeHit call
@@ -3202,6 +3257,11 @@ export class CombatScene extends Phaser.Scene {
     // untargetable-yet-hurt even transiently within this call.
     if (hasStatus(unit.statuses, 'unwritten')) {
       unit.statuses = clearStatus(unit.statuses, 'unwritten');
+      // Ch. VIII Task 6 (carried cosmetic) — the reveal used to be SILENT: the Lurker simply
+      // became targetable with nothing on screen to say why, which reads as a bug rather than
+      // as the ambush ending. Announced now at both reveal beats (here and consumeOnOwnAction);
+      // delayed past this call's own `−N` float so the two don't stack on the same pixels.
+      this.time.delayedCall(200, () => this.revealNotice(unit));
     }
     const before = unit.hp;
     unit.hp = Math.max(0, unit.hp - amount);
@@ -4154,13 +4214,6 @@ export class CombatScene extends Phaser.Scene {
     const unit = this.unitById(this.activeId);
     if (!unit) return [];
     return this.validTargets(unit, action).map((u) => u.id);
-  }
-
-  /** Debug: mark a unit toppleable for Shove regardless of its real archetype stat (e2e-only —
-   *  Task 3's stand-in for Task 6's Husk, the same "test seam, not production data" spirit as
-   *  debugApplyStatus/debugSetPos above; consulted by isToppleable). */
-  debugForceToppleable(id: string): void {
-    this.debugToppleableIds.add(id);
   }
 
   /** Debug: teleport a living unit (e2e-only test setup — e.g. arranging a wall-adjacent

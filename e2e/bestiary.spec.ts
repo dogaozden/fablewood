@@ -97,7 +97,7 @@ async function setPos(page: Page, id: string, c: number, r: number): Promise<voi
  *  toppled's conventionally-meaningless turnsLeft: 1, magnitude: 1. Ch. VIII Task 4 —
  *  `sourceId` is additive-optional (only Daunted reads it), threaded through to
  *  debugApplyStatus's own new param of the same name — this task's stand-in for the Pall's
- *  real touch (T6), the same spirit as forceToppleable standing in for the Husk. */
+ *  real touch (T6's Pall now supplies it in scenario e; this stays for hermetic single-mechanic setup). */
 async function applyStatus(
   page: Page, id: string, statusId: string, turns = 1, magnitude = 1, sourceId?: string,
 ): Promise<void> {
@@ -111,17 +111,6 @@ async function applyStatus(
     },
     { id, statusId, turns, magnitude, sourceId },
   );
-}
-
-/** Mark a unit toppleable for Shove (e2e-only CombatScene.debugForceToppleable, new — Task 3's
- *  stand-in for Task 6's Husk, which lands the real toppleable:true stat; none of the four
- *  shipped archetypes are toppleable by default). */
-async function forceToppleable(page: Page, id: string): Promise<void> {
-  await page.evaluate((uid) => {
-    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
-    const s = g?.scene?.getScene?.('combat') as { debugForceToppleable?(id: string): void } | undefined;
-    s?.debugForceToppleable?.(uid);
-  }, id);
 }
 
 async function waitForSnap(
@@ -379,78 +368,83 @@ test('bestiary scenario b: Shove pushes 1 tile and never damages; a blocked Shov
 // NON-FIRST unit (every enemy has speed < the Keeper's 5) — the exact case Task 2 could not
 // construct itself (nothing in the shipped game could topple anything before this task).
 //
-// Geometry: the stub (wisp-0, marked toppleable via the e2e-only debugForceToppleable hook) sits
-// beside the Keeper on row 1. The Keeper Shoves it in round 1 — a landed push, so it knocks
-// Toppled. wisp-0 is not first in initiative (speed 3 < 5), so unlike scenario a's Keeper-only
-// rise (which lands on the very next round because the Keeper always opens the round), wisp-0's
+// Task 6 RE-POINTED: this scenario used to fake its toppleable target with the e2e-only
+// debugForceToppleable hook, because nothing in the shipped game was toppleable yet. The Husk is
+// now the real toppleable:true entry, so the room is selected with ?enemies=husk,wisp,wraith
+// (Task 6's packless archetype param) and the hook is gone entirely — the test now proves the
+// SHIPPED stat rather than a test-only override.
+//
+// Geometry: husk-0 sits beside the Keeper on row 1. The Keeper Shoves it in round 1 — a landed
+// push against a toppleable entry, so it knocks Toppled. husk-0 is not first in initiative
+// (speed 1, the slowest line on the board, vs the Keeper's 5), so unlike scenario a's Keeper-only
+// rise (which lands on the very next round because the Keeper always opens the round), husk-0's
 // own next turn is STILL later in round 1 itself — that's where the rise actually fires. Its
-// mid-rise mark then persists (per Task 2's fix round 1: cleared PER-UNIT, at wisp-0's own next
+// mid-rise mark then persists (per Task 2's fix round 1: cleared PER-UNIT, at husk-0's own next
 // turn start, not in bulk at round-wrap) all the way through the rest of round 1 AND through the
-// opening of round 2 — including the Keeper's own round-2 turn, which comes BEFORE wisp-0's own
-// round-2 turn. Round 2 proves the latch is still suppressed there (the Keeper walks past wisp-0
+// opening of round 2 — including the Keeper's own round-2 turn, which comes BEFORE husk-0's own
+// round-2 turn. Round 2 proves the latch is still suppressed there (the Keeper walks past husk-0
 // and takes no opportunity damage); round 3 proves it has re-armed by then (the identical walk
 // now costs the Keeper exactly 1 hp) — the brief's own two-part ask: suppressed in the
 // intervening window, live again after the stub's own next turn.
 //
 // Every position is pinned via debugSetPos immediately before each check (scenario a's own
-// "re-teleport everyone back" idiom), so wisp-0's own AI-driven rise/act turns — which this test
+// "re-teleport everyone back" idiom), so husk-0's own AI-driven rise/act turns — which this test
 // does not otherwise control — can never contaminate the geometry.
 // ---------------------------------------------------------------------------------------
 test('bestiary scenario b: a landed Shove knocks Toppled, and a non-first unit\'s mid-rise latch survives the round wrap to its own next turn', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto('/?scene=combat&seed=7');
+  await page.goto('/?scene=combat&seed=7&enemies=husk,wisp,wraith');
   await waitReady(page, 'combat');
   await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
 
   await setPos(page, 'wisp-1', 10, 6);
   await setPos(page, 'wraith-2', 10, 1);
   await setPos(page, 'keeper', 5, 1);
-  await setPos(page, 'wisp-0', 6, 1);
-  await forceToppleable(page, 'wisp-0'); // Task 3's stand-in for Task 6's real toppleable Husk
+  await setPos(page, 'husk-0', 6, 1);
 
   // --- Round 1 (Keeper's turn): Shove the stub. Landed (7,1 is clear floor) + toppleable → Toppled.
   await page.keyboard.press('0'); // Shove hotkey
   await canvasClick(page, tileXY(6, 1).x, tileXY(6, 1).y);
   await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'the topple Shove to resolve');
-  const toppled = await unitState(page, 'wisp-0');
-  expect(toppled?.statuses.some((st) => st.id === 'toppled'), 'the landed Shove knocked wisp-0 Toppled').toBe(true);
+  const toppled = await unitState(page, 'husk-0');
+  expect(toppled?.statuses.some((st) => st.id === 'toppled'), 'the landed Shove knocked husk-0 Toppled').toBe(true);
 
   await page.keyboard.press('7'); // End the Keeper's round-1 turn.
 
-  // --- Let round 1 finish (Mira, then wisp-0's OWN turn — where the rise actually fires, since
-  // wisp-0 is not first in initiative and its own round-1 turn hasn't happened yet — then wisp-1/
+  // --- Let round 1 finish (Mira, then husk-0's OWN turn — where the rise actually fires, since
+  // husk-0 is not first in initiative and its own round-1 turn hasn't happened yet — then wisp-1/
   // wraith-2) and land back on the Keeper's round-2 turn.
   const turn2 = await passUntilKeeper(page);
   expect(turn2.activeId).toBe('keeper');
-  const afterRise = await unitState(page, 'wisp-0');
-  expect(afterRise?.statuses.some((st) => st.id === 'toppled'), "wisp-0's rise consumed Toppled during round 1").toBe(false);
+  const afterRise = await unitState(page, 'husk-0');
+  expect(afterRise?.statuses.some((st) => st.id === 'toppled'), "husk-0's rise consumed Toppled during round 1").toBe(false);
 
-  // --- Round 2 test: the Keeper walks past the still-mid-rise wisp-0 — no OA should land.
+  // --- Round 2 test: the Keeper walks past the still-mid-rise husk-0 — no OA should land.
   await setPos(page, 'wisp-1', 10, 6);
   await setPos(page, 'wraith-2', 10, 1);
-  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'husk-0', 6, 1);
   await setPos(page, 'keeper', 5, 1);
   const keeperHpBeforeR2 = await unitState(page, 'keeper');
 
-  await canvasClick(page, tileXY(4, 1).x, tileXY(4, 1).y); // vacates (5,1), adjacent to wisp-0
+  await canvasClick(page, tileXY(4, 1).x, tileXY(4, 1).y); // vacates (5,1), adjacent to husk-0
   const reached2 = await passUntilUnitAt(page, 'keeper', 4, 1);
   expect(reached2, 'round 2: the Keeper reached the retreat tile').toBe(true);
   await page.waitForTimeout(250); // let any (suppressed) OA resolution settle before reading hp
   const keeperHpAfterR2 = await unitState(page, 'keeper');
-  expect(keeperHpAfterR2?.hp, "round 2: wisp-0's latch is still disabled — the Keeper took NO opportunity damage").toBe(keeperHpBeforeR2?.hp);
+  expect(keeperHpAfterR2?.hp, "round 2: husk-0's latch is still disabled — the Keeper took NO opportunity damage").toBe(keeperHpBeforeR2?.hp);
 
   await page.keyboard.press('7'); // End the Keeper's round-2 turn.
 
-  // --- Let round 2 finish (Mira, wraith-2, wisp-1, then wisp-0's OWN round-2 turn — where the
+  // --- Let round 2 finish (Mira, wraith-2, wisp-1, then husk-0's OWN round-2 turn — where the
   // per-unit clear fires, per Task 2's fix round 1) and land on the Keeper's round-3 turn.
   const turn3 = await passUntilKeeper(page);
   expect(turn3.activeId).toBe('keeper');
 
   // --- Round 3 test: the identical walk now costs the Keeper exactly 1 hp — the latch is live
-  // again, proving the clear fired at wisp-0's own next turn start (not a stale suppression).
+  // again, proving the clear fired at husk-0's own next turn start (not a stale suppression).
   await setPos(page, 'wisp-1', 10, 6);
   await setPos(page, 'wraith-2', 10, 1);
-  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'husk-0', 6, 1);
   await setPos(page, 'keeper', 5, 1);
   const keeperHpBeforeR3 = await unitState(page, 'keeper');
 
@@ -459,7 +453,7 @@ test('bestiary scenario b: a landed Shove knocks Toppled, and a non-first unit\'
   expect(reached3, 'round 3: the Keeper reached the retreat tile').toBe(true);
   await page.waitForTimeout(250);
   const keeperHpAfterR3 = await unitState(page, 'keeper');
-  expect(keeperHpAfterR3?.hp, "round 3: wisp-0's latch has re-armed — the Keeper takes the opportunity strike").toBe((keeperHpBeforeR3?.hp ?? 0) - 1);
+  expect(keeperHpAfterR3?.hp, "round 3: husk-0's latch has re-armed — the Keeper takes the opportunity strike").toBe((keeperHpBeforeR3?.hp ?? 0) - 1);
 });
 
 // ---------------------------------------------------------------------------------------
