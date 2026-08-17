@@ -226,19 +226,17 @@ export class InventoryStore {
   /**
    * Choose the one live relic passive, or pass null to set it down (Concordance Ch. IX:
    * "swap costs nothing"). Reads the catalog (type === 'relic') and the freshest live
-   * stacks INSIDE the mutate() call, same freshness guarantee as buy/sell; an id that
-   * isn't an owned relic REJECTS the returned promise (thrown before any write — unlike
-   * the boolean-return refusals above, this is a caller error, not a "can't afford it").
+   * stacks INSIDE the mutate() call, same freshness guarantee as buy/sell. false (and no
+   * write) if id isn't an owned relic — same refusal idiom as buy/sell/spendGold above, not
+   * a thrown rejection (uniform guarded-mutator contract; controller line-read ruling).
    * Bearing null always succeeds.
    */
-  async bearRelic(id: string | null): Promise<void> {
-    await this.mutate((cur) => {
+  bearRelic(id: string | null): Promise<boolean> {
+    return this.mutate((cur) => {
       if (id !== null) {
         const def = itemById(id);
         const owned = (cur.stacks[id] ?? 0) > 0;
-        if (!def || def.type !== 'relic' || !owned) {
-          throw new Error(`bearRelic: '${id}' is not an owned relic`);
-        }
+        if (!def || def.type !== 'relic' || !owned) return null;
       }
       return { ...cur, bornRelicId: id };
     });

@@ -327,7 +327,7 @@ describe('borne relic (Concordance Ch. IX) — one relic, chosen freely, persist
     await s.ready();
     await s.grant('warden-signet-of-terms');
 
-    await s.bearRelic('warden-signet-of-terms');
+    expect(await s.bearRelic('warden-signet-of-terms')).toBe(true);
 
     expect(s.bornRelic()).toBe('warden-signet-of-terms');
     expect(s.snapshot().bornRelicId).toBe('warden-signet-of-terms');
@@ -341,9 +341,9 @@ describe('borne relic (Concordance Ch. IX) — one relic, chosen freely, persist
     await s.ready();
     await s.grant('warden-signet-of-terms');
     await s.grant('unbroken-clasp');
-    await s.bearRelic('warden-signet-of-terms');
+    expect(await s.bearRelic('warden-signet-of-terms')).toBe(true);
 
-    await s.bearRelic('unbroken-clasp');
+    expect(await s.bearRelic('unbroken-clasp')).toBe(true);
 
     expect(s.bornRelic()).toBe('unbroken-clasp');
   });
@@ -353,9 +353,9 @@ describe('borne relic (Concordance Ch. IX) — one relic, chosen freely, persist
     const s = new InventoryStore(b);
     await s.ready();
     await s.grant('warden-signet-of-terms');
-    await s.bearRelic('warden-signet-of-terms');
+    expect(await s.bearRelic('warden-signet-of-terms')).toBe(true);
 
-    await s.bearRelic(null);
+    expect(await s.bearRelic(null)).toBe(true);
 
     expect(s.bornRelic()).toBeNull();
     expect(s.snapshot().bornRelicId).toBeNull();
@@ -363,26 +363,26 @@ describe('borne relic (Concordance Ch. IX) — one relic, chosen freely, persist
     expect(disk.bornRelicId).toBeNull();
   });
 
-  it('rejects bearing a non-relic id even when owned, writing nothing', async () => {
+  it('refuses to bear a non-relic id even when owned, writing nothing', async () => {
     const b = new FakeBridge();
     const s = new InventoryStore(b);
     await s.ready();
     await s.grant('superior-draught'); // owned, but type 'consumable' not 'relic'
     const putSpy = vi.spyOn(b, 'putState');
 
-    await expect(s.bearRelic('superior-draught')).rejects.toThrow();
+    expect(await s.bearRelic('superior-draught')).toBe(false);
 
     expect(putSpy).not.toHaveBeenCalled();
     expect(s.bornRelic()).toBeNull();
   });
 
-  it('rejects bearing a relic id that is not owned, writing nothing', async () => {
+  it('refuses to bear a relic id that is not owned, writing nothing', async () => {
     const b = new FakeBridge();
     const s = new InventoryStore(b);
     await s.ready(); // no relics granted
     const putSpy = vi.spyOn(b, 'putState');
 
-    await expect(s.bearRelic('unbroken-clasp')).rejects.toThrow();
+    expect(await s.bearRelic('unbroken-clasp')).toBe(false);
 
     expect(putSpy).not.toHaveBeenCalled();
     expect(s.bornRelic()).toBeNull();
