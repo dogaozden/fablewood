@@ -647,17 +647,22 @@ export class DungeonScene extends Phaser.Scene {
   /** Ch. IV — offer the loot-advantage spend when a Lantern-light is held. Auto-drive
    *  always raises (a hung prompt would strand sim/auto runs — presentPendingLevelUp's
    *  own auto-threading rule). Consume-before-benefit; the no-trinket refund lives at
-   *  the call sites (trim's spend-first-refund idiom). */
-  private async offerLantern(troveName: string): Promise<Edge> {
+   *  the call sites (trim's spend-first-refund idiom). `wickCaught` rides back to the
+   *  caller rather than showing its own toast here (fix round 1, F1): VaultView.toast()
+   *  stacks with no clearing, and the loot toast that follows moments later would
+   *  overlap it illegibly — the SAME class of collision the no-trinket refund below
+   *  already folds into one message instead of a second toast. Each caller folds
+   *  WICK_CATCH_LINE into its own existing loot-outcome message. */
+  private async offerLantern(troveName: string): Promise<{ edge: Edge; wickCaught: boolean }> {
     // Guarded read (T4 review ruling; C6 — extracted to lantern.ts's heldLanternLight): a
     // save fault means "no lantern", never a thrown loot grant.
-    if (!heldLanternLight()) return 'none';
+    if (!heldLanternLight()) return { edge: 'none', wickCaught: false };
     const choice = this.auto ? 'raise' : await this.view.showLanternChoice(troveName);
-    if (choice !== 'raise') return 'none';
+    if (choice !== 'raise') return { edge: 'none', wickCaught: false };
     // Concordance Ch. IX — the Second Wick's catch (corrected 2026-08-17): the first spend
     // after a hearth rest re-banks the light instead of clearing it, once per rest-cycle.
-    if (await spendLanternLight()) this.view.toast(WICK_CATCH_LINE, 'good');
-    return 'advantage';
+    const wickCaught = await spendLanternLight();
+    return { edge: 'advantage', wickCaught };
   }
 
   /** Room-clear gold + a 35% trinket roll, banked immediately (inventory-handoff §4). Returns the
@@ -665,7 +670,7 @@ export class DungeonScene extends Phaser.Scene {
   private async grantRoomLoot(room: DungeonRoom): Promise<number> {
     const roomIndex = this.spec.rooms.findIndex((r) => r.id === room.id);
     const rng = mulberry32((this.seed + roomIndex * 7919 + 1) >>> 0);
-    const edge = await this.offerLantern(room.name);
+    const { edge, wickCaught } = await this.offerLantern(room.name);
     // Concordance Ch. IX — the Warden Signet of Terms edges every loot roll while borne,
     // independent of (and never stacking with) the Lantern-light choice above.
     const edged = services.inventory.bornRelic() === 'warden-signet-of-terms';
@@ -681,13 +686,17 @@ export class DungeonScene extends Phaser.Scene {
     // refund, trim's idiom. Folded into the SAME toast as the gold line (not a second,
     // separately-timed lootToast()) — two toasts fire from the same fixed screen position
     // (VaultView.toast), so back-to-back calls here render as illegible overlapping text;
-    // confirmed by eyes-on screenshot during authoring (task-7-report.md).
-    const refunding = edge === 'advantage' && !loot.trinketId;
+    // confirmed by eyes-on screenshot during authoring (task-7-report.md). The Wick's catch
+    // (fix round 1, F1) folds in the SAME way — wickCaught already means the light is back,
+    // so it takes precedence over the refund's own explanation rather than stacking with it.
+    const refunding = !wickCaught && edge === 'advantage' && !loot.trinketId;
     if (refunding) await services.save.save({ lanternLight: true });
     this.view.lootToast(
-      refunding
-        ? `${base} The lantern flares — but only dust glitters back. Its light returns to you.`
-        : base,
+      wickCaught
+        ? `${base} ${WICK_CATCH_LINE}`
+        : refunding
+          ? `${base} The lantern flares — but only dust glitters back. Its light returns to you.`
+          : base,
     );
     return loot.gold;
   }
@@ -815,7 +824,7 @@ export class DungeonScene extends Phaser.Scene {
     const quest = this.pack ? bossQuest(this.pack) : undefined;
     const reward = (quest ? rewardText(quest) : null) ?? DEV_REWARD;
 
-    const edge = await this.offerLantern("the Warden's trove");
+    const { edge, wickCaught } = await this.offerLantern("the Warden's trove");
     // Boss bounty: gold + the guaranteed Warden Signet + a boss-weighted trinket (inventory-handoff §4).
     const rng = mulberry32((this.seed + 104729) >>> 0);
     // Concordance Ch. IX — the Warden Signet of Terms edges every loot roll while borne.
@@ -826,10 +835,16 @@ export class DungeonScene extends Phaser.Scene {
     if (loot.trinketId) await services.inventory.grantItem(loot.trinketId);
     const trinketName = loot.trinketId ? itemById(loot.trinketId)?.name : null;
     const lanternSuffix = edge === 'advantage' && loot.trinketId ? " — drawn by the lantern's light." : '';
-    const lootLine = trinketName
+    let lootLine = trinketName
       ? ` The Warden yields ${loot.gold} coin, their signet, and a ${trinketName}${lanternSuffix || '.'}`
       : ` The Warden yields ${loot.gold} coin and their signet.`;
-    if (edge === 'advantage' && !loot.trinketId) {
+    if (wickCaught) {
+      // Fix round 1 (F1) — folded into lootLine (the SAME text vaultOpensBeat shows below),
+      // never a separate toast: offerLantern's own toast used to fire early and collide with
+      // whichever message this method shows moments later, the same illegible-overlap class
+      // the no-trinket refund below already avoids by folding into one message.
+      lootLine += ` ${WICK_CATCH_LINE}`;
+    } else if (edge === 'advantage' && !loot.trinketId) {
       // Boss loot always attempts a trinket (no 35% gate here, unlike a room clear) — this
       // only fires if the trinket pool is empty outright. Honest refund, trim's idiom (same
       // shape as grantRoomLoot's own block).

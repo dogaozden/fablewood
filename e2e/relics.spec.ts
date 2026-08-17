@@ -7,7 +7,12 @@ import {
   readState,
   waitForState,
   warpHamletTo,
+  canvasClick,
+  currentScene,
 } from './helpers';
+// Pure, no-Phaser module (same precedent as miras-stall.spec.ts's own buildLayout import) —
+// reuse the shipped constant rather than re-typing the literal (avoids drift/typos).
+import { WICK_CATCH_LINE } from '../app/src/game/lantern';
 
 /**
  * Concordance Ch. IX — "held is the mechanic, borne is the choice." A relic derives
@@ -405,5 +410,341 @@ test('without the Second Wick borne, the spend clears the light normally (regres
     expect(save?.wickCaught, 'wickCaught never sets when the Wick is not borne').not.toBe(true);
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+// ---- Fix round 1, F2: the catch's player-facing banner/notice text, at the four sites that
+// have a checkable hook (bannerText() for CombatScene's two showBanner sites, the .fw-notice
+// DOM paragraph for HamletScene/Death's Door's notice-channel sites — both proven, already-
+// in-use routes per the review). DungeonScene's site (post-F1, folded into the loot toast) has
+// no hook today; left unit-covered, noted in the report. All four helpers below are cloned from
+// their originating specs (own-file convention) — combat-magic.spec.ts (debugSetPos/
+// debugSetGlow/waitForKeeperTurn shape), miras-stall.spec.ts (bannerText), lantern-light.spec.ts
+// (the Wellspring/Death's Door drives, trimmed to what F2 needs: reaching the notice, not
+// proving which memory redrew — that's already pinned there).
+
+// combatSnap()/CombatSnap already declared above (T3's own — same shape, reused verbatim).
+
+async function debugSetPos(page: Page, id: string, c: number, r: number): Promise<void> {
+  await page.evaluate(
+    ({ id: uid, c: cc, r: rr }) => {
+      const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+      const s = g?.scene?.getScene?.('combat') as { debugSetPos?(id: string, c: number, r: number): void } | undefined;
+      s?.debugSetPos?.(uid, cc, rr);
+    },
+    { id, c, r },
+  );
+}
+
+async function debugSetGlow(page: Page, pips: number): Promise<void> {
+  await page.evaluate((p) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { debugSetGlow?(pips: number): void } | undefined;
+    s?.debugSetGlow?.(p);
+  }, pips);
+}
+
+async function waitForKeeperTurn(page: Page, timeout = 20_000): Promise<CombatSnap> {
+  const start = Date.now();
+  let s = await combatSnap(page);
+  while (s?.state !== 'playerMove' && Date.now() - start < timeout) {
+    await page.waitForTimeout(150);
+    s = await combatSnap(page);
+  }
+  return s;
+}
+
+/** miras-stall.spec.ts's own debug forwarding method (CombatScene.bannerText). */
+async function bannerText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { bannerText?(): string } | undefined;
+    return s?.bannerText?.() ?? '';
+  });
+}
+
+type LayoutDbg = { tiles: string[][] } | null;
+
+async function layoutDebug(page: Page): Promise<LayoutDbg> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { layoutDebug?(): unknown } | undefined;
+    return (s?.layoutDebug?.() ?? null) as LayoutDbg;
+  });
+}
+
+/** The real room's layout is generated per seed/room id (lantern-light.spec.ts's own idiom) —
+ *  scan for a horizontally-adjacent non-wall pair rather than hardcoding tiles. */
+async function findAdjacentFloorPair(page: Page): Promise<[{ c: number; r: number }, { c: number; r: number }]> {
+  const layout = await layoutDebug(page);
+  const tiles = layout?.tiles ?? [];
+  for (let r = 0; r < tiles.length; r++) {
+    for (let c = 0; c < (tiles[r]?.length ?? 0) - 1; c++) {
+      if (tiles[r][c] !== 'wall' && tiles[r][c + 1] !== 'wall') return [{ c, r }, { c: c + 1, r }];
+    }
+  }
+  throw new Error('no adjacent floor pair found in the room layout');
+}
+
+/** Enter room.threshold via the real vaults map and ride the teaching cards to combat launch —
+ *  lantern-light.spec.ts's own "combat cast" drive, cloned verbatim (own-file convention). A
+ *  REAL packId is required here, not the packless dev fixture: that file's own file-level note
+ *  explains why — the packless pool's due queue never has more than one fact per kind, so
+ *  planRedraw's exclusion always empties the pool (fate holds, no genuine spend), which is
+ *  exactly the false-negative this test hit on its first pass before this drive replaced it. */
+async function enterThresholdCombat(page: Page, rank: 1 | 2): Promise<void> {
+  await page.goto(`/?scene=vaults&seed=7&rank=${rank}`);
+  await waitReady(page, 'vaults');
+
+  await canvasClick(page, 225, 300); // green current-room node (room.threshold, this seed's map)
+  await page.waitForTimeout(500);
+  await canvasClick(page, 478, 365); // dismiss the blurb ("Descend")
+  await expect(page.locator('.fw-doc'), 'discovered-documents teaching shown').toBeVisible({ timeout: 8000 });
+
+  const tbtn = page.locator('.fw-footer .fw-btn-primary');
+  for (let i = 0; i < 8; i++) {
+    const label = await tbtn.innerText();
+    await tbtn.click();
+    if (label.includes('Close')) break;
+    await page.waitForTimeout(140);
+  }
+
+  await page.waitForFunction(() => (window as Window).__FABLEWOOD_STATE?.scene === 'combat', undefined, {
+    timeout: 15_000,
+  });
+}
+
+test('CombatScene T1 cast site: the catch banner is the exact verbatim string (F2)', async ({ page }) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    // fixture: no dungeon progress (room.threshold reads as "first uncleared") — same shape as
+    // lantern-light.spec.ts's own combat-cast fixture, Wick borne instead of just lanternLight.
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    await enterThresholdCombat(page, 1);
+
+    const opened = await waitForKeeperTurn(page);
+    expect(opened?.state, "the Keeper's turn opened for manual control").toBe('playerMove');
+
+    const [keeperTile, targetTile] = await findAdjacentFloorPair(page);
+    await debugSetPos(page, 'keeper', keeperTile.c, keeperTile.r);
+    await debugSetPos(page, 'wisp-0', targetTile.c, targetTile.r);
+
+    await page.keyboard.press('2'); // Smite (T1 Kindling, mcq)
+    await page.waitForTimeout(150);
+    expect((await combatSnap(page))?.state, 'Rank 1 goes straight to targeting').toBe('playerTarget');
+    await canvasClick(page, 192 + targetTile.c * 48 + 24, 48 + targetTile.r * 48 + 24); // wisp-0's tile
+
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+    const firstPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+
+    await page.locator('.fw-lantern-btn').click();
+    await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+    await expect(page.locator('.fw-overlay')).toBeVisible();
+    await page.waitForTimeout(450); // the re-presented overlay's OWN 400ms arm guard
+
+    // A real vc-law pack's due queue (COMBAT_DRAW_COUNT=20 candidates) guarantees planRedraw
+    // finds an alternative, so this proves a GENUINE redraw happened — not the false-holds case
+    // the earlier, packless version of this test silently fell into.
+    const secondPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+    expect(secondPrompt, 'a genuine redraw surfaced a different memory').not.toBe(firstPrompt);
+
+    expect(await bannerText(page), 'the T1 cast site shows the catch, verbatim, replacing the flare banner').toBe(
+      WICK_CATCH_LINE,
+    );
+
+    // resolve cleanly so the run doesn't strand.
+    await page.locator('.fw-opt').first().click();
+    const onward = page.getByRole('button', { name: 'Onward ▸' });
+    try { await onward.waitFor({ state: 'visible', timeout: 1500 }); await onward.click(); } catch { /* auto-resolves */ }
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('CombatScene T2/T3 cast site: the catch banner is the exact verbatim string (F2)', async ({ page }) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    await enterThresholdCombat(page, 2);
+
+    const opened = await waitForKeeperTurn(page);
+    expect(opened?.state, "the Keeper's turn opened").toBe('playerMove');
+
+    const [keeperTile, targetTile] = await findAdjacentFloorPair(page);
+    await debugSetPos(page, 'keeper', keeperTile.c, keeperTile.r);
+    await debugSetPos(page, 'wisp-0', targetTile.c, targetTile.r);
+    await debugSetGlow(page, 1); // Cinder-Rebuke (tier 2) costs 1 pip
+
+    await page.keyboard.press('2'); // open the Kindling flyout
+    await page.waitForTimeout(150);
+    expect((await combatSnap(page))?.state, 'Rank 2 opens the tier flyout').toBe('playerTier');
+    await page.keyboard.press('2'); // pick tier 2 — Cinder-Rebuke, castGatedSpell's own site
+    await page.waitForTimeout(150);
+    expect((await combatSnap(page))?.state, 'picking an enabled tier enters targeting').toBe('playerTarget');
+    await canvasClick(page, 192 + targetTile.c * 48 + 24, 48 + targetTile.r * 48 + 24); // wisp-0's tile
+
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450);
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+    const firstPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+
+    await page.locator('.fw-lantern-btn').click();
+    await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+    await expect(page.locator('.fw-overlay')).toBeVisible();
+    await page.waitForTimeout(450);
+
+    const secondPrompt = (await page.locator('.fw-prompt').textContent())?.trim();
+    expect(secondPrompt, 'a genuine redraw surfaced a different memory').not.toBe(firstPrompt);
+
+    expect(await bannerText(page), 'the T2/T3 cast site (castGatedSpell) shows the catch, verbatim').toBe(
+      WICK_CATCH_LINE,
+    );
+
+    await page.locator('.fw-opt').first().click();
+    const onward = page.getByRole('button', { name: 'Onward ▸' });
+    try { await onward.waitFor({ state: 'visible', timeout: 1500 }); await onward.click(); } catch { /* auto-resolves */ }
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('HamletScene Wellspring site: the catch notice is the exact verbatim string, riding the FATE_HOLDS_LINE channel (F2)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+
+    await page.goto('/?scene=hamlet&seed=7');
+    await waitReady(page, 'hamlet');
+    await waitHamletPlayer(page);
+    await waitProvincesLoaded(page); // else doWellspring() takes the no-pack branch
+
+    const warped = await warpHamletTo(page, 'wellspring');
+    expect(warped, 'dev warp hook parked the Keeper at the Wellspring').toBe(true);
+    await tapKey(page, 'e'); // open the Wellspring intro
+    await page.waitForTimeout(220);
+    for (let k = 0; k < 12; k++) {
+      if (await page.locator('.fw-overlay').count()) break;
+      await tapKey(page, 'e');
+      await page.waitForTimeout(300);
+    }
+    await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 8000 });
+    await page.waitForTimeout(450);
+
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+    await page.locator('.fw-lantern-btn').click();
+
+    await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+    await expect(page.locator('.fw-overlay')).toBeVisible();
+    await page.waitForTimeout(450);
+
+    await expect(
+      page.locator('.fw-notice'),
+      'the Wellspring re-present shows the catch notice, verbatim, riding the SAME channel FATE_HOLDS_LINE uses',
+    ).toHaveText(WICK_CATCH_LINE);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+// Death's Door fixture (cloned from lantern-light.spec.ts's own "Death's Door" test — trimmed
+// to what F2 needs: reaching the notice, not proving which memory redrew, so no factId-diff
+// assertion here).
+const WICK_DOOR_FACTS: ReadonlyArray<{ factId: string }> = [
+  { factId: 'vc.econ.liqpref.preference-plus-participation' },
+  { factId: 'vc.econ.paytoplay.ubiquitous-after-dotcom' },
+];
+
+async function seedWickDoorFacts(page: Page): Promise<void> {
+  const now = Date.now();
+  const facts: Record<string, { box: number; next_due: number; history: unknown[] }> = {};
+  WICK_DOOR_FACTS.forEach(({ factId }, i) => {
+    facts[factId] = { box: 1, next_due: now - (500_000 - i * 100_000), history: [] };
+  });
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded the two known door facts').toBe(true);
+}
+
+async function driveToWickDoor(page: Page, timeoutMs = 75_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if ((await currentScene(page)) !== 'combat') return;
+    const s = await combatSnap(page);
+    if (!s || s.state === 'over' || s.state === 'deathsdoor') return;
+    if (s.state === 'playerMove') await page.keyboard.press('7'); // Wait
+    await page.waitForTimeout(150);
+  }
+}
+
+test("CombatScene Death's Door site: the catch notice is the exact verbatim string (F2)", async ({ page }) => {
+  test.setTimeout(120_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+  const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: {
+        scene: 'hamlet', hp: 2, streak: 0, lastPlayed: '',
+        dungeon: { roomIndex: 0, cleared: [] }, lanternLight: true,
+      },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
+    });
+    await seedWickDoorFacts(page);
+
+    await page.goto('/?scene=vaults&dev=1&sim=0&auto=win&seed=7');
+    await waitReady(page, 'combat');
+
+    await driveToWickDoor(page);
+
+    const doorCard = page.locator('.fw-overlay', { hasText: /Ledger Holds Your Line/ });
+    await doorCard.waitFor({ state: 'visible', timeout: 15_000 });
+    await page.waitForTimeout(450);
+
+    await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+    await page.locator('.fw-lantern-btn').click();
+
+    await expect.poll(() => page.locator('.fw-lantern-btn').count(), { timeout: 15_000 }).toBe(0);
+    await expect(page.locator('.fw-overlay')).toBeVisible();
+    await page.waitForTimeout(450);
+
+    await expect(
+      page.locator('.fw-notice'),
+      "the Death's Door re-draw shows the catch notice, verbatim, riding the SAME channel FATE_HOLDS_LINE uses",
+    ).toHaveText(WICK_CATCH_LINE);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });
