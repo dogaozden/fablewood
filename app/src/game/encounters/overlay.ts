@@ -20,7 +20,7 @@ import { ensureStyles } from './styles';
 import { el, ACTIONS } from './dom';
 import { RENDERERS, excerptBlock } from './kinds';
 import { DIFFICULTY_DEFS, difficultyOf } from './engine';
-import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel } from './lantern-ui';
+import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel, type CommitKeySet } from './lantern-ui';
 import { LEVEL_UP_TITLE, LEVEL_UP_SIGNOFF } from '../progression/ceremony';
 
 export interface EncounterCtx {
@@ -52,6 +52,14 @@ export interface Overlay {
   setHeader(kindKey: string, prompt?: string, flair?: string, difficulty?: EncounterDifficulty): void;
   /** register a keydown handler (several may coexist; all fire). */
   onKey(fn: (e: KeyboardEvent) => void): void;
+  /** Ch. VIII lantern ticket — the renderer (kinds.ts) publishes exactly which keys COMMIT an
+   *  answer right now for its kind (mcq's live digits minus any struck option, Enter only
+   *  where actually bound — see kinds.ts). Paired with getLiveCommitKeys below; overlay itself
+   *  stays kind-agnostic — it only ever relays a bag of key strings, never why they commit. */
+  setLiveCommitKeys(keys: Iterable<string>): void;
+  /** The lantern's keydown disarm (presentEncounter, below) reads this back. Empty until a
+   *  renderer publishes — so an overlay with no live set yet never disarms on any key. */
+  getLiveCommitKeys(): CommitKeySet;
   /** animate out, remove, restore prior focus. */
   close(): Promise<void>;
 }
@@ -101,6 +109,7 @@ function buildOverlay(): Overlay {
   const prevFocus = document.activeElement as HTMLElement | null;
   let closed = false;
   let armed = false;
+  let liveCommitKeys: CommitKeySet = new Set();
 
   const header = el('div', { class: 'fw-header' });
   const body = el('div', { class: 'fw-body' });
@@ -184,6 +193,12 @@ function buildOverlay(): Overlay {
     footer,
     isArmed() {
       return armed;
+    },
+    setLiveCommitKeys(keys) {
+      liveCommitKeys = new Set(keys);
+    },
+    getLiveCommitKeys() {
+      return liveCommitKeys;
     },
     setHeader(kindKey, prompt, flair, difficulty) {
       const a = ACTIONS[kindKey] ?? ACTIONS.mcq;
@@ -280,7 +295,7 @@ export function presentEncounter(
         { capture: true },
       );
       o.onKey((e) => {
-        if (isCommitKey(e.key)) disarm();
+        if (isCommitKey(e.key, o.getLiveCommitKeys())) disarm();
       });
     }
 

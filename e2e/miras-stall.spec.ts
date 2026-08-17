@@ -374,6 +374,8 @@ test("armed Scrivener's Hint strikes one wrong MCQ option and fires on the answe
 // Ch. VII Mira's Stall, Task 3 scenario b2: a lantern-raise mid-cast re-presents the SAME
 // strikeOneFalse request — the strike persists across the redraw, and the Hint only fires
 // (consumes, clears) once, on the eventual genuine answer, never on the sentinel re-present.
+// W8 lantern ticket (added below, before the raise-click): pressing the struck option's OWN
+// digit — a dead key, since the Hint made it commit nothing — must not disarm the raise either.
 test('a lantern-raise redraw during a struck cast keeps the strike; the Hint fires once, on the eventual answer', async ({ page }) => {
   test.setTimeout(90_000);
   await page.request.put('/api/state/save.json', { data: { hp: 16, lanternLight: true } });
@@ -403,6 +405,19 @@ test('a lantern-raise redraw during a struck cast keeps the strike; the Hint fir
 
   await expect(page.locator('.fw-opt.fw-struck'), 'struck before the raise').toHaveCount(1);
   await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+
+  // ---- W8 lantern ticket: the struck option's own digit is a dead key — the Hint made it
+  // commit nothing (choose() itself refuses idx === struckIndex) — so pressing it must NOT
+  // disarm the raise. Read the digit off the struck card rather than hardcoding one: whichever
+  // real fact this seed draws determines which option ends up struck.
+  const struckDigit = (await page.locator('.fw-opt.fw-struck .fw-key').textContent())?.trim();
+  expect(struckDigit, 'the struck option carries its own digit label').toBeTruthy();
+  await page.keyboard.press(struckDigit!);
+  await page.waitForTimeout(200);
+  await expect(
+    page.locator('.fw-lantern-btn'),
+    'the raise SURVIVES a struck-digit press (W8 lantern ticket)',
+  ).toBeVisible();
 
   await page.locator('.fw-lantern-btn').click();
 

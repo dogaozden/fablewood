@@ -114,6 +114,16 @@ const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
   // no real index ever equals it, so nothing renders struck.
   const struckIndex = ctx.strikeOneFalse ? options.findIndex((opt) => opt !== answer) : -1;
 
+  // W8 lantern ticket: publish the keys that actually commit — every option's digit EXCEPT a
+  // struck one (choose() itself refuses idx === struckIndex, so that digit is a dead key), plus
+  // Enter wherever it's bound (the first enabled card is auto-focused below, and Enter's native
+  // click on a focused, non-struck `data-commit` button already commits it — real whenever at
+  // least one option survived the strike).
+  const liveKeys = new Set<string>();
+  options.forEach((_, i) => { if (i !== struckIndex) liveKeys.add(String(i + 1)); });
+  if (liveKeys.size > 0) liveKeys.add('Enter');
+  o.setLiveCommitKeys(liveKeys);
+
   const choose = (idx: number) => {
     if (answered || !o.isArmed() || idx === struckIndex) return;
     answered = true;
@@ -155,8 +165,10 @@ const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
     // data-commit so a click on one disarms the lantern raise (overlay.ts's capture listener
     // -> lantern-ui.ts's isCommitTarget, which is a `closest('[data-commit]')` test), so
     // withholding the attribute is what keeps a struck line from counting as a commit as well
-    // as from being clickable. Click path only — isCommitKey is index-blind by construction
-    // (any digit disarms), which is W6's own behavior and not something this build can reach.
+    // as from being clickable. The keyboard path is covered too, not just click: the liveKeys
+    // set published above excludes the struck digit, so isCommitKey no longer disarms on that
+    // dead key either (W8 lantern ticket — previously index-blind by construction, any digit
+    // disarmed regardless of whether it was struck).
     const card = i === struckIndex
       ? el('button', { class: 'fw-opt fw-struck', type: 'button', disabled: true }, [
           el('span', { class: 'fw-key', 'aria-hidden': 'true', text: String(i + 1) }),
@@ -189,6 +201,11 @@ const renderMcq: KindRenderer = (o, enc, facts, ctx, resolve) => {
 // --- free_recall · Cast From Memory -----------------------------------------
 
 const renderFreeRecall: KindRenderer = (o, enc, facts, ctx, resolve) => {
+  // W8 lantern ticket: Enter is the only real commit binding here (submit(), below) — no
+  // digits. Shift+Enter inserts a newline instead of submitting, a nuance the plain key string
+  // can't carry; the rare miss (Shift+Enter treated as a commit key) errs toward disarming a
+  // moment that in fact didn't commit, never the reverse.
+  o.setLiveCommitKeys(['Enter']);
   const ta = el('textarea', {
     class: 'fw-textarea',
     'aria-label': 'Your answer',
@@ -291,6 +308,14 @@ const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
   const cards: HTMLButtonElement[] = [];
   let answered = false;
 
+  // W8 lantern ticket: every branch's digit commits (no struck concept here), plus Enter where
+  // it's bound — cards[0] is auto-focused below, and Enter's native click on that focused,
+  // `data-commit` card already commits it, real whenever there's at least one branch.
+  const liveKeys = new Set<string>();
+  branches.forEach((_, i) => liveKeys.add(String(i + 1)));
+  if (liveKeys.size > 0) liveKeys.add('Enter');
+  o.setLiveCommitKeys(liveKeys);
+
   const choose = (idx: number) => {
     if (answered || !o.isArmed()) return;
     answered = true;
@@ -347,6 +372,11 @@ const renderScenario: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const renderMatch: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
+  // W8 lantern ticket: match has no keyboard commit at all — pairing is click/drag-only and
+  // "Seal the Weave" is a click-only submit (no onKey handler in this renderer). The lantern's
+  // keyboard disarm must never fire here; the click-based isCommitTarget (W6) already covers
+  // the Seal button correctly.
+  o.setLiveCommitKeys([]);
   const cols = (enc.options ?? []) as unknown[];
   const left = ((cols[0] as unknown[]) ?? []).map(String);
   const right = ((cols[1] as unknown[]) ?? []).map(String);
@@ -501,6 +531,9 @@ const ORDER_DROP_HALO_PX = 6;
 const ORDER_LIFT_OFFSET_PX = 10;
 
 const renderOrder: KindRenderer = (o, enc, _facts, _ctx, resolve) => {
+  // W8 lantern ticket: Enter alone commits (submit(), below, called directly regardless of
+  // focus) — ArrowUp/ArrowDown only reorder, never commit, so no digits and no arrows here.
+  o.setLiveCommitKeys(['Enter']);
   const answer = ((enc.answer as unknown[]) ?? []).map(String);
   const items = ((enc.options as unknown[]) ?? []).map(String);
   let active = 0;
