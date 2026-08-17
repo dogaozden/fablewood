@@ -30,6 +30,26 @@ export function openInventoryPane(): Promise<void> {
     };
 
     const useCell = (item: ItemDef): Array<Node | string> => {
+      if (item.type === 'relic') {
+        // Relics derive `use: null` (catalog.ts) — holding/bearing IS the mechanic, never a
+        // button-driven "use" — so this branches on `type` ahead of the `use`-based checks
+        // below, which would otherwise fall through to the empty trinket case (Ch. IX).
+        const borne = services.inventory.bornRelic() === item.id;
+        return [
+          el('span', { class: 'inv-btn is-muted', text: borne ? 'Borne' : 'Held' }),
+          el('button', {
+            class: 'inv-btn',
+            type: 'button',
+            text: borne ? 'Set down' : 'Bear',
+            onClick: async () => {
+              const ok = await services.inventory.bearRelic(borne ? null : item.id);
+              if (!ok) return; // refused (not an owned relic) — silent by store law, never expected here
+              showBanner(true, borne ? 'Set down.' : `Borne: ${item.name}.`);
+              render();
+            },
+          }),
+        ];
+      }
       if (item.use === 'field') {
         return [
           el('button', {
