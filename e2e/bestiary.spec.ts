@@ -509,9 +509,11 @@ test('bestiary scenario g: an adjacent Strike deals +1 against a Toppled target 
 // (5,1) along that same row — hasLineOfFire (grid.ts) clears at distance 2 (≤ its range of 3),
 // and ai.ts's own "already in range from where we stand? hit without moving" branch fires
 // deterministically, so there's no AI-scoring uncertainty to derive. wisp-0/wisp-1 are exiled to
-// row 6, far beyond their own move(3)+range(1) reach of the Keeper; mira sits at distance 4 from
-// the wraith — one tile beyond its range 3 — so she never enters its target pool. The wraith is
-// the only thing that can act on the Keeper either round.
+// row 6, far beyond their own move(3)+range(1) reach of the Keeper; mira is pinned to (3,1) —
+// her own seed=7 default, confirmed via unitDebug rather than hand-derived — distance 4 from the
+// wraith at (7,1), one tile beyond its range 3, so she never enters its target pool. The wraith
+// is the only thing that can act on the Keeper either round. (8b-M1: this used to rest on Mira's
+// default spawn staying put by accident, unpinned — now explicit, true by construction.)
 //
 // Emboldened(+1) is applied to the wraith once, for the whole test, so neither leg's delta rests
 // on a bare 0 — the control leg alone (delta 2, not 1) already proves the wraith reliably
@@ -527,6 +529,7 @@ test("bestiary scenario g: a non-adjacent wraith deals −1 against a Toppled pa
 
   await setPos(page, 'wisp-0', 10, 6); // exiled — beyond move(3)+range(1) of the Keeper
   await setPos(page, 'wisp-1', 9, 6); // exiled — same reasoning
+  await setPos(page, 'mira', 3, 1); // 8b-M1: pin the geometry the header comment claims — distance 4 from the wraith, out of its range 3
   await setPos(page, 'wraith-2', 7, 1); // distance 2 from the Keeper, same row — non-adjacent, in LoF/range
   await setPos(page, 'keeper', 5, 1);
 
