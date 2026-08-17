@@ -191,4 +191,6 @@ Two render conventions coexist and are reconciled here: **hamlet is 16px-native 
 
 ---
 
-*Contract v1 — derived from `fablewood-mood-v1.png`, 2026-07-19 (§8 integration contract added same day). Reopen only by the art director with a new mood canon.*
+**Gate addendum — score `value` in-engine (W8-T6, 2026-08-17).** The contact sheet renders on the canon dusk gradient and a checker; the game renders on the vault floor (or whatever ground the asset actually ships onto). Those are different `value` tests, and the sheet's is the wrong one: W8's Lurker passed value 4 on the sheet and scored 2 the moment it was booted — its dusk body sat a hair off the vault floor's purple and vanished, findable only by its HP bar and eyes. **Law: an asset shipping onto a known background passes `value` on that background** — the review archives an in-engine screenshot beside the sheet, and a sheet-only value score is never a pass.
+
+*Contract v1 — derived from `fablewood-mood-v1.png`, 2026-07-19 (§8 integration contract added same day; in-engine value law added 2026-08-17). Reopen only by the art director with a new mood canon.*
