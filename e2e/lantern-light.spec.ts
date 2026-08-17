@@ -271,10 +271,11 @@ async function restoreLootState(page: Page, save: Save | null, inv: Inventory | 
 /** Node-map x for room index `i` — VaultView.ts's renderMap formula, reproduced (no debug
  *  accessor exists for node bounds): count = rooms.length+1 (camp), left=96, right=W-86=874,
  *  step=(right-left)/(count-1), room i sits at nodeXs[i+1] = left+(i+1)*step; STRIP_Y=300. The
- *  dev fixture carries 4 rooms (count=5, step=194.5), so under-1 (i=0) sits at x≈290.5 — a
- *  DIFFERENT x than the real pack's room.threshold (225, count=7) scenario (b) above clicks;
- *  both sit on the same STRIP_Y=300 row. */
-const UNDER1_NODE = { x: 291, y: 300 };
+ *  dev fixture carries 5 rooms since Ch. VIII added "under-bestiary" (count=6, step=155.6), so
+ *  under-1 (i=0) sits at x≈251.6 — a DIFFERENT x than the real pack's room.threshold (225,
+ *  count=7) scenario (b) above clicks; both sit on the same STRIP_Y=300 row.
+ *  Was 291 (4 rooms, step=194.5) until W8 T6; node radius is 22, so the stale x missed. */
+const UNDER1_NODE = { x: 252, y: 300 };
 
 /** Drive into the packless fixture's under-1 (gate-less, roomIndex 0) and past its 2-fact
  *  teaching modal, ending with the sim-victory chain in flight. The node-click + blurb-dismiss

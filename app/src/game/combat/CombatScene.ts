@@ -4174,7 +4174,10 @@ export class CombatScene extends Phaser.Scene {
     return {
       c: u.c, r: u.r, alive: u.alive, hp: u.hp, maxHp: u.maxHp, attack: u.attack,
       depth: this.views.get(id)?.container.depth ?? 0,
-      statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
+      // Ch. VIII Task 6 — sourceId rides along (additive, undefined for every status but
+      // Daunted): without it a test can only infer "the Pall daunted me" from the fact that
+      // felling the Pall lifted it, which is a different claim from "the daunt names the Pall".
+      statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude, sourceId: s.sourceId })),
     };
   }
 

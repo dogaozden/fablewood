@@ -45,11 +45,11 @@ async function unitPos(page: Page, id: string): Promise<{ c: number; r: number }
 async function unitState(
   page: Page,
   id: string,
-): Promise<{ hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null> {
+): Promise<{ hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number; sourceId?: string }> } | null> {
   return page.evaluate((uid) => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
     const s = g?.scene?.getScene?.('combat') as
-      | { unitDebug?(id: string): { hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number }> } | null }
+      | { unitDebug?(id: string): { hp: number; alive: boolean; statuses: Array<{ id: string; turnsLeft: number; magnitude: number; sourceId?: string }> } | null }
       | undefined;
     return s?.unitDebug?.(uid) ?? null;
   }, id);
@@ -111,6 +111,17 @@ async function applyStatus(
     },
     { id, statusId, turns, magnitude, sourceId },
   );
+}
+
+/** Ch. VIII Task 6 — pin the demo pilot to one free-lane action (CombatScene.setPilotPreference,
+ *  crucible-combat.spec.ts's own idiom) so no encounter overlay opens during the termination
+ *  gate: this test is about the pilot never running out of legal moves, not about grading. */
+async function setPilotPreference(page: Page, kind: string | null): Promise<void> {
+  await page.evaluate((k) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { setPilotPreference?(k: string | null): void } | undefined;
+    s?.setPilotPreference?.(k);
+  }, kind);
 }
 
 async function waitForSnap(
@@ -757,4 +768,186 @@ test('bestiary scenario d: an Unwritten enemy\'s opportunity strike also carries
   await setPos(page, 'keeper', 5, 1);
   const strikeTargets = await validTargets(page, 'strike');
   expect(strikeTargets, 'revealed by its own ambush — Strike-targetable now').toContain('wisp-0');
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario e (Task 6 — the three entries, integrated): the wave's mechanics have each been
+// proven in isolation against debug stand-ins (scenarios a-d). This is the room those stand-ins
+// were standing in FOR: the real Lurker, Husk and Pall on one board, selected with Task 6's
+// ?enemies= param, each driving the shipped mechanic it owns.
+//
+//   Lurker — spawns Unwritten (a spawn-time rider, not a first-turn action), holds, and is
+//     revealed by its own opening act. Proven by the status AND by Strike targeting reopening.
+//   Husk   — the only toppleable entry, and symmetric: its heave topples the RETINUE, and the
+//     Keeper then pays Task 2's rise toll at its own next turn start.
+//   Pall   — its touch Daunts with sourceId = itself, and felling it lifts the daunt: observed
+//     through the move field, which stops being filtered the moment the source is off the board.
+//
+// Enemies are lethally Kindled when they need to die on cue (scenario a's own technique — they
+// expire at their own turn-start tick, before acting), and every position is pinned via
+// debugSetPos immediately before the beat that reads it, so AI-driven moves between beats can
+// never contaminate the geometry.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario e: the mixed room — the Lurker is written, the Husk floors the retinue, the Pall daunts until it falls', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto('/?scene=combat&seed=7&enemies=lurker,husk,pall');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  // --- The Lurker begins Unwritten. A SPAWN-time rider: nothing has taken a turn yet.
+  const lurkerAtSpawn = await unitState(page, 'lurker-0');
+  expect(lurkerAtSpawn?.statuses.some((s) => s.id === 'unwritten'), 'the Lurker begins combat Unwritten').toBe(true);
+
+  // Park Mira and the Pall out of the way; stand the Keeper beside the Lurker so its opening
+  // act has a target. The Husk is left where it spawned for now.
+  await setPos(page, 'mira', 1, 7);
+  await setPos(page, 'pall-2', 11, 7);
+  await setPos(page, 'husk-1', 11, 0);
+  await setPos(page, 'keeper', 5, 3);
+  await setPos(page, 'lurker-0', 6, 3);
+
+  // Unwritten cannot be Struck while it holds — the shipped exclusion, now driven by a real entry.
+  expect(await validTargets(page, 'strike'), 'an Unwritten Lurker is not a legal Strike target')
+    .not.toContain('lurker-0');
+
+  // Let the Lurker take its own turn: it opens from the unseen, which consumes Unwritten.
+  await page.keyboard.press('7'); // end the Keeper's turn
+  const revealed = await (async () => {
+    const start = Date.now();
+    while (Date.now() - start < 30_000) {
+      const st = await unitState(page, 'lurker-0');
+      if (st && !st.statuses.some((s) => s.id === 'unwritten')) return st;
+      const s = await snap(page);
+      if (s?.state === 'playerMove' && s.activeId !== 'lurker-0') await page.keyboard.press('7');
+      await page.waitForTimeout(150);
+    }
+    return null;
+  })();
+  expect(revealed, 'the Lurker acted and was written into the Ledger').not.toBeNull();
+
+  await passUntilKeeper(page);
+  await setPos(page, 'keeper', 5, 3);
+  await setPos(page, 'lurker-0', 6, 3);
+  expect(await validTargets(page, 'strike'), 'once written, the Lurker is Strike-targetable like anything else')
+    .toContain('lurker-0');
+
+  // --- The Husk's heave topples the RETINUE (the chapter's symmetry clause), and the Keeper
+  // pays the rise toll at its own next turn start. Clear the Lurker off the board so only the
+  // Husk can act on the Keeper, and stand the Keeper with open floor behind it so the push LANDS
+  // (a blocked heave bumps but never topples).
+  await applyStatus(page, 'lurker-0', 'kindled', 5, 5); // lethal at its own turn-start tick
+  await setPos(page, 'pall-2', 11, 7); // and keep the Pall out of this beat
+  await setPos(page, 'keeper', 6, 3);
+  await setPos(page, 'husk-1', 5, 3); // heave pushes the Keeper east, onto open floor at (7,3)
+
+  const keeperBeforeHeave = await unitState(page, 'keeper');
+  await page.keyboard.press('7');
+  const heaved = await (async () => {
+    const start = Date.now();
+    while (Date.now() - start < 40_000) {
+      const st = await unitState(page, 'keeper');
+      if (st?.statuses.some((s) => s.id === 'toppled')) return st;
+      const s = await snap(page);
+      if (s?.state === 'playerMove' && s.activeId !== 'keeper') await page.keyboard.press('7');
+      await page.waitForTimeout(150);
+    }
+    return null;
+  })();
+  expect(heaved, "the Husk's heave knocked the Keeper Toppled — the retinue is toppleable too").not.toBeNull();
+  expect(heaved!.hp, 'the heave dealt its ordinary damage as well — the no-damage law is Shove\'s alone')
+    .toBeLessThan(keeperBeforeHeave?.hp ?? 10);
+
+  // The rise: automatic at the Keeper's own next turn start, and it consumes the condition.
+  const afterRise = await passUntilKeeper(page);
+  expect(afterRise.activeId).toBe('keeper');
+  const keeperRisen = await unitState(page, 'keeper');
+  expect(keeperRisen?.statuses.some((s) => s.id === 'toppled'), "the Keeper's rise consumed Toppled").toBe(false);
+  expect(afterRise.budget.total, 'the rise was paid for: half the movement base, house floor max(1, floor(4/2))').toBe(2);
+
+  // --- The Pall's touch Daunts, carrying itself as the source; felling it lifts the daunt.
+  // The Husk is EXILED here rather than killed. It and the Pall are the last two enemies, so
+  // felling both would END THE BATTLE the instant the Pall dies — and a finished battle has no
+  // move field left to read the lift from. Parked in the far corner it is speed 1 / move 2 and
+  // cannot close on the Keeper before the test re-parks it.
+  await setPos(page, 'husk-1', 11, 7);
+  await setPos(page, 'keeper', 6, 3);
+  await setPos(page, 'pall-2', 5, 3);
+  await page.keyboard.press('7');
+  const daunted = await (async () => {
+    const start = Date.now();
+    while (Date.now() - start < 40_000) {
+      const st = await unitState(page, 'keeper');
+      const d = st?.statuses.find((s) => s.id === 'daunted');
+      if (d) return d;
+      const s = await snap(page);
+      if (s?.state === 'playerMove' && s.activeId !== 'keeper') await page.keyboard.press('7');
+      await page.waitForTimeout(150);
+    }
+    return null;
+  })();
+  expect(daunted, "the Pall's touch Daunted the Keeper").not.toBeNull();
+  expect(daunted!.sourceId, 'the daunt names the Pall itself as its source').toBe('pall-2');
+
+  // While the Pall stands, the move field is filtered: the Keeper cannot willingly END a move
+  // closer to the source than it began. Asserted on ONE named tile rather than on a reachable
+  // COUNT — the count also moves with whatever movement budget is left on the turn being read,
+  // so comparing counts across two different turns compares two things at once and proves
+  // neither. (7,3) is one step toward the Pall at (5,3) from the Keeper's (8,3).
+  await passUntilKeeper(page);
+  await setPos(page, 'husk-1', 11, 7);
+  await setPos(page, 'pall-2', 5, 3);
+  await setPos(page, 'keeper', 8, 3);
+  expect(hasTile(await reachable(page), 7, 3), 'while the Pall stands, the Keeper cannot step toward it')
+    .toBe(false);
+
+  // Fell it. END THE KEEPER'S TURN FIRST: Kindled ticks at its OWNER's turn start, and
+  // passUntilKeeper called while the Keeper's own turn is already open returns immediately,
+  // handing the Pall no turn in which to burn.
+  await applyStatus(page, 'pall-2', 'kindled', 9, 9);
+  await page.keyboard.press('7');
+  await passUntilKeeper(page);
+  const pallGone = await unitState(page, 'pall-2');
+  expect(pallGone?.alive, 'the Pall fell').toBe(false);
+  const keeperAlive = await unitState(page, 'keeper');
+  expect(keeperAlive?.alive, 'the Keeper is still standing to observe the lift').toBe(true);
+  await setPos(page, 'keeper', 8, 3);
+  expect(hasTile(await reachable(page), 7, 3), 'source off the board — the daunt no longer filters the move field')
+    .toBe(true);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario e, part 2 (the C2-W6 regression gate): the demo pilot must still drive a fight to
+// RESOLUTION with the three new archetypes in the loop. C2-W6 was a freeze class — the pilot
+// reaching a board state it had no legal action for and spinning forever — and every new
+// archetype is a fresh chance to resurrect it: the Lurker is untargetable by Strike while it
+// holds, the Pall walks AWAY once its daunt lands, and the Husk moves the pilot's own units
+// around underneath it. Any of those could strand a pilot that assumed a reachable target.
+//
+// Deliberately asserts the poll REACHED 'over' rather than trusting pollUntil's timeout return
+// (Step 0/T2's own lesson: a stalled fight passes a bare truthiness check silently).
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario e: the demo pilot drives the mixed room to resolution — the freeze class stays dead', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/?scene=combat&seed=7&demo=1&enemies=lurker,husk,pall');
+  await waitReady(page, 'combat');
+  await setPilotPreference(page, 'strike'); // keep it in the free lane; no encounter overlay opens
+
+  // RESOLUTION, not victory. The mixed room reliably beats a level-1 retinue — the Pall's −1
+  // plus the Husk's 2-and-a-topple is more than the starting kit answers — so the honest
+  // terminal state here is Death's Door, and demanding 'over' would be asserting a balance
+  // outcome while pretending to assert a freeze. What the freeze class is actually about is
+  // whether the pilot ever STOPS: both 'over' and 'deathsdoor' are the turn loop reaching an
+  // end, and a frozen pilot reaches neither.
+  const TERMINAL = ['over', 'deathsdoor'];
+  const start = Date.now();
+  let last: Snap = null;
+  while (Date.now() - start < 150_000) {
+    last = await snap(page);
+    if (last && TERMINAL.includes(last.state)) break;
+    await page.waitForTimeout(200);
+  }
+  expect(
+    last && TERMINAL.includes(last.state),
+    `the pilot drove the mixed room to an end rather than spinning; last state=${last?.state}`,
+  ).toBe(true);
 });
