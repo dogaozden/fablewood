@@ -642,7 +642,13 @@ test('armed Second Wind Seal retries a failed cast; the retry drives damage, the
   );
   const history = srs?.facts?.[REVIVE_FACT]?.history ?? [];
   expect(history.length, 'exactly one Ledger row — the original miss, no second row for the retry').toBe(1);
-  expect(history[0]?.quality, "the standing row is the ORIGINAL miss's quality").toBe(0);
+  // T4-M5 hardening (inherited e2e debt): assert the row itself exists, explicitly, before
+  // indexing into it — the length check above proves the array's SIZE, not that index 0 is
+  // actually populated; an optional-chain read straight off history[0] would let a hole in the
+  // array pass this line silently (quality reads as undefined, never asserted as present).
+  const row = history[0];
+  expect(row, 'the standing row exists — indexing history[0] is safe now that it is proven, not assumed').toBeDefined();
+  expect(row!.quality, "the standing row is the ORIGINAL miss's quality").toBe(0);
 });
 
 // Ch. VII Mira's Stall, Task 5 scenario d: the Vigil break law — a missed calendar
