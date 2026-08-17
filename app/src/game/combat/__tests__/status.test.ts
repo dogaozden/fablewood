@@ -390,10 +390,13 @@ describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
   });
 
   describe('ENEMY_STATS.toppleable — topple-ability is per-entry data (units.ts)', () => {
-    it('all four standing archetypes are NOT toppleable — Toppling arrives with the Husk, a later task', () => {
-      for (const archetype of ['wisp', 'wraith', 'construct', 'warden'] as const) {
-        expect(ENEMY_STATS[archetype].toppleable).toBe(false);
+    it('topple-ability across all seven archetypes: only the Husk stands toppleable', () => {
+      // Carried rider (T8 sweep ratification): the original four (checked below solo) plus
+      // the lurker/pall pair — neither newcomer topples — pinned alongside the Husk's own YES.
+      for (const archetype of ['wisp', 'wraith', 'construct', 'warden', 'lurker', 'pall'] as const) {
+        expect(ENEMY_STATS[archetype].toppleable, archetype).toBe(false);
       }
+      expect(ENEMY_STATS.husk.toppleable, 'husk').toBe(true);
     });
   });
 
@@ -574,6 +577,80 @@ describe('Bestiary (Ch. VIII) — Task 5: Unwritten mechanics', () => {
       const oaHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
       expect(turnActionHit.hpDamage, 'the turn-action is the first act from the unseen — it carries +1').toBe(2);
       expect(oaHit.hpDamage, 'a later OA from the same (already-revealed) unit carries no bonus').toBe(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 8b (plan amendment) — Ch. V/Ch. VIII's own text, twice over: "adjacent attackers deal +1
+// against it, non-adjacent −1" / "Damage vs a Toppled unit: adjacent attackers +1, non-adjacent
+// −1 (the ±1 idiom, both directions)." Task 8's completeness sweep proved this was never wired —
+// e2e/bestiary.spec.ts's "bestiary FINDING" pin is the acceptance floor this implementation flips
+// green. The term is TARGET-side (reads targetStatuses for 'toppled', like inked) gated by a
+// caller-supplied `adjacent` input (like flank — board geometry this pure module can't compute
+// itself), and joins the SAME pre-floor modifier family as daunted/weakened/unwritten-tempo — no
+// special-casing, no new floor law.
+// ---------------------------------------------------------------------------------------
+describe('Bestiary (Ch. V/Ch. VIII) — Task 8b: Toppled damage, the ±1 idiom', () => {
+  describe('computeHit — the toppled fold, target-side + caller-supplied adjacency', () => {
+    // Local equivalent of the "computeHit — the one pipeline" describe block's own `noMods`
+    // (not reachable here, same reason Task 5's own local copy exists above) — same shape, plus
+    // this task's own `adjacent` field passed explicitly per-test (never defaulted here, so
+    // every case below states its own intent).
+    const noMods = {
+      attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+      flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+      attackerUnwrittenOpeningTempo: false,
+    };
+    const toppledStatus: StatusInstance[] = [{ id: 'toppled', turnsLeft: 1, magnitude: 1 }];
+
+    it('adjacent attacker deals +1 against a Toppled target', () => {
+      const res = computeHit({ base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      expect(res.hpDamage).toBe(3);
+    });
+
+    it('non-adjacent attacker deals −1 against a Toppled target', () => {
+      const res = computeHit({ base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: false });
+      expect(res.hpDamage).toBe(1);
+    });
+
+    it('un-toppled target: adjacent is a no-op either way — no term applies without the status', () => {
+      expect(computeHit({ base: 2, ...noMods, adjacent: true }).hpDamage).toBe(2);
+      expect(computeHit({ base: 2, ...noMods, adjacent: false }).hpDamage).toBe(2);
+    });
+
+    it('stacks with the attacker-side Daunted −1: adjacent-Toppled(+1) and Daunted(−1) net to zero — base passes through unchanged', () => {
+      const res = computeHit({
+        base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: true,
+        attackerStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 1, sourceId: 'pall-1' }],
+        attackerDauntedSourceAlive: true,
+      });
+      expect(res.hpDamage).toBe(2); // 2 +1 (toppled, adjacent) −1 (daunted) = 2 — the two ±1s cancel
+    });
+
+    it('symmetric by construction: an enemy blow against a Toppled party member folds the identical +1 a party Strike gets against a Toppled enemy', () => {
+      // computeHit has no notion of "team" anywhere in its signature — only ever
+      // attackerStatuses/targetStatuses — so nothing here COULD special-case a direction. Each
+      // side gets its own realistic base (Keeper's Strike is 1; the Husk's own blow reads off
+      // ENEMY_STATS rather than a hardcoded literal) so this reads as two distinct scenarios,
+      // not one literal duplicate.
+      const keeperStrikesToppledHusk = computeHit({ base: 1, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      const huskHitsToppledKeeper = computeHit({ base: ENEMY_STATS.husk.attack, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      expect(keeperStrikesToppledHusk.hpDamage, 'party-vs-toppled-enemy: base 1 +1').toBe(2);
+      expect(huskHitsToppledKeeper.hpDamage, "enemy-vs-toppled-party: base (husk's own attack) +1").toBe(ENEMY_STATS.husk.attack + 1);
+    });
+
+    it('floors at 0, never negative — same floor rule as weakened/daunted (non-adjacent −1 alone on a 0 base)', () => {
+      const res = computeHit({ base: 0, ...noMods, targetStatuses: toppledStatus, adjacent: false });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('floor interaction inherited: non-adjacent −1 stacks with Weakened −1 and still floors at 0, never negative', () => {
+      const res = computeHit({
+        base: 1, ...noMods, targetStatuses: toppledStatus, adjacent: false,
+        attackerStatuses: [{ id: 'weakened', turnsLeft: 1, magnitude: 1 }],
+      });
+      expect(res.hpDamage).toBe(0); // 1 −1 (toppled, non-adjacent) −1 (weakened) = −1 → floors to 0
     });
   });
 });
