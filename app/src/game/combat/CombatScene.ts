@@ -35,7 +35,7 @@ import {
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
 import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
-import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId } from './status';
+import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId, type StatusInstance } from './status';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
 import { fixtureLaunch, parseEnemiesParam, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
@@ -698,19 +698,33 @@ export class CombatScene extends Phaser.Scene {
     this.updateDanger(u);
   }
 
-  /** §3/§12.3 — up to 3 status chips (CHIP_KEYS glyphs) under the HP bar, overflow '+'. */
+  /**
+   * Ch. VIII Task 6 — the statuses a unit SHOWS, as opposed to the ones it carries.
+   *
+   * An INERT Daunted (its source off the board) still sits on `statuses`: the chapter consumes
+   * that condition by event, not by decay. But it has stopped applying in every way that matters
+   * — computeHit's penalty, the move-field filter and the AI's own read all gate on
+   * source-alive — so no presentation surface should go on announcing a fear that has lifted.
+   * Hidden, never cleared: removing the instance would be a mechanical change, and every caller
+   * of this is presentation only.
+   *
+   * ONE definition, consulted by BOTH condition-rendering surfaces (the chip row below and the
+   * §12.3 hover banner). Fix round 1 landed because the first pass filtered only the chip row,
+   * leaving the banner to announce "Daunted 1" over an empty row — a second surface drifting
+   * from the same law is exactly what a shared helper prevents. Mechanical readers keep reading
+   * `statuses` directly and are deliberately untouched.
+   */
+  private visibleStatuses(u: UnitState): StatusInstance[] {
+    return u.statuses.filter((s) => s.id !== 'daunted' || this.dauntedSourceAlive(u));
+  }
+
+  /** §3/§12.3 — up to 3 status chips (CHIP_KEYS glyphs) under the HP bar, overflow '+'.
+   *  Everything downstream (MAX, the overflow '+') reads the VISIBLE list, so a hidden chip
+   *  can't leave a phantom slot or a '+' counting something invisible. */
   private drawStatusChips(u: UnitState, v: UnitView, chipY: number): void {
     for (const c of v.chips) c.destroy();
     v.chips = [];
-    // Ch. VIII Task 6 (carried cosmetic) — an INERT Daunted carries no chip. When the source
-    // falls the daunt lifts immediately in every way that matters (computeHit's penalty, the
-    // move-field filter, the AI's own read all gate on source-alive), but the status INSTANCE
-    // stays on the unit — the chapter consumes it by event, not by decay — so the row went on
-    // advertising a fear that had stopped applying. Hidden, not cleared: removing the instance
-    // would be a mechanical change, and this seam is presentation only. Everything downstream
-    // (MAX, the overflow '+') reads the filtered list, so a hidden chip can't leave a phantom
-    // slot or a '+' counting something invisible.
-    const visible = u.statuses.filter((s) => s.id !== 'daunted' || this.dauntedSourceAlive(u));
+    const visible = this.visibleStatuses(u);
     if (!visible.length) return;
     const SIZE = 10;
     const GAP = 2;
@@ -3420,14 +3434,21 @@ export class CombatScene extends Phaser.Scene {
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (pt: Phaser.Input.Pointer) => {
       const tile = this.screenToTile(pt.x, pt.y);
       const unit = tile ? this.unitAt(tile) : undefined;
-      const id = unit && unit.statuses.length ? unit.id : null;
+      // Ch. VIII Task 6 fix round 1 — the GATE, the LINE and the TINT all read the VISIBLE list
+      // (visibleStatuses, above), never the raw one. This was the last stale condition surface
+      // after the chip fix, and it read worse than the bug it was meant to close: hovering a unit
+      // whose only status was an inert Daunted announced "Keeper — Daunted 1" over a chip row
+      // showing nothing at all. The tint mattered too — `statuses[0]` could colour the banner
+      // from a condition the player has no way to see.
+      const visible = unit ? this.visibleStatuses(unit) : [];
+      const id = unit && visible.length ? unit.id : null;
       if (id === this.hoveredStatusUnitId) return;
       this.hoveredStatusUnitId = id;
       if (unit && id) {
-        const line = unit.statuses
+        const line = visible
           .map((s) => `${STATUS_DEFS[s.id].label} ${s.id === 'warded' ? s.magnitude : s.turnsLeft}`)
           .join(' · ');
-        this.hud.showBanner(`${unit.name} — ${line}`, STATUS_DEFS[unit.statuses[0].id].tint);
+        this.hud.showBanner(`${unit.name} — ${line}`, STATUS_DEFS[visible[0].id].tint);
       }
     });
 

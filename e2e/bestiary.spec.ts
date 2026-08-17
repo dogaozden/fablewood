@@ -113,6 +113,27 @@ async function applyStatus(
   );
 }
 
+/** The HUD banner's current raw text (CombatScene.bannerText — boss-reforged.spec.ts's idiom). */
+async function bannerText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { bannerText?(): string } | undefined;
+    return s?.bannerText?.() ?? '';
+  });
+}
+
+/** Move the pointer over a board tile (same 960x540 -> canvas mapping canvasClick uses). The
+ *  §12.3 status-hover listener debounces on the hovered unit id, so a test that wants two reads
+ *  of the SAME unit must hover something else in between — hence the explicit tile arg. */
+async function hoverTile(page: Page, c: number, r: number): Promise<void> {
+  const canvas = page.locator('canvas').first();
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('canvas has no bounding box');
+  const p = tileXY(c, r);
+  await page.mouse.move(box.x + (p.x / 960) * box.width, box.y + (p.y / 540) * box.height);
+  await page.waitForTimeout(120);
+}
+
 /** Ch. VIII Task 6 — pin the demo pilot to one free-lane action (CombatScene.setPilotPreference,
  *  crucible-combat.spec.ts's own idiom) so no encounter overlay opens during the termination
  *  gate: this test is about the pilot never running out of legal moves, not about grading. */
@@ -923,8 +944,11 @@ test('bestiary scenario e: the mixed room — the Lurker is written, the Husk fl
 // holds, the Pall walks AWAY once its daunt lands, and the Husk moves the pilot's own units
 // around underneath it. Any of those could strand a pilot that assumed a reachable target.
 //
-// Deliberately asserts the poll REACHED 'over' rather than trusting pollUntil's timeout return
-// (Step 0/T2's own lesson: a stalled fight passes a bare truthiness check silently).
+// Deliberately asserts the poll REACHED a terminal state — 'over' OR 'deathsdoor' — rather than
+// falling out of the loop on the time budget (Step 0/T2's own lesson: a stalled fight passes a
+// bare truthiness check silently). Either state means the turn loop ENDED, which is the whole
+// claim; a frozen pilot reaches neither. Demanding 'over' specifically would assert a balance
+// outcome under the name of a freeze gate — see the in-body note.
 // ---------------------------------------------------------------------------------------
 test('bestiary scenario e: the demo pilot drives the mixed room to resolution — the freeze class stays dead', async ({ page }) => {
   test.setTimeout(180_000);
@@ -950,4 +974,66 @@ test('bestiary scenario e: the demo pilot drives the mixed room to resolution �
     last && TERMINAL.includes(last.state),
     `the pilot drove the mixed room to an end rather than spinning; last state=${last?.state}`,
   ).toBe(true);
+});
+
+// ---------------------------------------------------------------------------------------
+// Scenario f (Task 6 fix round 1 — the stale-Daunted cosmetic, second surface): an INERT Daunted
+// must not be ANNOUNCED any more than it is drawn. The chip row was filtered first; the §12.3
+// status hover banner was not, and it read worse than the bug it was meant to close — hovering a
+// unit whose only status was a lifted daunt announced "Keeper — Daunted 1" over a chip row
+// showing nothing at all. Both surfaces now read one shared `visibleStatuses` list.
+//
+// Two claims, because the defect had two halves:
+//   1. the LINE (and its tint) omit a lifted daunt while still naming the unit's real statuses;
+//   2. the GATE does not fire the banner at all when a lifted daunt is the ONLY status.
+// The daunt is applied through the debug seam with sourceId, and the source is felled with a
+// lethal Kindled — scenario a's technique — so nothing here depends on the Pall's own AI.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario f: a lifted Daunted is neither drawn nor announced — the hover line drops it, and never fires alone', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7&enemies=pall,wisp,wraith');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  // Park every enemy away from the retinue; the Pall is only ever a NAMED SOURCE here.
+  await setPos(page, 'pall-0', 11, 7);
+  await setPos(page, 'wisp-1', 11, 0);
+  await setPos(page, 'wraith-2', 10, 0);
+  await setPos(page, 'keeper', 5, 3);
+  await setPos(page, 'mira', 5, 5);
+
+  // The Keeper carries a real status AND a daunt sourced to the (still standing) Pall.
+  await applyStatus(page, 'keeper', 'inked', 9, 1);
+  await applyStatus(page, 'keeper', 'daunted', 1, 1, 'pall-0');
+
+  await hoverTile(page, 0, 0); // somewhere empty, so the next hover is a fresh unit id
+  await hoverTile(page, 5, 3);
+  const whileSourceStands = await bannerText(page);
+  expect(whileSourceStands, 'while the Pall stands the daunt is real, so the line names it').toContain('Daunted');
+  expect(whileSourceStands, "and the unit's other conditions are named too").toContain('Inked');
+
+  // Fell the source. End the turn first so the Pall reaches its own turn-start Kindled tick.
+  await applyStatus(page, 'pall-0', 'kindled', 9, 9);
+  await page.keyboard.press('7');
+  await passUntilKeeper(page);
+  expect((await unitState(page, 'pall-0'))?.alive, 'the source fell').toBe(false);
+
+  // Claim 1: the line drops the lifted daunt and keeps everything else.
+  await setPos(page, 'keeper', 5, 3);
+  await hoverTile(page, 0, 0);
+  await hoverTile(page, 5, 3);
+  const afterSourceFell = await bannerText(page);
+  expect(afterSourceFell, 'the lifted daunt is no longer announced').not.toContain('Daunted');
+  expect(afterSourceFell, 'the real condition is still announced — the filter is not a blanket mute').toContain('Inked');
+
+  // Claim 2: with a lifted daunt as its ONLY status, hovering fires no banner at all — the gate
+  // reads the visible list too. Mira's banner would have to overwrite the Keeper's line to fail
+  // this, so an unchanged banner is the proof.
+  await applyStatus(page, 'mira', 'daunted', 1, 1, 'pall-0');
+  await setPos(page, 'mira', 5, 5);
+  const beforeHoveringMira = await bannerText(page);
+  await hoverTile(page, 0, 0);
+  await hoverTile(page, 5, 5);
+  expect(await bannerText(page), 'a lone lifted daunt fires no hover banner — the banner is untouched')
+    .toBe(beforeHoveringMira);
 });
