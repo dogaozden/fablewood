@@ -1013,3 +1013,145 @@ test('without the Margin Lamp borne: the Lurker still begins combat Unwritten �
     await restoreInventoryOnly(page, beforeInv);
   }
 });
+
+// ---------------------------------------------------------------------------------------
+// Task 6 — the Unbroken Clasp: once per battle, party-side only, the first blow that would
+// take a party unit to 0 leaves it at 1 HP instead, caught at the damage seam BEFORE
+// checkEnd()/enterDeathsDoor() ever sees the fall.
+//
+// Rig: `save.json {hp: 2}` seeds the pooled HP that `splitPooledHp` (CombatScene.ts:198-203)
+// hands to the party at spawn — pool=2 puts the Keeper at 2 and Mira at 0 (the SAME math
+// deaths-door.spec.ts's own rig relies on), so Mira starts already fallen and the Keeper is
+// the party's sole living member: every felling blow is unambiguous, and a SECOND one (once
+// the Clasp's catch is spent) opens the Door outright, with nothing else to keep the party up.
+//
+// Damage comes from a single `warden` trash mob (`?enemies=warden`) — ENEMY_STATS.warden:
+// attack 2, melee, and (unlike `construct`/`husk`) NOT in enemyStrike's push-branch gate
+// (CombatScene.ts:3251's `kind === 'construct' || kind === 'husk' || isBoss`), so its hit is a
+// flat, unmodified 2 with no push/bump/topple to complicate the arithmetic. Positioned
+// adjacent to the Keeper via debugSetPos before its first turn: decideEnemy's "already in
+// range from where we stand" branch (ai.ts) then attacks immediately, no approach needed.
+// Keeper pool=2 means the warden's flat 2 exactly matches "would take a party unit to 0" on
+// the first hit, and again (from 1 hp) on the second.
+//
+// The Clasp's own banner is deliberately delayed inside damageUnit (see its comment) to land
+// after enemyStrike's own synchronous closing banner — showBanner is replace-not-stack, so an
+// undelayed call would be overwritten in the same tick and never actually be visible. Polled
+// with expect.poll below rather than read at a single instant, since it is itself transient
+// (superseded again once the next turn's own opening banner fires) — polling catches its
+// window regardless of exact engine timing, rather than betting the test on it.
+// ---------------------------------------------------------------------------------------
+
+const CLASP_ID = 'unbroken-clasp';
+
+/** Own-file local copy (T5's own "richer than the last" convention) — needs `alive`, which
+ *  the T5-era `unitState` above (hp + statuses only) doesn't carry. */
+async function claspUnitState(page: Page, id: string): Promise<{ hp: number; alive: boolean } | null> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as
+      | { unitDebug?(id: string): { hp: number; alive: boolean } | null }
+      | undefined;
+    return s?.unitDebug?.(uid) ?? null;
+  }, id);
+}
+
+test('the Unbroken Clasp borne: the first felling blow leaves the Keeper at 1 HP and banners exactly; the Door opens only on the second (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 2 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [CLASP_ID]: 1 }, bornRelicId: CLASP_ID },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=warden');
+    await waitReady(page, 'combat');
+
+    await passUntilPartyTurn(page, 'keeper');
+    await debugSetPos(page, 'keeper', 5, 1);
+    await debugSetPos(page, 'warden-0', 6, 1);
+
+    const beforeFirst = await claspUnitState(page, 'keeper');
+    expect(beforeFirst?.hp, 'sanity: the seeded pool puts the Keeper at exactly 2 hp — the warden\'s flat 2 would fell').toBe(2);
+    expect(beforeFirst?.alive).toBe(true);
+
+    await page.keyboard.press('7'); // End the Keeper's turn 1 — the adjacent warden strikes.
+
+    await expect
+      .poll(async () => (await claspUnitState(page, 'keeper'))?.hp, {
+        timeout: 20_000,
+        message: 'the Clasp catches the felling blow: 2 -> 1, not 2 -> 0',
+      })
+      .toBe(1);
+    const afterFirst = await claspUnitState(page, 'keeper');
+    expect(afterFirst?.alive, 'still standing — the catch happened before the death branch, not after it').toBe(true);
+
+    await expect
+      .poll(() => bannerText(page), { timeout: 5_000, intervals: [50] })
+      .toBe('The Clasp holds.'); // ruled copy, verbatim
+
+    expect((await combatSnap(page))?.state, 'the door never opened — the catch fires before its trigger').not.toBe('deathsdoor');
+
+    // Round 2 genuinely opens under manual control (not hijacked by the Door), and the catch's
+    // effect persisted rather than reverting once the banner's own window closed.
+    await passUntilPartyTurn(page, 'keeper');
+    const beforeSecond = await claspUnitState(page, 'keeper');
+    expect(beforeSecond?.hp, 'still at 1 going into round 2').toBe(1);
+
+    await page.keyboard.press('7'); // End turn 2 — the SAME warden's second flat-2 blow.
+
+    await expect
+      .poll(async () => (await combatSnap(page))?.state, {
+        timeout: 20_000,
+        message: 'the battle\'s SECOND felling blow lands true — once per battle, not once per unit',
+      })
+      .toBe('deathsdoor');
+
+    const afterSecond = await claspUnitState(page, 'keeper');
+    expect(afterSecond?.alive, 'this time the fall was real').toBe(false);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('without the Unbroken Clasp borne: the first felling blow opens the Door directly — regression (Ch. IX)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 2 } });
+    await page.request.put('/api/state/inventory.json', { data: { version: 1, gold: 0, stacks: {}, bornRelicId: null } });
+
+    await page.goto('/?scene=combat&seed=7&enemies=warden');
+    await waitReady(page, 'combat');
+
+    await passUntilPartyTurn(page, 'keeper');
+    await debugSetPos(page, 'keeper', 5, 1);
+    await debugSetPos(page, 'warden-0', 6, 1);
+
+    const before = await claspUnitState(page, 'keeper');
+    expect(before?.hp, 'sanity: same rig as the borne test — the warden\'s flat 2 would fell').toBe(2);
+
+    await page.keyboard.press('7'); // End the Keeper's only turn — no relic to catch what follows.
+
+    await expect
+      .poll(async () => (await combatSnap(page))?.state, {
+        timeout: 20_000,
+        message: 'no Clasp borne: the FIRST felling blow opens the Door directly',
+      })
+      .toBe('deathsdoor');
+
+    const after = await claspUnitState(page, 'keeper');
+    expect(after?.hp, 'the fall was real — no catch').toBe(0);
+    expect(after?.alive).toBe(false);
+    expect(await bannerText(page), 'never the Clasp\'s line — nothing was borne to catch it').not.toBe('The Clasp holds.');
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
