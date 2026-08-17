@@ -23,7 +23,9 @@ The battery every wave runs before its final review and merge. Distilled from Wa
 
 ## The census
 
-`grep -rn "services\.draw\.\(due\|fresh\)" app/src` — every production draw consumer must visibly carry its exhaustion ladder (due → fresh → seededShuffle fallback; teaching's two-tier fresh→scripted variant is the one W1-certified deliberate exception). The consumer list grows with waves — the certifying task's brief states the expected count; a surprise entry is a finding.
+The oracle is `app/src/draw/__tests__/census.test.ts` (W9): a comment/string-stripped, allowlist-classified whole-tree scan asserting the exact consumer count and file set — it runs inside the unit leg, so the census is certified there. Every production draw consumer must visibly carry its exhaustion ladder (due → fresh → seededShuffle fallback; teaching's two-tier fresh→scripted variant is the one W1-certified deliberate exception). The consumer list grows with waves — the certifying task's brief states the expected count; a surprise entry is a finding.
+
+The historical quick-grep (`grep -rn "services\.draw\.\(due\|fresh\)" app/src`) is a manual convenience only and now over-counts: doc comments and test fixtures legitimately quote these strings (W9's raw grep hit 34 lines in 7 files; classified, that was exactly 9 production call lines in 3 files = the expected 5 consumers). Never treat the raw line count as pass/fail without classifying hits into calls vs comments vs test files.
 
 ## Conventions
 
