@@ -219,6 +219,40 @@ test('boss hoard: a borne Warden Signet of Terms edges the loot-rarity roll, wit
   }
 });
 
+// Task 10 (the wave sweep) — the Signet was the one relic of five missing its "without borne"
+// regression pair (Heel/Lamp/Clasp/Wick each have one; this closes the asymmetry, same rig and
+// seed as the borne test above, `stacks: {}, bornRelicId: null` matching every other relic's
+// own regression convention, e.g. the Clasp's at line ~1170).
+test('without the Warden Signet of Terms borne: the loot-rarity roll is NOT edged — regression (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 20, stacks: {}, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=vaults&sim=1&auto=boss&seed=7');
+
+    const inv = await waitForState<LootInventory>(
+      page,
+      'inventory.json',
+      (i) => (i?.stacks?.['clerks-silver-nib'] ?? 0) >= 1 || (i?.stacks?.['mossbound-locket'] ?? 0) >= 1,
+      60_000,
+    );
+    expect(inv?.stacks?.['mossbound-locket'], 'no relic borne: the un-edged control outcome lands').toBe(1);
+    expect(inv?.stacks?.['clerks-silver-nib'], 'the edged outcome did NOT land — nothing was borne to edge it').toBeUndefined();
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
 // Task 4, the rotation law — cloned drive: inventory-pane-cross-reopen.spec.ts's own
 // openMiraShop() verbatim (warp to the stall, tap through the dialogue until the shop opens).
 async function openMiraShop(page: Page): Promise<void> {
@@ -1000,6 +1034,53 @@ test('without the Waymark Heel borne: Move N/M reads the plain base — regressi
     const keeperTurn = await passUntilPartyTurn(page, 'keeper');
     expect(keeperTurn.budget.total, 'no relic borne: the Keeper\'s plain base').toBe(4);
     expect(await partyPanelText(page)).toContain('Move 4/4');
+  } finally {
+    await restoreInventoryOnly(page, beforeInv);
+  }
+});
+
+// Task 10 (the wave sweep) — the chapter's own wording for the Heel is emphatic that it is "a
+// base change, not a lane: the budget, the move field, the rise toll, AND BOTH STANCES all see
+// it." The borne test above only ever reads the fresh-turn budget (the move field/budget seam);
+// neither stance's OWN separate base-read (turnBudget.ts's header: "Careful Step's halving in
+// ai.ts, Press On's bonus calc in CombatScene.ts — separate call sites") had ever been exercised
+// against a Heel-boosted base before this. This is the same bug SHAPE the W8 sweep caught for
+// Toppled's rise toll ("only Press On's separate read had ever been exercised on a rising turn
+// before this") — a second base-reading site silently missing the modifier everyone assumes it
+// shares. Press On, not Careful Step, is the discriminating choice: at this fixture's base move
+// (4), Careful Step's floor(base/2) gives floor(4/2)=2 and floor(5/2)=2 — the SAME number either
+// way, so a Careful-Step-only pin could not tell "composes correctly" from "silently ignores the
+// Heel." Press On's additive bonus (total + effectiveMove) has no such collision: 4+4=8 vs
+// 5+5=10, unambiguous.
+test('the Waymark Heel borne: Press On grants the boosted base twice over, not a stale plain base (Ch. IX × Ch. VI)', async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [HEEL_ID]: 1 }, bornRelicId: HEEL_ID },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+
+    const keeperTurn = await passUntilPartyTurn(page, 'keeper');
+    expect(keeperTurn.budget.total, 'sanity: fresh budget is base 4 +1 Heel = 5, same as the borne test above').toBe(5);
+
+    await page.keyboard.press('8'); // Press On — forgo the action, add effectiveMove to the budget again
+    await expect
+      .poll(async () => (await budgetSnap(page))?.budget.pressedOn, { timeout: 10_000, message: 'Press On to fire' })
+      .toBe(true);
+
+    const pressed = await budgetSnap(page);
+    expect(
+      pressed?.budget.total,
+      "Press On re-reads the Heel-boosted base (5), not a stale plain 4 — grants 5+5=10, not the un-Heel'd 4+4=8",
+    ).toBe(10);
+    expect(pressed?.budget.left, 'left matches the doubled total — the bonus extends, never just refills').toBe(10);
+    expect(pressed?.budget.actionSpent, 'Press On still spends the action, Heel or no Heel').toBe(true);
   } finally {
     await restoreInventoryOnly(page, beforeInv);
   }
