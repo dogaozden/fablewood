@@ -8,6 +8,7 @@ import {
   waitForState,
   warpHamletTo,
   canvasClick,
+  tileClick,
   currentScene,
 } from './helpers';
 // Pure, no-Phaser module (same precedent as miras-stall.spec.ts's own buildLayout import) —
@@ -1154,4 +1155,491 @@ test('without the Unbroken Clasp borne: the first felling blow opens the Door di
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
   }
+});
+
+// ---- Task 7: THE SEALED PAGE OF THE GEYSER (Ch. IX) ---------------------------------------
+//
+// The wave's one item-driven TARGETED flow, and the only Satchel item that does not resolve the
+// instant it is picked: Satchel → "Use" → a target-selection mode over enemies within reach 3 →
+// click a foe → the push resolves and the page crumbles. It is Shove written down, so it inherits
+// Shove's own targeting idiom (validTargets → enterTargeting → runPlayerAction, reusing
+// pendingAction/targetTiles rather than a second input system) and Ch. VI's action gate. What it
+// does NOT inherit is Shove's no-damage purity — an item's push is an item's blow, so it goes
+// through pushUnit with the bump ENABLED, and a blocked page-push bumps for 1 where a blocked
+// Shove bumps for nothing.
+//
+// REACH: hasLineOfFire(unit, e, 3, tiles) — the wraith's own range idiom (ai.ts:80 takes that
+// branch for `ranged: true`; grid.ts:259's doc names the wraith outright), NOT a manhattan disk.
+// The distinction is load-bearing rather than cosmetic: a push needs a Dir, CombatScene.dirTo is
+// 4-way and returns null off the orthogonals, and a manhattan disk would admit diagonals the
+// engine has no "away" direction for. Ritual Sequence — the other directional player action at
+// range 3 — already targets through this exact predicate. Pinned at the pure level too
+// (combat.test.ts, "the Sealed Page reaches three tiles along a clear row/column").
+//
+// GEOMETRY: every scenario below plays on ROW 1, which is fully floor across cols 1-10 at
+// seed=7, with col 0 the west wall border (bestiary.spec.ts's own fixture dump, reused rather
+// than re-derived). Landed pushes run rightward into open floor; the blocked push runs leftward
+// into that wall. Each test takes a fresh combat launch and reads exactly one Page inside the
+// Keeper's own turn 1, so no enemy AI turn, no rise, and no cross-turn status decay can
+// contaminate a reading — Toppled and Unwritten both sit in status.ts's NO_TURN_END_DECAY set,
+// which makes a two-uses-across-two-turns test measurably less deterministic than two tests.
+// -------------------------------------------------------------------------------------------
+
+const PAGE_ID = 'sealed-page-geyser';
+const PAGE_NAME = 'Sealed Page of the Geyser';
+/** Ruled copy (Ch. IX), verbatim — the banner the reading itself shows. */
+const PAGE_LINE = 'The page speaks water, once.';
+
+/** Own-file local copy, richer than budgetSnap above (T5's own "richer than the last"
+ *  convention): the Page's assertions need the action LOG as well as the budget. */
+type PageSnap = {
+  state: string;
+  activeId: string;
+  budget: Budget;
+  log: Array<{ action: string; dmg: number; overlay: boolean }>;
+} | null;
+
+async function pageSnap(page: Page): Promise<PageSnap> {
+  return page.evaluate(() => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as { combatSnapshot?(): unknown } | undefined;
+    return (s?.combatSnapshot?.() ?? null) as PageSnap;
+  });
+}
+
+/** Own-file local copy — needs position AND hp AND statuses together (T5's unitState carries no
+ *  c/r; T6's claspUnitState carries no statuses), since one page-push is asserted on all three. */
+async function pageUnit(
+  page: Page,
+  id: string,
+): Promise<{ c: number; r: number; hp: number; alive: boolean; statuses: Array<{ id: string }> } | null> {
+  return page.evaluate((uid) => {
+    const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
+    const s = g?.scene?.getScene?.('combat') as
+      | { unitDebug?(id: string): { c: number; r: number; hp: number; alive: boolean; statuses: Array<{ id: string }> } | null }
+      | undefined;
+    return s?.unitDebug?.(uid) ?? null;
+  }, id);
+}
+
+/** How many Pages the store holds ON DISK — the crumble is only real if it survives to state. */
+async function pagesOnDisk(page: Page): Promise<number> {
+  const inv = await readState<LootInventory>(page, 'inventory.json');
+  return inv?.stacks?.[PAGE_ID] ?? 0;
+}
+
+const hasStatusId = (u: { statuses: Array<{ id: string }> } | null, id: string): boolean =>
+  !!u?.statuses.some((s) => s.id === id);
+
+/** Opens the in-battle Satchel and reads the Page — miras-stall.spec.ts's own armHint idiom
+ *  (row.getByRole('button', { name: 'Use' })), which is the canonical "Use" selector for this
+ *  pane. Asserts the row is THERE on the way past: the Page reaching the pane at all is
+ *  usableSatchelItems' push_blast admission, proven end-to-end rather than by unit test alone. */
+async function readPageFromSatchel(page: Page): Promise<void> {
+  await page.keyboard.press('q');
+  await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('.inv-title')).toHaveText('Satchel');
+  const row = page.locator('.inv-row', { hasText: PAGE_NAME });
+  await expect(row, 'the Page reaches the combat Satchel — push_blast is admitted').toBeVisible();
+  await row.getByRole('button', { name: 'Use' }).click();
+  await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+}
+
+/** Waits out the hand-off from the closing DOM pane into the Page's own target-selection mode.
+ *  Unlike every other Satchel item, picking the Page resolves NOTHING yet — it arms targeting. */
+async function waitForPageTargeting(page: Page): Promise<void> {
+  await expect
+    .poll(async () => (await pageSnap(page))?.state, {
+      timeout: 10_000,
+      intervals: [50],
+      message: 'the Page enters target selection instead of resolving on pick',
+    })
+    .toBe('playerTarget');
+}
+
+test('the Sealed Page of the Geyser: read at reach 3, it pushes one tile, crumbles, and spends the action (Ch. IX)', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    // Exile the two enemies this scenario does not use (bestiary.spec.ts's own "exile" idiom),
+    // then lay the reach-3 line out on row 1: Keeper(2,1) → wisp-0(5,1), a clear three-tile
+    // channel, with (6,1) open floor for the push to land on.
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'wraith-2', 10, 1);
+    await debugSetPos(page, 'keeper', 2, 1);
+    await debugSetPos(page, 'wisp-0', 5, 1);
+
+    const before = await pageUnit(page, 'wisp-0');
+    expect(before?.hp, 'sanity: wisp-0 opens at full hp').toBe(2);
+    expect(await pagesOnDisk(page), 'sanity: exactly one Page carried in').toBe(1);
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+
+    // The targeting banner names the ITEM, not the Satchel button it came from.
+    const targetingBanner = await bannerText(page);
+    expect(targetingBanner, 'the target-selection banner names the Page').toContain(PAGE_NAME);
+    expect(targetingBanner, "and carries the house cancel hint, same as Strike's own").toContain('Esc cancels');
+    // Nothing is spent yet — the page is still whole and the action still unspent while the
+    // target is being chosen.
+    expect(await pagesOnDisk(page), 'the page has NOT crumbled merely by being picked').toBe(1);
+    expect((await pageSnap(page))?.budget.actionSpent, 'nor is the action spent before a target commits').toBe(false);
+
+    await tileClick(page, 5, 1); // commit: read the page at wisp-0, three tiles down the row
+
+    // The ruled line lands the instant the reading resolves. Polled rather than read at one
+    // instant because the W6 gate's own "Steps remain" banner replaces it ~560ms later — the
+    // Clasp test's own reason for polling its transient banner.
+    await expect
+      .poll(() => bannerText(page), { timeout: 10_000, intervals: [30], message: 'the ruled cast line' })
+      .toBe(PAGE_LINE);
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+        timeout: 15_000,
+        message: 'the reading spends the turn\'s one action',
+      })
+      .toBe(true);
+    const after = await pageSnap(page);
+
+    expect(after?.state, 'banked movement survives — the steps-remain shape every gated action shares').toBe('playerMove');
+    const last = after?.log[after.log.length - 1];
+    expect(last?.action, 'the action log records the reading as a Satchel use').toBe('satchel');
+    expect(last?.dmg, 'a LANDED page-push deals no damage of its own').toBe(0);
+
+    const pushed = await pageUnit(page, 'wisp-0');
+    expect({ c: pushed?.c, r: pushed?.r }, 'wisp-0 moved exactly one tile further down the row').toEqual({ c: 6, r: 1 });
+    expect(pushed?.hp, 'a landed push never bumps — forceMove moved, so the bump branch is never reached').toBe(2);
+    expect(hasStatusId(pushed, 'toppled'), 'the wisp is not a toppleable entry, so no knock').toBe(false);
+
+    // The crumble, on disk: single-use means the stack is genuinely gone, not flagged.
+    await expect
+      .poll(() => pagesOnDisk(page), { timeout: 10_000, message: 'the page crumbles after the reading' })
+      .toBe(0);
+
+    // ...and the pane agrees: reopening the Satchel offers no Page at all.
+    await page.keyboard.press('q');
+    await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.inv-row', { hasText: PAGE_NAME }), 'nothing left to read').toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('relics-sealed-page-spent.png') });
+    await page.locator('.inv-close', { hasText: 'Never Mind' }).click({ timeout: 2_000 });
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('a landed page-push knocks a toppleable entry Toppled — the heave-gate mirror, without a scratch on it (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=husk,wisp,wraith');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'wraith-2', 10, 5);
+    await debugSetPos(page, 'keeper', 2, 1);
+    await debugSetPos(page, 'husk-0', 5, 1); // the one shipped toppleable:true entry
+
+    const before = await pageUnit(page, 'husk-0');
+    expect(hasStatusId(before, 'toppled'), 'sanity: the stub starts on its feet').toBe(false);
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 5, 1);
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, { timeout: 15_000, message: 'the reading resolves' })
+      .toBe(true);
+
+    const knocked = await pageUnit(page, 'husk-0');
+    expect({ c: knocked?.c, r: knocked?.r }, 'the push landed — one tile down the row').toEqual({ c: 6, r: 1 });
+    expect(hasStatusId(knocked, 'toppled'), 'landed && alive && isToppleable — the heave\'s own gate, mirrored').toBe(true);
+    // For the Page these two are mutually exclusive by construction: bump damage happens only
+    // when the push is BLOCKED, and the knock only when it LANDED. So a knock always arrives
+    // clean, and the heave's "knock after damage" ordering is inherited but never exercised.
+    expect(knocked?.hp, 'the knock cost it nothing — a landed push deals no damage').toBe(before?.hp);
+    await expect.poll(() => pagesOnDisk(page), { timeout: 10_000 }).toBe(0);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('a BLOCKED page-push bumps for 1, knocks nothing, and still spends both page and action (Ch. IX)', async ({ page }) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=husk,wisp,wraith');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'wraith-2', 10, 5);
+    // Keeper(4,1) reads westward at husk-0(1,1) — three clear tiles of channel, and (0,1) is the
+    // west wall border, so the push has nowhere to put it.
+    await debugSetPos(page, 'keeper', 4, 1);
+    await debugSetPos(page, 'husk-0', 1, 1);
+
+    const before = await pageUnit(page, 'husk-0');
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 1, 1);
+
+    // Same ruled line either way: a read page is a read page, landed or blocked.
+    await expect
+      .poll(() => bannerText(page), { timeout: 10_000, intervals: [30], message: 'the ruled cast line, blocked case too' })
+      .toBe(PAGE_LINE);
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+        timeout: 15_000,
+        message: 'a blocked reading still spends the action — you read the page',
+      })
+      .toBe(true);
+    const after = await pageSnap(page);
+
+    const bumped = await pageUnit(page, 'husk-0');
+    expect({ c: bumped?.c, r: bumped?.r }, 'nowhere to go — the west wall held it in place').toEqual({ c: 1, r: 1 });
+    expect(bumped?.hp, "the ordinary bump: an item's push is an item's blow (contrast Shove, which suppresses it)")
+      .toBe((before?.hp ?? 0) - 1);
+    expect(hasStatusId(bumped, 'toppled'), 'no knock without a landed push — even against the toppleable entry').toBe(false);
+    expect(bumped?.alive, 'sanity: the stub survives a 1-point bump').toBe(true);
+
+    // pushUnit's own bump entry, then the reading's — the log carries both halves.
+    const kinds = (after?.log ?? []).map((l) => l.action);
+    expect(kinds[kinds.length - 2], 'the bump logged first, from inside pushUnit').toBe('bump');
+    expect(kinds[kinds.length - 1], 'then the reading itself').toBe('satchel');
+
+    await expect
+      .poll(() => pagesOnDisk(page), { timeout: 10_000, message: 'a blocked reading crumbles the page all the same' })
+      .toBe(0);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('backing out of the Page\'s targeting spends nothing — the page is kept and the action stays open (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'wraith-2', 10, 5);
+    await debugSetPos(page, 'keeper', 2, 1);
+    await debugSetPos(page, 'wisp-0', 5, 1);
+    const before = await pageUnit(page, 'wisp-0');
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+
+    // The house cancel path (CombatScene.cancelTargeting, reached by Esc exactly as it is from
+    // Strike/Shove's own targeting) — the ONE route out of a picked Page that costs nothing.
+    await page.keyboard.press('Escape');
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.state, {
+        timeout: 10_000,
+        intervals: [50],
+        message: 'Esc returns to the action menu',
+      })
+      .toBe('playerMove');
+    const backedOut = await pageSnap(page);
+
+    expect(backedOut?.budget.actionSpent, 'backing out spends no action — nothing was committed').toBe(false);
+    expect(await pagesOnDisk(page), 'and the page is still whole, on disk').toBe(1);
+    const untouched = await pageUnit(page, 'wisp-0');
+    expect({ c: untouched?.c, r: untouched?.r }, 'nobody moved').toEqual({ c: 5, r: 1 });
+    expect(untouched?.hp, 'nobody was hurt').toBe(before?.hp);
+
+    // The action really is still available: the same page can be read again this very turn, and
+    // THAT reading resolves — proving the cancel left no half-armed state behind.
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 5, 1);
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+        timeout: 15_000,
+        message: 'the re-read resolves normally after a cancel',
+      })
+      .toBe(true);
+    expect({ ...(await pageUnit(page, 'wisp-0')) }, 'the second reading pushed for real').toMatchObject({ c: 6, r: 1 });
+    await expect.poll(() => pagesOnDisk(page), { timeout: 10_000 }).toBe(0);
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('the Page REACHES the Unwritten, and a CLEAN push leaves it unwritten still (Ch. IX / Ch. VIII composition)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=lurker');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'keeper', 2, 1);
+    await debugSetPos(page, 'lurker-0', 5, 1);
+    const before = await pageUnit(page, 'lurker-0');
+    expect(hasStatusId(before, 'unwritten'), 'sanity: the Lurker opens Unwritten (Ch. VIII spawn grant)').toBe(true);
+
+    // The contrast that makes the ruling visible: Strike refuses the same foe the Page reads.
+    // The Page is spell-family under Ch. VIII's "spells and area effects reach it fine" — it is
+    // a written thing's answer, not a shoulder — so isStrikeTargetable is deliberately NOT on
+    // its reach predicate.
+    expect(await validTargets(page, 'strike'), 'Strike still cannot see it').not.toContain('lurker-0');
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 5, 1); // a click that only lands if the Page's targets include it
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+        timeout: 15_000,
+        message: 'the Page resolves against the Unwritten — it reaches',
+      })
+      .toBe(true);
+
+    const pushed = await pageUnit(page, 'lurker-0');
+    expect({ c: pushed?.c, r: pushed?.r }, 'the Page reached it and moved it — proof of the reach ruling').toEqual({ c: 6, r: 1 });
+    // The composition law: a landed clean push is neither damage taken nor the holder acting, so
+    // NEITHER Unwritten trigger fires. It is moved, and it is still unwritten.
+    expect(pushed?.hp, 'no damage — so trigger 2 (being struck writes you) never fires').toBe(before?.hp);
+    expect(hasStatusId(pushed, 'unwritten'), 'and it did not ACT, so trigger 1 never fires either — it survives the shove')
+      .toBe(true);
+    expect(await validTargets(page, 'strike'), 'still unwritten means still un-Strikeable, one tile further out').not.toContain('lurker-0');
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('a BLOCKED page-push consumes the Unwritten — the bump IS damage taken (Ch. IX / Ch. VIII composition)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7&enemies=lurker');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'keeper', 4, 1);
+    await debugSetPos(page, 'lurker-0', 1, 1); // pinned against the west wall
+    const before = await pageUnit(page, 'lurker-0');
+    expect(hasStatusId(before, 'unwritten'), 'sanity: still Unwritten going in').toBe(true);
+    expect(before?.hp, 'sanity: the Lurker has 2 hp, so a 1-point bump leaves it standing to be read').toBe(2);
+
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 1, 1);
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, { timeout: 15_000, message: 'the blocked reading resolves' })
+      .toBe(true);
+
+    const revealed = await pageUnit(page, 'lurker-0');
+    expect({ c: revealed?.c, r: revealed?.r }, 'the wall held it').toEqual({ c: 1, r: 1 });
+    expect(revealed?.hp, 'the bump landed for 1 — this is real damage taken').toBe(1);
+    expect(revealed?.alive, 'and it is still standing to be read').toBe(true);
+    // The other half of the composition: damage routes through damageUnit, which is where Ch.
+    // VIII's trigger 2 lives, so THIS push writes the thing into the Ledger.
+    expect(hasStatusId(revealed, 'unwritten'), 'being struck writes you — the bump consumed the Unwritten').toBe(false);
+    expect(await validTargets(page, 'strike'), 'and now Strike can see it, one blocked push later').toContain('lurker-0');
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('Shove itself is untouched by the Page\'s pushUnit reuse: still zero damage, blocked or landed — regression (Ch. VIII)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await passUntilPartyTurn(page, 'keeper');
+
+  await debugSetPos(page, 'wisp-1', 10, 6);
+  await debugSetPos(page, 'wraith-2', 10, 5);
+  // Adjacent and pinned against the west wall: a blocked Shove, the exact case where the Page
+  // bumps for 1 and Shove must still bump for nothing ({ bump: false } is Shove's alone).
+  await debugSetPos(page, 'keeper', 2, 1);
+  await debugSetPos(page, 'wisp-0', 1, 1);
+  const before = await pageUnit(page, 'wisp-0');
+
+  await page.keyboard.press('0'); // Shove hotkey
+  await tileClick(page, 1, 1);
+
+  await expect
+    .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+      timeout: 15_000,
+      message: 'the blocked Shove still spends the action',
+    })
+    .toBe(true);
+  const after = await pageSnap(page);
+
+  const shoved = await pageUnit(page, 'wisp-0');
+  expect({ c: shoved?.c, r: shoved?.r }, 'blocked by the west wall, same as ever').toEqual({ c: 1, r: 1 });
+  expect(shoved?.hp, "Shove's no-damage purity is intact — the Page's { bump: true } did not leak into it").toBe(before?.hp);
+  const last = after?.log[after.log.length - 1];
+  expect(last?.action).toBe('shove');
+  expect(last?.dmg, 'and it logs zero, as it always has').toBe(0);
+  expect((after?.log ?? []).some((l) => l.action === 'bump'), 'no bump entry anywhere — Shove suppresses it always').toBe(false);
 });

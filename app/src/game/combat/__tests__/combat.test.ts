@@ -836,6 +836,65 @@ describe('in-battle satchel (pure logic, inventory-handoff §10)', () => {
     expect(usableSatchelItems({ gold: 0, stacks: { 'ward-of-focus': 1 }, bornRelicId: null })).toEqual([]);
   });
 
+  // Ch. IX — the Sealed Page of the Geyser (push_blast) joins the combat-usable family. Like the
+  // Glow items it has NO field-use path at all (catalog.ts derives use:'combat'; consume.ts's
+  // useItem always refuses it outside battle), so the in-battle Satchel is the only place it can
+  // ever be read — which makes this filter the Page's sole route onto a screen.
+  it('usableSatchelItems surfaces the Sealed Page of the Geyser (push_blast) beside heals and tools, catalog order', () => {
+    const snap = {
+      gold: 0,
+      stacks: {
+        'embermend-draught': 1, 'sealed-page-geyser': 2, 'scriveners-hint': 1,
+        'ward-of-focus': 1, 'faded-coin-cache': 1,
+      },
+      bornRelicId: null,
+    };
+    const usable = usableSatchelItems(snap);
+    // Catalog order puts the Page after the glow items and before the tools (catalog.ts's own
+    // sectioning), so it lands between the draught and the Hint. The passive Ward and the
+    // trinket stay excluded exactly as before — widening the filter admitted one kind, not all.
+    expect(usable.map((u) => u.item.id)).toEqual(['embermend-draught', 'sealed-page-geyser', 'scriveners-hint']);
+    expect(usable[1].qty).toBe(2);
+  });
+
+  it('a zero-qty Sealed Page never surfaces — the crumble genuinely retires the row', () => {
+    expect(usableSatchelItems({ gold: 0, stacks: { 'sealed-page-geyser': 0 }, bornRelicId: null })).toEqual([]);
+    expect(usableSatchelItems({ gold: 0, stacks: { 'sealed-page-geyser': 1 }, bornRelicId: null }).map((u) => u.item.id))
+      .toEqual(['sealed-page-geyser']);
+  });
+
+  // Ch. IX — the Page's REACH predicate, pinned at the pure level because the choice is
+  // load-bearing and easy to "simplify" wrongly later. The chapter says "one enemy within reach
+  // 3"; reach 3 is the WRAITH's range idiom, and the wraith is `ranged: true`, so ai.ts reads it
+  // through hasLineOfFire (grid.ts's own doc: "Straight clear line-of-fire for a wraith — same
+  // row/col, within range, no walls/mist"), never manhattan. That is not a cosmetic difference:
+  // a push needs a Dir, CombatScene.dirTo is 4-way and returns null off the orthogonals, and a
+  // manhattan disk would admit diagonals the engine has no "away" for. Same predicate Ritual
+  // Sequence already uses for the other directional player action at range 3.
+  it('the Sealed Page reaches three tiles along a clear row/column — never a diagonal (the wraith idiom, not a manhattan disk)', () => {
+    const tiles = floorGrid(GRID_W, GRID_H);
+    const from = { c: 4, r: 3 };
+    const reach = 3;
+    // Straight lines out to 3, all four ways.
+    expect(hasLineOfFire(from, { c: 7, r: 3 }, reach, tiles)).toBe(true);
+    expect(hasLineOfFire(from, { c: 1, r: 3 }, reach, tiles)).toBe(true);
+    expect(hasLineOfFire(from, { c: 4, r: 0 }, reach, tiles)).toBe(true);
+    expect(hasLineOfFire(from, { c: 4, r: 6 }, reach, tiles)).toBe(true);
+    // A fourth tile out is past the reach, and the reader's own tile is not a target.
+    expect(hasLineOfFire(from, { c: 8, r: 3 }, reach, tiles)).toBe(false);
+    expect(hasLineOfFire(from, from, reach, tiles)).toBe(false);
+    // Diagonals are refused even when a manhattan disk of 3 would happily include them — this
+    // is the line the whole predicate choice turns on.
+    expect(manhattan(from, { c: 5, r: 4 })).toBeLessThanOrEqual(reach);
+    expect(hasLineOfFire(from, { c: 5, r: 4 }, reach, tiles)).toBe(false);
+    expect(hasLineOfFire(from, { c: 5, r: 5 }, reach, tiles)).toBe(false);
+    // A wall (or mist) in the channel stops the water-word, same as it stops the wraith's bolt.
+    const walled = floorGrid(GRID_W, GRID_H);
+    walled[3][6] = 'wall';
+    expect(hasLineOfFire(from, { c: 7, r: 3 }, reach, walled)).toBe(false);
+    expect(hasLineOfFire(from, { c: 5, r: 3 }, reach, walled)).toBe(true); // nearer than the wall — still reachable
+  });
+
   it('resolveHealUse restores the item amount, clamped to the caller-supplied maxPool', () => {
     expect(resolveHealUse(draught, 6, 16)).toMatchObject({ ok: true, nextPool: 12, gained: 6 });
     expect(resolveHealUse(draught, 12, 16)).toMatchObject({ ok: true, nextPool: 16, gained: 4 }); // clamps at 16
