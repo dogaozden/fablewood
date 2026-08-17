@@ -1168,13 +1168,15 @@ test('without the Unbroken Clasp borne: the first felling blow opens the Door di
 // through pushUnit with the bump ENABLED, and a blocked page-push bumps for 1 where a blocked
 // Shove bumps for nothing.
 //
-// REACH: hasLineOfFire(unit, e, 3, tiles) — the wraith's own range idiom (ai.ts:80 takes that
-// branch for `ranged: true`; grid.ts:259's doc names the wraith outright), NOT a manhattan disk.
-// The distinction is load-bearing rather than cosmetic: a push needs a Dir, CombatScene.dirTo is
-// 4-way and returns null off the orthogonals, and a manhattan disk would admit diagonals the
-// engine has no "away" direction for. Ritual Sequence — the other directional player action at
-// range 3 — already targets through this exact predicate. Pinned at the pure level too
-// (combat.test.ts, "the Sealed Page reaches three tiles along a clear row/column").
+// REACH, as the chapter now states it: "reach 3 down a straight, clear line — row or column,
+// walls and mist stand between; the wraith's own reach law (hasLineOfFire)". Not a manhattan
+// disk, and the distinction is load-bearing rather than cosmetic: a push needs a Dir,
+// CombatScene.dirTo is 4-way and returns null off the orthogonals, so a disk would admit
+// diagonals the engine has no "away" direction for. Ritual Sequence — the other directional
+// player action at range 3 — already targets through this exact predicate. Pinned at the pure
+// level too (combat.test.ts, "the Sealed Page reaches three tiles along a clear row/column"),
+// which is also where the walls-and-mist half of the law is pinned directly on hasLineOfFire;
+// the straight-line half gets its live pin below ("a diagonal foe cannot be paged at all").
 //
 // GEOMETRY: every scenario below plays on ROW 1, which is fully floor across cols 1-10 at
 // seed=7, with col 0 the west wall border (bestiary.spec.ts's own fixture dump, reused rather
@@ -1358,6 +1360,72 @@ test('the Sealed Page of the Geyser: read at reach 3, it pushes one tile, crumbl
     await expect(page.locator('.inv-row', { hasText: PAGE_NAME }), 'nothing left to read').toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('relics-sealed-page-spent.png') });
     await page.locator('.inv-close', { hasText: 'Never Mind' }).click({ timeout: 2_000 });
+  } finally {
+    await restoreLootState(page, beforeSave, beforeInv);
+  }
+});
+
+test('a diagonal foe cannot be paged at all, and refusing costs nothing — the straight-jet law, live (Ch. IX)', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const beforeSave = await readState<LootSave>(page, 'save.json');
+  const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+
+  try {
+    await page.request.put('/api/state/save.json', { data: { hp: 16 } });
+    await page.request.put('/api/state/inventory.json', {
+      data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
+    });
+
+    await page.goto('/?scene=combat&seed=7');
+    await waitReady(page, 'combat');
+    await passUntilPartyTurn(page, 'keeper');
+
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'wraith-2', 10, 5);
+    // The discriminating case for the whole predicate choice: wisp-0 sits DIAGONALLY adjacent at
+    // manhattan 2 — comfortably inside a manhattan-3 disk, and there is no other foe on the
+    // Keeper's row or column. Under a disk this would be a legal target the engine has no "away"
+    // direction for; under the ratified straight-line law it is simply not a target.
+    await debugSetPos(page, 'keeper', 4, 1);
+    await debugSetPos(page, 'wisp-0', 5, 2);
+    const before = await pageUnit(page, 'wisp-0');
+
+    await tapKey(page, 'q');
+    await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
+    await page.locator('.inv-row', { hasText: PAGE_NAME }).getByRole('button', { name: 'Use' }).click();
+    await page.locator('.inv-overlay').waitFor({ state: 'detached', timeout: 5_000 });
+
+    // Refused before anything is armed, in the house's own refusal vocabulary — never a silent
+    // no-op, which is precisely the failure mode a manhattan disk would have shipped.
+    await expect
+      .poll(() => bannerText(page), { timeout: 10_000, intervals: [50], message: 'the reach refusal' })
+      .toBe(`${PAGE_NAME}: no foe within reach.`);
+
+    const refused = await pageSnap(page);
+    expect(refused?.state, 'and it hands the turn straight back to the action menu').toBe('playerMove');
+    expect(refused?.budget.actionSpent, 'a refused pick costs no action').toBe(false);
+    expect(await pagesOnDisk(page), 'and no page was read').toBe(1);
+    expect({ c: before?.c, r: before?.r }, 'sanity: the diagonal foe never moved').toEqual({ c: 5, r: 2 });
+
+    // The control: step that SAME foe onto the Keeper's row at reach 3 — strictly FURTHER away in
+    // manhattan terms than the diagonal it was just refused at — and the Page reaches it fine.
+    // Alignment is the only thing that changed.
+    await debugSetPos(page, 'wisp-0', 7, 1);
+    await page.waitForTimeout(PANE_SETTLE_MS); // the pane's own reopen guard (see PANE_SETTLE_MS)
+    await readPageFromSatchel(page);
+    await waitForPageTargeting(page);
+    await tileClick(page, 7, 1);
+
+    await expect
+      .poll(async () => (await pageSnap(page))?.budget.actionSpent, {
+        timeout: 15_000,
+        message: 'the same foe, three tiles down a clear row, reads fine',
+      })
+      .toBe(true);
+    expect({ ...(await pageUnit(page, 'wisp-0')) }, 'pushed one tile along the line').toMatchObject({ c: 8, r: 1 });
+    await expect.poll(() => pagesOnDisk(page), { timeout: 10_000 }).toBe(0);
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
   }

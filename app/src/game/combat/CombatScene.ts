@@ -1515,15 +1515,17 @@ export class CombatScene extends Phaser.Scene {
    *  item, and giving it an action row would put a button on the bar for a thing most runs never
    *  carry), so it gets its own predicate here rather than a case in validTargets above.
    *
-   *  reach = hasLineOfFire, which IS the wraith's range idiom: ai.ts takes that branch for any
-   *  `ranged: true` archetype, and grid.ts's own doc names the wraith outright ("same row/col,
-   *  within range, no walls/mist"). A manhattan disk was the other reading and it does not work:
-   *  a push needs a Dir, dirTo is 4-way and returns null off the orthogonals, and a disk of 3
-   *  admits diagonals this engine has no "away" direction for — a rare item that silently did
-   *  nothing on a legal target. Ritual Sequence, the other directional player action at range 3,
-   *  already targets through this exact predicate. Consequences, both deliberate: mist and walls
-   *  stop the water-word the same way they stop the wraith's bolt, and a foe standing diagonally
-   *  cannot be paged at all — the Page is a straight jet, not a burst.
+   *  reach = hasLineOfFire, which the chapter now states outright: "reach 3 down a straight,
+   *  clear line — row or column, walls and mist stand between; the wraith's own reach law
+   *  (hasLineOfFire)". It IS the wraith's range idiom — ai.ts takes that branch for any
+   *  `ranged: true` archetype, and grid.ts's own doc names the wraith ("same row/col, within
+   *  range, no walls/mist"). A manhattan disk was the other reading and it cannot work: a push
+   *  needs a Dir, dirTo is 4-way and returns null off the orthogonals, so a disk of 3 admits
+   *  diagonals this engine has no "away" direction for — a rare item silently doing nothing on a
+   *  legal target. Ritual Sequence, the other directional player action at range 3, already
+   *  targets through this exact predicate. The two consequences are ratified as features: the
+   *  water-word needs a clear channel, and the Page is a straight jet, not a burst — line up the
+   *  shot. A foe standing diagonally cannot be paged even from one tile away.
    *
    *  isStrikeTargetable is deliberately ABSENT (controller ruling, 2026-08-17): the Page REACHES
    *  the Unwritten. Ch. VIII excludes Strikes and Shove by name and admits "spells and area
