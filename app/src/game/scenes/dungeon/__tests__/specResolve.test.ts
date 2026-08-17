@@ -12,6 +12,7 @@ import {
   archetypeError,
 } from '../specResolve';
 import type { DungeonSpec } from '../../../contracts';
+import devDungeon from '../__fixtures__/dev.dungeon.json';
 
 const quest = (id: string, title: string, region: string, reward?: Quest['reward']): Quest => ({
   id,
@@ -156,6 +157,16 @@ describe('archetype validation (Ch. VIII)', () => {
     expect(msg).toContain('lurker');
     expect(msg).toContain('husk');
     expect(msg).toContain('pall');
+  });
+
+  // Ch. VIII fix round 1 (M1) — the fixture map now runs through the same gate a pack's map does
+  // (DungeonScene.useFixture). This pins the in-repo map itself as buildable: it is the one map
+  // every ?dev=1 run and a dozen e2e specs actually walk, so a typo here would fail far from its
+  // cause. Guards the assertion too — a validator that silently accepted everything would pass
+  // this line for the wrong reason, so the negative case above is what gives it teeth.
+  it('the shipped dev fixture names only archetypes the engine can build', () => {
+    expect(unknownArchetypes(devDungeon as unknown as DungeonSpec)).toEqual([]);
+    expect(archetypeError(devDungeon as unknown as DungeonSpec, 'dev-fixture')).toBeNull();
   });
 
   it('tolerates a room with no enemies array and a non-string archetype', () => {

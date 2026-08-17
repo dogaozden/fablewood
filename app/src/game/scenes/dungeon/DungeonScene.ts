@@ -258,7 +258,19 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private useFixture(): void {
-    this.spec = devSpecJson as unknown as DungeonSpec;
+    const spec = devSpecJson as unknown as DungeonSpec;
+    // Ch. VIII fix round 1 — the fixture map gets the SAME archetype validation a pack's map gets
+    // (loadSpec, above). Skipping it here left the one map that ships IN this repo — the one
+    // every ?dev=1 run and a dozen e2e specs actually walk — with exactly the crash-at-combat-
+    // launch behaviour the chapter says this wave closes. That is the map where a typo is both
+    // most likely to be introduced and least likely to be caught by a player.
+    // Named 'dev-fixture' unconditionally, NOT this.packId: this function always validates the
+    // fixture map, but it is also reached on the non-dev fallbacks (no packs installed, named
+    // pack not found) where packId still holds a real pack id — which would point an author at
+    // a pack file to find a typo that lives in dev.dungeon.json.
+    const archetypeProblem = archetypeError(spec, 'dev-fixture');
+    if (archetypeProblem) throw new Error(archetypeProblem);
+    this.spec = spec;
     this.facts = toFactMap(devFactsJson as unknown as FactLite[]);
     this.pack = null;
   }
