@@ -253,6 +253,93 @@ test('bestiary scenario a: the rise toll — a Toppled Keeper stands at a price,
 });
 
 // ---------------------------------------------------------------------------------------
+// Task 8 sweep — "rise+stance compose in e2e?": the fix-round-1 test above already proves Press
+// On composes off the TOLLED base through the real CombatScene wiring (pressOn()'s own
+// `tolledMoveBase` read). Careful Step reads the SAME `tolledMoveBase` field but through a
+// SEPARATE call site (moveBudgetFor, invoked by toggleCarefulStep) that no e2e test had ever
+// exercised on a rising turn. turnBudget.test.ts's own compose-law describe block ("Mirrors the
+// Ch. VI describe block above exactly, substituting tollRise(eff) for eff") already proves the
+// PURE math identity at every base; this proves the real scene wiring reads the live
+// `tolledMoveBase` CombatScene.advanceTurn sets, not a stale or re-derived value — the same class
+// of wiring bug the Press On fix-round-1 pin above was written to catch.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario a: Careful Step also composes off the TOLLED base — a mid-turn stance toggle survives the rise', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await applyStatus(page, 'wisp-0', 'kindled', 1, 2); // dies at its own turn-start tick (hp 2)
+  await applyStatus(page, 'wraith-2', 'kindled', 1, 3); // dies at its own turn-start tick (hp 3)
+  await setPos(page, 'wisp-1', 11, 7); // exiled
+
+  await applyStatus(page, 'keeper', 'toppled', 1, 1);
+  await page.keyboard.press('7'); // end turn 1
+  const risen = await passUntilKeeper(page);
+  expect(risen.activeId).toBe('keeper');
+  expect(risen.budget.total, "sanity: the rise fired — tollRise(4) = 2 (scenario a's own proof, above)").toBe(2);
+
+  await page.keyboard.press('c'); // Careful Step toggle (measured-turn.spec.ts's own idiom)
+  const stanced = await waitForSnap(page, (s) => s?.budget.total === 1, 'Careful Step to compose off the tolled base');
+  expect(stanced.budget.total, 'Careful Step over the TOLLED base: carefulStepMove(2) = max(1, floor(2/2)) = 1').toBe(1);
+  expect(stanced.budget.left, 'a fresh toggle re-anchors left to the new total — nothing spent yet').toBe(1);
+  expect(stanced.budget.legSpent, 'toggling the stance alone spends no leg').toBe(false);
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 8 sweep FINDING — Ch. VIII's own text: "Damage vs a Toppled unit: adjacent attackers +1,
+// non-adjacent −1 (the ±1 idiom, both directions)." Traced to source before writing this pin:
+// computeHit (status.ts) is the engine's OWN documented single damage-modifier pipeline ("the
+// ONE damage-modifier pipeline (§3 rule 4) — the only place modifiers stack") — its formula reads
+// emboldened/weakened/daunted/unwritten-opening-tempo/flank/overglow/weld/rider/inked, and NO
+// term for a Toppled target or attacker-adjacency exists anywhere in it. meleeHit (CombatScene.ts,
+// Strike's own damage path) calls computeHit with exactly that parameter set — no Toppled/target
+// status, no adjacency flag beyond the unrelated `flank`. A repo-wide search for "toppled" outside
+// this test file turns up only the rise/consumption seam (advanceTurn), the status application on
+// a landed Shove/heave, and status.ts's label/glyph/stacking metadata — never a damage modifier.
+// This is not a missing e2e pin over working code; the mechanic itself was never wired. The pin
+// below is written to the CHAPTER's law and is expected to fail against HEAD — that failure IS
+// the finding, reported verbatim rather than fixed (app/ is out of scope for this task) or
+// softened to pass.
+// ---------------------------------------------------------------------------------------
+test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled target (Ch. VIII\'s ±1 idiom)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6); // exiled — scenario b/c's own spot
+  await setPos(page, 'wraith-2', 8, 6); // exiled off row AND column — scenario c's own note
+  await setPos(page, 'keeper', 5, 1);
+  await setPos(page, 'wisp-0', 6, 1); // adjacent
+
+  // --- control: an undaunted, un-toppled Strike (scenario c's own control idiom).
+  await page.keyboard.press('1'); // Strike hotkey
+  await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
+  await canvasClick(page, tileXY(6, 1).x, tileXY(6, 1).y);
+  const afterControl = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the control Strike to resolve');
+  const controlDealt = afterControl.log.at(-1)?.dmg ?? -1;
+  expect(controlDealt, 'sanity: the plain base, no modifiers in this fixture').toBe(1);
+
+  await setPos(page, 'wraith-2', 8, 6); // re-exile before ending the turn (scenario c's own note)
+  await page.keyboard.press('7'); // end turn 1
+
+  // --- test: the SAME Strike, now against a Toppled wisp-0, from the SAME adjacent tile.
+  const turn2 = await passUntilKeeper(page);
+  expect(turn2.activeId).toBe('keeper');
+  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'keeper', 5, 1);
+  await applyStatus(page, 'wisp-0', 'toppled', 1, 1);
+
+  await page.keyboard.press('1'); // Strike hotkey
+  await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
+  await canvasClick(page, tileXY(6, 1).x, tileXY(6, 1).y);
+  const afterToppled = await waitForSnap(page, (s) => s?.state !== 'resolving', 'the Strike-vs-Toppled to resolve');
+  const toppledDealt = afterToppled.log.at(-1)?.dmg ?? -1;
+  expect(toppledDealt, "Ch. VIII: an adjacent attacker deals +1 against a Toppled target — see the FINDING note above if this fails").toBe(controlDealt + 1);
+});
+
+// ---------------------------------------------------------------------------------------
 // Scenario a (latch): the same Toppled-Keeper rise, now proving its opportunity latch is
 // disabled for the rest of that round. Geometry (empirically verified against seed=7's actual
 // floor/wall/gold layout — hand-derived coordinates alone were not reliable here; see
@@ -486,6 +573,46 @@ test('bestiary scenario b: a landed Shove knocks Toppled, and a non-first unit\'
   await page.waitForTimeout(250);
   const keeperHpAfterR3 = await unitState(page, 'keeper');
   expect(keeperHpAfterR3?.hp, "round 3: husk-0's latch has re-armed — the Keeper takes the opportunity strike").toBe((keeperHpBeforeR3?.hp ?? 0) - 1);
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 8 sweep — "blocked-Shove-no-damage on all three block causes?": forceMove (grid.ts) has
+// three distinct block branches — !inBounds, a wall/mist tile, and an OCCUPIED landing tile —
+// and only the wall branch (scenario b's own second test, above) had e2e coverage. The true
+// out-of-bounds branch is structurally unreachable through any legally-positioned unit: every
+// room's border ring is unconditionally wall-typed (grid.ts's buildLayout), so a push that would
+// leave the grid always fails the wall check first for anything that could legally stand adjacent
+// to it — covered in effect by the wall case, not a separate reachable law. This closes the
+// remaining REACHABLE gap: a push blocked by another unit already standing on the landing tile.
+// ---------------------------------------------------------------------------------------
+test('bestiary scenario b: a Shove blocked by an OCCUPIED landing tile also spends the action with zero damage', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/?scene=combat&seed=7');
+  await waitReady(page, 'combat');
+  await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
+
+  await setPos(page, 'wisp-1', 10, 6); // exiled — scenario b's own idiom
+
+  // Keeper(5,1) shoves wisp-0(6,1) east — the landing tile (7,1) is occupied by wraith-2, not a
+  // wall (row 1 is fully floor across cols 1-10, task-2-report.md's own fixture dump, reused
+  // verbatim by scenario b/c above).
+  await setPos(page, 'keeper', 5, 1);
+  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'wraith-2', 7, 1); // occupies the landing tile
+  const before = await unitState(page, 'wisp-0');
+  expect(before?.hp, 'sanity: wisp-0 starts at full hp').toBe(2);
+
+  await page.keyboard.press('0'); // Shove hotkey
+  await canvasClick(page, tileXY(6, 1).x, tileXY(6, 1).y);
+
+  const blocked = await waitForSnap(page, (s) => s?.budget.actionSpent === true, 'the occupied-blocked Shove to still spend the action');
+  expect(blocked.log[blocked.log.length - 1]?.action, 'the blocked Shove still logs').toBe('shove');
+  expect(blocked.log[blocked.log.length - 1]?.dmg, 'the occupied-blocked Shove still deals ZERO damage').toBe(0);
+
+  const afterPos = await unitPos(page, 'wisp-0');
+  expect(afterPos, 'wisp-0 did not move — the landing tile was occupied').toEqual({ c: 6, r: 1 });
+  const afterHp = await unitState(page, 'wisp-0');
+  expect(afterHp?.hp, 'still zero damage — the bump is suppressed for Shove, always, even on an occupied block').toBe(before?.hp ?? 2);
 });
 
 // ---------------------------------------------------------------------------------------

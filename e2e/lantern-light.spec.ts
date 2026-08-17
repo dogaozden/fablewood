@@ -455,6 +455,76 @@ test.describe('Lantern-light (Wave 5, Ch. IV)', () => {
     }
   });
 
+  // Wave 8 (Bestiary) Task 8 — carried from Task 7's review: an ORDER encounter (Ritual
+  // Sequence, hotkey '4') is the one kind where Enter's COMMIT is a preventDefault kind, not a
+  // click. mcq's Enter (kinds.ts renderMcq) never has its own onKey case for 'Enter' at all — a
+  // focused, non-struck `data-commit` option answers it via the BROWSER's native
+  // Enter-on-focused-button behavior, which fires a real click event that the lantern's
+  // click-based isCommitTarget disarm also catches (redundant with the keydown path). order's own
+  // onKey (kinds.ts renderOrder) calls e.preventDefault() before calling submit() directly —
+  // suppressing that native click entirely, so no click event ever fires for an Enter-driven
+  // order commit. The keydown live-set check (isCommitKey, fed by the renderer's own
+  // setLiveCommitKeys(['Enter'])) is therefore the SOLE disarm gate here — this pin is the one
+  // that would actually catch a regression in that wiring, unlike an mcq-based raise test where
+  // the click path would still catch it even if isCommitKey were broken.
+  //
+  // Uses the packless `?scene=combat` route (miras-stall.spec.ts's own idiom for Smite/Cast):
+  // unlike the redraw-content tests above, this pin never needs to prove WHICH memory surfaced,
+  // only that an order encounter rendered and Enter committed it — the T4 fix-round note's
+  // prompt-text caveat doesn't apply.
+  test("an ORDER encounter's Enter commit disarms the lantern raise — the keydown live set is its sole gate (no click co-fires, unlike mcq)", async ({ page }) => {
+    test.setTimeout(90_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '', lanternLight: true },
+      });
+
+      await page.goto('/?scene=combat&seed=7&rank=1');
+      await waitReady(page, 'combat');
+
+      const opened = await waitForKeeperTurn(page);
+      expect(opened?.state, "the Keeper's first turn opened for manual control").toBe('playerMove');
+
+      // combat-magic.spec.ts's own proven-safe (5,3)/(6,3) — same row, adjacent, well within
+      // Sequence's range 3 and hasLineOfFire's same-row requirement (grid.ts).
+      await debugSetPos(page, 'keeper', 5, 3);
+      await debugSetPos(page, 'wisp-0', 6, 3);
+
+      await page.keyboard.press('4'); // Ritual Sequence (T1 Ritecraft, order)
+      await page.waitForTimeout(150); // a bare `.press()` can race Phaser's own frame-tick handling
+      expect((await combatSnap(page))?.state, 'Rank 1 goes straight to targeting').toBe('playerTarget');
+
+      await canvasClick(page, 192 + 6 * 48 + 24, 48 + 3 * 48 + 24); // wisp-0's tile
+
+      await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+      await expect(page.locator('.fw-step').first(), 'the order (Ritual Sequence) overlay rendered').toBeVisible();
+      await page.waitForTimeout(450); // past overlay.ts's paint-anchored 400ms arm guard
+
+      await expect(page.locator('.fw-lantern-btn'), 'lanternLight:true shows the raise affordance').toBeVisible();
+
+      await page.keyboard.press('Enter'); // commits the sequence AND (via the keydown live set) disarms the raise
+
+      // The overlay stays open — order's submit() (kinds.ts) renders a verdict + continue button
+      // but does not resolve()/close() on its own — so the lantern strip's absence below is
+      // proof the DISARM fired, not just that the whole overlay tore down underneath it.
+      await expect(page.locator('.fw-overlay'), 'the overlay is still open — Enter committed, not closed').toBeVisible();
+      await expect(
+        page.locator('.fw-lantern-btn'),
+        "Enter's commit disarmed the raise — the strip is gone even though the overlay is still up",
+      ).toHaveCount(0);
+
+      // let the battle continue cleanly.
+      const cont = page.getByRole('button', { name: 'Onward ▸' });
+      await cont.waitFor({ state: 'visible', timeout: 10_000 });
+      await cont.click();
+      await page.locator('.fw-overlay').waitFor({ state: 'detached', timeout: 10_000 });
+    } finally {
+      await restoreSave(page, beforeSave);
+    }
+  });
+
   test('Wellspring round: raising the lantern re-presents a different memory and spends the light', async ({ page }) => {
     test.setTimeout(90_000);
     const beforeSave = await readState<Save>(page, 'save.json');
