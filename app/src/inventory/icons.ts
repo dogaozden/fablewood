@@ -5,8 +5,12 @@
  * canvas, the same frameCanvas approach as art/buildTextures.ts but data-URL'd
  * instead of registered as a Phaser texture.
  *
- * Gate-reviewed (all six axes ≥4, 2 iterations): docs/art-reviews/item-icons-v1.md.
- * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png.
+ * Gate-reviewed (all six axes ≥4, 2 iterations): docs/art-reviews/item-icons-v1.md (first 14
+ * icons — draughts/tools/trinkets/relic families) and docs/art-reviews/item-icons-relics.md
+ * (Wave 9 Ch. IX: 4 new relics + 2 new wares, plus the Warden Signet re-scored on the
+ * parchment pane per the in-engine value law).
+ * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png and
+ * docs/art-reviews/item-icons-relics/*.json + *-iter{1,2}.png (+ in-engine pane screenshots).
  */
 import { PAL_CHAR } from '../art/palette';
 
@@ -278,6 +282,123 @@ const wardenSignetOfTerms = [
   '................',
 ] as const;
 
+// -- Wave 9 (Concordance Ch. IX): 4 new relics + 2 new wares, gate-reviewed on the parchment
+// pane per the in-engine value law: docs/art-reviews/item-icons-relics.md.
+
+const unbrokenClasp = [
+  '................',
+  '......xTTx......',
+  '......xTTx......',
+  '..xxxxxxxxxxxx..',
+  '..xttttttttttx..',
+  '..xtkkkkkkkktx..',
+  '..xtkAAAAAAktx..',
+  '..xtkkkkkkkktx..',
+  '..xTTTTTTTTTTx..',
+  '..xxxxxxxxxxxx..',
+  '......xTTx......',
+  '......xTTx......',
+  '................',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const waymarkHeel = [
+  '................',
+  '.....xxxxxx.....',
+  '.....xnnnnx.....',
+  '....xnssssnx....',
+  '....xnkkssnx....',
+  '....xnssssnx....',
+  '...xnssssssnx...',
+  '...xnssssssnx...',
+  '...xnnnnnnnnx...',
+  '..xgmgmgmgmgmx..',
+  '..xxxxxxxxxxxx..',
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const marginLamp = [
+  '................',
+  '.......xx.......',
+  '......xTTx......',
+  '......xTTx......',
+  '.....xTGGTx.....',
+  '....xTGWWGTx....',
+  '....xTGWWGTx....',
+  '....xTGGGGTx....',
+  '.....xTAATx.....',
+  '......xEEx......',
+  '...xcTTTTTTcx...',
+  '...xKKKKKKKKx...',
+  '................',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const secondWick = [
+  '................',
+  '.....xttttx.....',
+  '....xtTTTTtx....',
+  '....xtTTTTtx....',
+  '.....xxssxx.....',
+  '....xtTTTTtx....',
+  '....xtTTTTtx....',
+  '.....xttttx.....',
+  '......xTTx......',
+  '.......xx.......',
+  '........e.......',
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const sealedPageGeyser = [
+  '................',
+  '.....xxxxxx.....',
+  '....xEEEEEEx....',
+  '...xEAAAAAAEx...',
+  '...xEAAwwAAEx...',
+  '...xEAAAAAAEx...',
+  '....xEEEEEEx....',
+  '.....xxxxxx.....',
+  '...xnssssssnx...',
+  '...xnssssssnx...',
+  '....xnnnnnnx....',
+  '................',
+  '................',
+  '................',
+  '................',
+  '................',
+] as const;
+
+const superiorDraught = [
+  '................',
+  '......xxxx......',
+  '.....xtTTtx.....',
+  '.....xKEEKx.....',
+  '......xEEx......',
+  '.....xcAAcx.....',
+  '....xxcAAcxx....',
+  '...xcWAAAAecx...',
+  '..xcWAAAAAeecx..',
+  '..xcAAAAAeeecx..',
+  '...xAAAeeeEcx...',
+  '....xAAeeEEx....',
+  '....xAeeEEEx....',
+  '.....xeEEEx.....',
+  '......xxxx......',
+  '................',
+] as const;
+
 /** itemId (catalog.ts) -> 16×16 grid. Every CATALOG entry has one. */
 export const ICONS: Record<string, readonly string[]> = {
   'embermend-draught': embermendDraught,
@@ -294,6 +415,12 @@ export const ICONS: Record<string, readonly string[]> = {
   'amber-writ-seal': amberWritSeal,
   'gilded-ledger-bead': gildedLedgerBead,
   'warden-signet-of-terms': wardenSignetOfTerms,
+  'unbroken-clasp': unbrokenClasp,
+  'waymark-heel': waymarkHeel,
+  'margin-lamp': marginLamp,
+  'second-wick': secondWick,
+  'sealed-page-geyser': sealedPageGeyser,
+  'superior-draught': superiorDraught,
 };
 
 /** One grid -> a canvas at `scale` (nearest-neighbor); '.' and off-palette = transparent. */
