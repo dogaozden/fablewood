@@ -14,6 +14,11 @@ import {
 // Pure, no-Phaser module (same precedent as miras-stall.spec.ts's own buildLayout import) —
 // reuse the shipped constant rather than re-typing the literal (avoids drift/typos).
 import { WICK_CATCH_LINE } from '../app/src/game/lantern';
+// Fix round 2 addendum — the SAME pure resolver CombatScene itself calls (previewPick wraps
+// this verbatim), imported directly so the redraw-pool precondition below is checked the real
+// way, not merely assumed from an external probe run once during authoring.
+import { pick } from '../app/src/game/encounters/engine';
+import type { Pack } from '../app/src/packs/types';
 
 /**
  * Concordance Ch. IX — "held is the mechanic, borne is the choice." A relic derives
@@ -530,6 +535,50 @@ async function seedWickCastFacts(page: Page): Promise<void> {
   expect(res.ok(), 'seeded the two known-distinct-encounter facts').toBe(true);
 }
 
+/**
+ * Fix round 2 addendum — the fixture's own load-bearing premise, proven structurally rather
+ * than assumed from an external probe run once during authoring (the W8 headroom-assertion
+ * precedent, miras-stall.spec.ts's buildLayout check: "an 'assert exact outcome' pin alone
+ * would NOT catch a regression against this precondition — asserting the precondition is what
+ * actually makes the pin self-defending"). Calls the REAL, pure engine.pick() — the exact
+ * function CombatScene's own previewPick wraps for its wouldBe===result.encounterId safety
+ * net — so this can never silently drift out of sync with how the app itself resolves a
+ * redraw. If a future pack edit ever collapsed these two facts back onto one encounter, THIS
+ * assertion fails here, loudly and first — never masquerading as a wiring failure three steps
+ * later at a bannerText() mismatch.
+ *
+ * Task 10 (the wave sweep) addendum — the fragility spelled out in numbers, independently
+ * re-counted against the live pack rather than taken on trust from an earlier report:
+ * packs/vc-law/pack.json carries 42 facts total; exactly 7 are prerequisite-free; of those 7,
+ * exactly 2 resolve to ANY mcq encounter at all — WICK_CAST_FACT_A
+ * ('vc.econ.valuation.pre-vs-post-money' -> 'enc.mcq.pre-post-money') and WICK_CAST_FACT_B
+ * ('vc.econ.vesting.four-year-one-year-cliff' -> 'enc.mcq.vesting-standard'). The other 5
+ * prerequisite-free facts resolve to non-mcq encounters or none at all. So this named pair
+ * isn't merely today's convenient choice — it is the pack's ONLY possible prerequisite-free,
+ * distinct-mcq pair, which is exactly why this assertion (not a comment, not a one-off probe)
+ * has to be the thing that catches a future pack edit that closes the gap.
+ */
+async function assertWickCastFactsResolveToDistinctEncounters(page: Page): Promise<void> {
+  const res = await page.request.get('/api/packs');
+  expect(res.ok(), 'read installed packs').toBe(true);
+  const { packs: entries } = (await res.json()) as { packs: Array<{ pack: Pack }> };
+  const packs = entries.map((e) => e.pack);
+  const home = packs.find((p) => p.facts.some((f) => f.id === WICK_CAST_FACT_A));
+  expect(home, 'the pack installing the two seeded facts is present').toBeTruthy();
+
+  const resolve = (factId: string) =>
+    pick({ context: 'combat', kinds: ['mcq'], factIds: [factId], packId: home!.meta.id }, packs);
+  const encA = resolve(WICK_CAST_FACT_A);
+  const encB = resolve(WICK_CAST_FACT_B);
+  expect(encA, 'fact A resolves to a real mcq encounter').not.toBeNull();
+  expect(encB, 'fact B resolves to a real mcq encounter').not.toBeNull();
+  expect(
+    encA!.id,
+    'the two seeded facts resolve to GENUINELY DISTINCT encounters — checked the same way ' +
+      'the app itself resolves a redraw, not merely assumed from a one-off probe',
+  ).not.toBe(encB!.id);
+}
+
 /** Enter room.threshold via the real vaults map and ride the teaching cards to combat launch —
  *  lantern-light.spec.ts's own "combat cast" drive, cloned verbatim (own-file convention). A
  *  REAL packId is required here, not the packless dev fixture: that file's own file-level note
@@ -574,6 +623,7 @@ test('CombatScene T1 cast site: the catch banner is the exact verbatim string (F
       data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
     });
     await seedWickCastFacts(page); // seed BEFORE goto — the due queue must see it from boot
+    await assertWickCastFactsResolveToDistinctEncounters(page); // the fixture's own premise, proven
 
     await enterThresholdCombat(page, 1);
 
@@ -633,6 +683,7 @@ test('CombatScene T2/T3 cast site: the catch banner is the exact verbatim string
       data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
     });
     await seedWickCastFacts(page); // seed BEFORE goto — the due queue must see it from boot
+    await assertWickCastFactsResolveToDistinctEncounters(page); // the fixture's own premise, proven
 
     await enterThresholdCombat(page, 2);
 
