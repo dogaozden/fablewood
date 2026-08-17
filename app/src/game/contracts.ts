@@ -226,6 +226,13 @@ export interface SaveData {
    *  advantage; game/lantern.ts + the spend sites own the rules. Optional, additive: old
    *  consumers unaffected, same `?? `-default pattern as `xp?`/`level?`. */
   lanternLight?: boolean;
+  /** Concordance Ch. IX — the Second Wick relic's once-per-rest-cycle catch: true once the
+   *  catch has fired this cycle (the Wick already re-banked one spend since the last hearth
+   *  rest). Reset to false at every hearth rest (HamletScene.doCottage, beside lanternLight's
+   *  own grant) — game/lantern.ts's spendLanternLight() owns the read+write. Absent = false =
+   *  catch available (correct default for saves predating the relic — nobody is mid-cycle).
+   *  Optional, additive, same `?? `-default pattern as lanternLight itself. */
+  wickCaught?: boolean;
   /** Cumulative XP (Concordance Ch. III). Absent = 0 — legacy saves start the spine at L1
    *  with no catch-up grant (W4 controller ruling). progression/xp.ts owns every number. */
   xp?: number;
