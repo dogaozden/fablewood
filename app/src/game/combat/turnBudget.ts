@@ -59,11 +59,13 @@ export function stanceLocked(b: TurnBudget): boolean {
 }
 
 /** Ch. VIII — the rise toll: a Toppled unit stands automatically at its own turn start, and
- *  that turn's movement base is halved (the house halving: floor, min 1 — same shape as
- *  carefulStepMove, but a separate law) BEFORE anything else touches it. Composition order is
- *  law: rise-toll first, stance second — CombatScene applies this to the raw effectiveMove
+ *  that turn's movement base is halved (the house halving: floor, min 1 for a MOBILE unit —
+ *  same shape as carefulStepMove, but a separate law) BEFORE anything else touches it. Zero-
+ *  preserving (fix round, I1): the min-1 floor guards the halving of a nonzero base, it never
+ *  resurrects a zero another law (e.g. Bound's effectiveMove) already made. Composition order
+ *  is law: rise-toll first, stance second — CombatScene applies this to the raw effectiveMove
  *  once, at turn start, then Careful Step/Press On compose over the TOLLED result exactly as
  *  they would over any other base (Ch. VI's identity holds relative to it). */
 export function tollRise(base: number): number {
-  return Math.max(1, Math.floor(base / 2));
+  return base === 0 ? 0 : Math.max(1, Math.floor(base / 2));
 }

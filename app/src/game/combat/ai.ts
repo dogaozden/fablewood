@@ -25,9 +25,12 @@ export interface AiIntent {
   carefulStep: boolean;
 }
 
-/** §4.2 Careful Step math: half move, floor, minimum 1. */
+/** §4.2 Careful Step math: half move, floor, minimum 1 for a MOBILE unit. Zero-preserving
+ *  (fix round, I1 — tollRise's pre-existing sibling): the min-1 floor guards the halving of
+ *  a nonzero base, it never resurrects a zero another law (e.g. Bound's effectiveMove)
+ *  already made. */
 export function carefulStepMove(baseMove: number): number {
-  return Math.max(1, Math.floor(baseMove / 2));
+  return baseMove === 0 ? 0 : Math.max(1, Math.floor(baseMove / 2));
 }
 
 /**
