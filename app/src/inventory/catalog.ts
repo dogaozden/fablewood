@@ -15,6 +15,12 @@ export type ItemEffect =
   | { kind: 'reveal_option' } // trial aid (deferred): strike one false MCQ option
   | { kind: 'retry_cast' } // trial aid (deferred): retry a failed cast (combat outcome only)
   | { kind: 'streak_shield' } // trial aid (deferred): hold the streak through one stumble
+  | { kind: 'edge_loot' } // relic passive (Concordance Ch. IX): loot rolls edged while borne
+  | { kind: 'fell_guard' } // relic passive (Ch. IX): once a battle, the first fall is caught at 1 HP
+  | { kind: 'move_base'; amount: 1 } // relic passive (Ch. IX): party movement base +1
+  | { kind: 'begin_written' } // relic passive (Ch. IX): enemies never spawn Unwritten
+  | { kind: 'rest_light'; amount: 1 } // relic passive (Ch. IX): +1 Lantern-light per hearth rest
+  | { kind: 'push_blast'; reach: 3; tiles: 1 } // combat consumable (Ch. IX): the Sealed Page's push
   | { kind: 'none' };
 
 export interface ItemDef {
@@ -53,6 +59,25 @@ export const RARITY_META: Record<
   legendary: { label: 'Legendary', chip: '#f7ce6b', chipInk: '#241a14', name: '#a65420' }, // lantern-gold → deep-ember text
 };
 
+/** Where a use-effect surfaces (kept explicit on ItemDef for the UI). Combat-only effects (Glow,
+ *  the Sealed Page's push) route to the battle Satchel; relic passives (Ch. IX) are never "used"
+ *  via a button at all — holding/bearing IS the mechanic — so they derive null, same as 'none'. */
+function deriveUse(kind: ItemEffect['kind']): ItemDef['use'] {
+  switch (kind) {
+    case 'heal':
+      return 'field';
+    case 'glow':
+    case 'push_blast':
+      return 'combat';
+    case 'reveal_option':
+    case 'retry_cast':
+    case 'streak_shield':
+      return 'trial';
+    default:
+      return null; // 'none' + the five relic passives
+  }
+}
+
 const item = (
   id: string,
   name: string,
@@ -70,7 +95,7 @@ const item = (
   flavor,
   value,
   icon: id,
-  use: effect.kind === 'heal' ? 'field' : effect.kind === 'glow' ? 'combat' : effect.kind === 'none' ? null : 'trial',
+  use: deriveUse(effect.kind),
   sellable: type === 'trinket',
 });
 
@@ -83,11 +108,17 @@ export const CATALOG: readonly ItemDef[] = [
     'Bottled hearthlight — drink deep and the ache recedes.'),
   item('wardancers-restorative', "Wardancer's Restorative", 'rare', 'consumable', { kind: 'heal', amount: 999 }, 90,
     "Full vigor, distilled from a Warden's mercy."),
+  item('superior-draught', 'Superior Draught', 'rare', 'consumable', { kind: 'heal', amount: 24 }, 80,
+    "A heavier cordial than the shelf usually stocks, poured only for those who've earned it."),
   // -- glow (combat-only; the Five Arts' Glow economy, magic-combat-depth §11.1) --
   item('wick-tallow', 'Wick-Tallow', 'common', 'consumable', { kind: 'glow', amount: 1 }, 25,
     'Render of old lantern-tallow — the wick drinks it greedily.'),
   item('lantern-brand', 'Lantern-Brand', 'rare', 'consumable', { kind: 'glow', amount: 2 }, 70,
     "A splint from the First Lantern's own fire, banked in wax."),
+  // -- combat scroll (single-use push; Concordance Ch. IX, the Decanter's third word written down) --
+  item('sealed-page-geyser', 'Sealed Page of the Geyser', 'rare', 'consumable',
+    { kind: 'push_blast', reach: 3, tiles: 1 }, 80,
+    'One word of an old command, copied out and sealed in wax — good for a single reading, then just paper.'),
   // -- tools (trial-only encounter aids; usable hook is deferred to combat) --
   item('scriveners-hint', "Scrivener's Hint", 'common', 'tool', { kind: 'reveal_option' }, 25,
     'A margin-note that strikes one false answer from the page.'),
@@ -106,9 +137,17 @@ export const CATALOG: readonly ItemDef[] = [
     'A writ sealed in true amber — the Terms inside still legible after an age.'),
   item('gilded-ledger-bead', 'Gilded Ledger-Bead', 'legendary', 'trinket', { kind: 'none' }, 500,
     "One bead from the First Ledger's abacus. It counts, quietly, on its own."),
-  // -- relic (quest keepsake, never sellable) --
-  item('warden-signet-of-terms', 'Warden Signet of Terms', 'legendary', 'relic', { kind: 'none' }, 0,
+  // -- relics (quest keepsakes, never sellable; one borne at a time — Concordance Ch. IX) --
+  item('warden-signet-of-terms', 'Warden Signet of Terms', 'legendary', 'relic', { kind: 'edge_loot' }, 0,
     "The Vault-Warden's own seal. Proof you argued the Terms and won."),
+  item('unbroken-clasp', 'Unbroken Clasp', 'rare', 'relic', { kind: 'fell_guard' }, 0,
+    "It caught the wearer once, when catching mattered most — a clasp like that doesn't forget."),
+  item('waymark-heel', 'Waymark Heel', 'uncommon', 'relic', { kind: 'move_base', amount: 1 }, 0,
+    'Cobbled from an old waymark stone; wear it, and the road gives a little more with every step.'),
+  item('margin-lamp', 'Margin Lamp', 'rare', 'relic', { kind: 'begin_written' }, 0,
+    'Held to the page, its small light reads what the margins tried to hide.'),
+  item('second-wick', 'Second Wick', 'uncommon', 'relic', { kind: 'rest_light', amount: 1 }, 0,
+    'A spare wick, kept trimmed and ready — the hearth burns a little longer for having it near.'),
 ];
 
 const BY_ID = new Map(CATALOG.map((i) => [i.id, i]));

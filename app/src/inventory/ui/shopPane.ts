@@ -28,6 +28,18 @@ export function effectLabel(item: ItemDef): string {
       return 'Retry a failed cast in a trial';
     case 'streak_shield':
       return 'Holds your Vigil through a stumble in a trial';
+    case 'edge_loot':
+      return 'Loot rolls are edged while borne';
+    case 'fell_guard':
+      return 'Once a battle, the first fall is caught at 1 HP';
+    case 'move_base':
+      return 'Every step reaches a tile further (+1 move)';
+    case 'begin_written':
+      return 'Enemies begin combat written';
+    case 'rest_light':
+      return 'Each hearth rest banks +1 Lantern-light';
+    case 'push_blast':
+      return 'Push a foe one tile, from three away';
     case 'none':
       return '';
   }
