@@ -51,23 +51,29 @@ describe('catalog integrity — ids are state-referenced and must stay coherent'
     expect(itemById('lantern-brand')).toMatchObject({ use: 'combat', sellable: false, effect: { kind: 'glow', amount: 2 } });
   });
 
-  it('shopStock() = the 8 staples plus the two new Ch. IX wares leaking in pre-rotation (T4 reshapes this; catalog order)', () => {
-    // shopStock() filters by type alone (consumable|tool) — untouched this task (Task 4 owns
-    // rotation). superior-draught and sealed-page-geyser are both type:'consumable', so they
-    // appear here unconditionally until T4 adds the staples-vs-rotating-pool distinction. This
-    // is the expected, flagged consequence of Ch. IX's catalog growth, not a shopStock() change.
-    expect(shopStock().map((i) => i.id)).toEqual([
+  it('shopStock(dateKey) = the 8 staples (catalog order) + the 2 rotating wares appended, ten rows today (Ch. IX rotation law — T4)', () => {
+    // Rotation law (Concordance Ch. IX): the eight staples stand forever, grouped first; two
+    // rotating shelf slots are appended after. The rotating pool is exactly two wares today
+    // (superior-draught, sealed-page-geyser), so every dateKey shows both — the "pool smaller
+    // than slots" case, proven generally in catalog.test.ts's pickRotatingWares suite with a
+    // synthetic larger pool.
+    expect(shopStock(20260817).map((i) => i.id)).toEqual([
       'embermend-draught',
       'lanternoil-tonic',
       'wardancers-restorative',
-      'superior-draught',
       'wick-tallow',
       'lantern-brand',
-      'sealed-page-geyser',
       'scriveners-hint',
       'second-wind-seal',
       'ward-of-focus',
+      'superior-draught',
+      'sealed-page-geyser',
     ]);
+  });
+
+  it('shopStock(dateKey): same dateKey -> same shelf; today\'s 2-item pool shows both regardless of dateKey', () => {
+    expect(shopStock(1).map((i) => i.id)).toEqual(shopStock(1).map((i) => i.id));
+    expect(shopStock(1).map((i) => i.id)).toEqual(shopStock(999999).map((i) => i.id));
   });
 
   it('a fresh purse affords exactly one cheap draught', () => {
@@ -215,5 +221,27 @@ describe('rollRarityEdged (Concordance Ch. IV advantage primitive)', () => {
     // regression pin: same seed → same result with the param omitted
     expect(roomClearLoot(2, mulberry32(42))).toEqual(roomClearLoot(2, mulberry32(42), 'none'));
     expect(bossLoot(mulberry32(42))).toEqual(bossLoot(mulberry32(42), 'none'));
+  });
+});
+
+describe('edged param — Concordance Ch. IX, the Warden Signet of Terms (routes through rollRarityEdged, never reimplements it)', () => {
+  it('roomClearLoot: edged:true is byte-identical to an explicit edge:"advantage"', () => {
+    expect(roomClearLoot(2, mulberry32(7), 'none', true)).toEqual(roomClearLoot(2, mulberry32(7), 'advantage'));
+  });
+  it('bossLoot: edged:true is byte-identical to an explicit edge:"advantage"', () => {
+    expect(bossLoot(mulberry32(7), 'none', true)).toEqual(bossLoot(mulberry32(7), 'advantage'));
+  });
+  it('roomClearLoot/bossLoot: edged omitted defaults to false — byte-identical to today', () => {
+    expect(roomClearLoot(2, mulberry32(42))).toEqual(roomClearLoot(2, mulberry32(42), 'none', false));
+    expect(bossLoot(mulberry32(42))).toEqual(bossLoot(mulberry32(42), 'none', false));
+  });
+  it('edge:"advantage" AND edged:true together never stack — same roll count as advantage alone', () => {
+    const countCalls = (edged: boolean): number => {
+      let calls = 0;
+      const rng = () => { calls += 1; return calls === 2 ? 0.1 : 0.5; }; // call 2 clears the 35% trinket gate
+      roomClearLoot(0, rng, 'advantage', edged);
+      return calls;
+    };
+    expect(countCalls(true)).toBe(countCalls(false));
   });
 });

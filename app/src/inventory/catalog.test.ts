@@ -5,7 +5,7 @@
  * file covers only what's new this wave.
  */
 import { describe, expect, it } from 'vitest';
-import { CATALOG, itemById, type ItemEffect } from './catalog';
+import { CATALOG, dateKeyOf, itemById, pickRotatingWares, type ItemEffect } from './catalog';
 
 describe('ItemEffect union — the six Ch. IX kinds construct with their exact literal shape', () => {
   it('each new kind is constructible as an ItemEffect', () => {
@@ -114,5 +114,42 @@ describe('catalog — Ch. IX growth to twenty (six new ids + the Signet awakenin
       rarity: 'rare',
       effect: { kind: 'heal', amount: 24 },
     });
+  });
+});
+
+describe('pickRotatingWares — Ch. IX rotation law, seeded pick generalized for a future bigger pool', () => {
+  it('pool.length <= slots returns the whole pool, in pool order, regardless of dateKey', () => {
+    expect(pickRotatingWares(['a', 'b'], 2, 1)).toEqual(['a', 'b']);
+    expect(pickRotatingWares(['a', 'b'], 2, 999)).toEqual(['a', 'b']);
+    expect(pickRotatingWares(['solo'], 2, 42)).toEqual(['solo']);
+  });
+
+  it('a bigger pool picks exactly `slots` distinct ids, always drawn from the pool', () => {
+    const pool = ['a', 'b', 'c', 'd', 'e'];
+    const picked = pickRotatingWares(pool, 2, 777);
+    expect(picked).toHaveLength(2);
+    expect(new Set(picked).size).toBe(2);
+    for (const id of picked) expect(pool).toContain(id);
+  });
+
+  it('same dateKey -> same pick (deterministic — same day, same shelf)', () => {
+    const pool = ['a', 'b', 'c', 'd', 'e'];
+    expect(pickRotatingWares(pool, 2, 777)).toEqual(pickRotatingWares(pool, 2, 777));
+  });
+
+  it('different dateKeys can select different subsets from a bigger pool', () => {
+    const pool = ['a', 'b', 'c', 'd', 'e'];
+    const seen = new Set<string>();
+    for (let k = 0; k < 30; k++) seen.add([...pickRotatingWares(pool, 2, k)].sort().join(','));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+});
+
+describe('dateKeyOf — local calendar date (mirrors canRestTonight\'s day-boundary math: local Y/M/D, never UTC/epoch)', () => {
+  it('same local calendar day -> same key, any time of day', () => {
+    expect(dateKeyOf(new Date(2026, 7, 17, 0, 1))).toBe(dateKeyOf(new Date(2026, 7, 17, 23, 59)));
+  });
+  it('different calendar days -> different keys', () => {
+    expect(dateKeyOf(new Date(2026, 7, 17))).not.toBe(dateKeyOf(new Date(2026, 7, 18)));
   });
 });
