@@ -301,6 +301,19 @@ test('bestiary scenario a: Careful Step also composes off the TOLLED base — a 
 // below is written to the CHAPTER's law and is expected to fail against HEAD — that failure IS
 // the finding, reported verbatim rather than fixed (app/ is out of scope for this task) or
 // softened to pass.
+//
+// Fix round 1 (review C1): the modified leg must NOT reuse the control leg's own target.
+// `damageUnit` (CombatScene.ts) floors HP at `Math.max(0, hp - amount)`, and the logged `dmg` is
+// a pool-wide before/after delta (`enemyHpSum()`), not raw computeHit output — so a target that's
+// already down to its last HP point can only ever LOG a delta of however much HP it had left,
+// regardless of how much real damage the (eventually fixed) engine computes. wisp-0 (2 max HP)
+// loses 1 HP in the control leg, leaving exactly 1 HP of headroom — not enough to show a genuine
+// +1 (needs 2). Reusing it would make this pin permanently red with the IDENTICAL failure message
+// even after the missing term is correctly implemented, misleading whoever lands that fix. The
+// modified leg now strikes a FRESH target (wraith-2, 3 max HP, untouched all test long) instead —
+// same Strike shape (adjacent, no other modifiers, same relative tile), only the target and its
+// Toppled status differ. The headroom itself is asserted explicitly below, not just assumed, so
+// this can never silently regress back into the clamp trap.
 // ---------------------------------------------------------------------------------------
 test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled target (Ch. VIII\'s ±1 idiom)', async ({ page }) => {
   test.setTimeout(60_000);
@@ -309,9 +322,9 @@ test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled targ
   await waitForSnap(page, (s) => s?.state === 'playerMove' && s?.activeId === 'keeper', "the Keeper's turn 1 to open");
 
   await setPos(page, 'wisp-1', 10, 6); // exiled — scenario b/c's own spot
-  await setPos(page, 'wraith-2', 8, 6); // exiled off row AND column — scenario c's own note
+  await setPos(page, 'wraith-2', 8, 6); // exiled for now — kept FRESH (0 damage) for the modified leg below
   await setPos(page, 'keeper', 5, 1);
-  await setPos(page, 'wisp-0', 6, 1); // adjacent
+  await setPos(page, 'wisp-0', 6, 1); // adjacent — the CONTROL leg's target only
 
   // --- control: an undaunted, un-toppled Strike (scenario c's own control idiom).
   await page.keyboard.press('1'); // Strike hotkey
@@ -321,15 +334,29 @@ test('bestiary FINDING: an adjacent Strike should deal +1 against a Toppled targ
   const controlDealt = afterControl.log.at(-1)?.dmg ?? -1;
   expect(controlDealt, 'sanity: the plain base, no modifiers in this fixture').toBe(1);
 
-  await setPos(page, 'wraith-2', 8, 6); // re-exile before ending the turn (scenario c's own note)
   await page.keyboard.press('7'); // end turn 1
 
-  // --- test: the SAME Strike, now against a Toppled wisp-0, from the SAME adjacent tile.
+  // --- test: the SAME Strike shape, now against a Toppled FRESH target — wraith-2, never hit
+  // this test, standing on the SAME relative tile wisp-0 held for the control leg (only the
+  // target identity and its Toppled status differ). wisp-0 (spent, 1 HP left) is exiled out of
+  // the way so it can't be targeted or confound anything.
   const turn2 = await passUntilKeeper(page);
   expect(turn2.activeId).toBe('keeper');
-  await setPos(page, 'wisp-0', 6, 1);
+  await setPos(page, 'wisp-0', 8, 6); // exile the spent control target
+  await setPos(page, 'wraith-2', 6, 1); // the modified leg's target, on wisp-0's old tile
   await setPos(page, 'keeper', 5, 1);
-  await applyStatus(page, 'wisp-0', 'toppled', 1, 1);
+  await applyStatus(page, 'wraith-2', 'toppled', 1, 1);
+
+  // Headroom check (fix round 1, load-bearing): the modified-leg target must hold enough HP to
+  // show a genuine control+1 without damageUnit's floor(0) clamp masking it. wraith-2 is fresh
+  // (3 max HP) against a control of 1, so this holds with zero slack (3 >= 1+2) — if a future
+  // change to this fixture ever narrows that margin, this assertion fails loudly instead of the
+  // pin quietly rotting back into the C1 clamp trap.
+  const beforeModified = await unitState(page, 'wraith-2');
+  expect(
+    beforeModified?.hp,
+    "headroom check: the modified-leg target needs enough HP that a real control+1 hit can't clamp — otherwise this pin would misreport a missing engine term as a clamp artifact",
+  ).toBeGreaterThanOrEqual(controlDealt + 2);
 
   await page.keyboard.press('1'); // Strike hotkey
   await waitForSnap(page, (s) => s?.state === 'playerTarget', 'Strike targeting to open');
