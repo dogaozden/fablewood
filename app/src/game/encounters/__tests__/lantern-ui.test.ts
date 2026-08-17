@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel } from '../lantern-ui';
+import { createLanternGate, isCommitKey, isCommitTarget, redrawSentinel, type CommitKeySet } from '../lantern-ui';
 
 /** Minimal Element stand-in — isCommitTarget only ever calls .closest(selector), so a stub that
  *  answers per-selector is enough (no real DOM needed; this module stays DOM-free, see file
@@ -35,12 +35,38 @@ describe('lantern-ui (Ch. IV pure slice)', () => {
     expect(g.settle()).toBe(true);
     expect(g.mayRaise()).toBe(false);
   });
-  it('isCommitKey: Enter and MCQ digit hotkeys commit (disarm); navigation/typing keys do not', () => {
-    expect(isCommitKey('Enter')).toBe(true);
-    expect(isCommitKey('7')).toBe(true);
-    expect(isCommitKey('Escape')).toBe(false);
-    expect(isCommitKey('a')).toBe(false);
-    expect(isCommitKey('ArrowDown')).toBe(false);
+  // W8 lantern ticket: isCommitKey no longer guesses from the key's shape (old law: "any
+  // digit, or Enter" — index-blind, so a Scrivener's-Hint-struck MCQ digit disarmed the raise
+  // even though it commits nothing). It now consults a `live` set the renderer publishes —
+  // the renderer owns truth, isCommitKey just asks whether THIS key is in it.
+  it('isCommitKey: commits exactly the keys the live set names — nothing else, regardless of shape', () => {
+    const live: CommitKeySet = new Set(['1', '2', '3', 'Enter']);
+    expect(isCommitKey('1', live)).toBe(true);
+    expect(isCommitKey('Enter', live)).toBe(true);
+    expect(isCommitKey('Escape', live)).toBe(false);
+    expect(isCommitKey('a', live)).toBe(false);
+    expect(isCommitKey('ArrowDown', live)).toBe(false);
+  });
+
+  it('a struck MCQ option\'s digit does not commit — a dead key, not an answer gesture', () => {
+    // 3-option MCQ, option index 1 (key '2') struck: the renderer publishes digits 1..3 minus
+    // the struck one, so '2' is a live digit's exact shape but absent from the live set.
+    const live: CommitKeySet = new Set(['1', '3']);
+    expect(isCommitKey('2', live)).toBe(false);
+    expect(isCommitKey('1', live)).toBe(true);
+    expect(isCommitKey('3', live)).toBe(true);
+  });
+
+  it('an out-of-range digit does not commit — the live set only ever names real options', () => {
+    // a 3-option MCQ: nothing above '3' (or below '1') was ever published.
+    const live: CommitKeySet = new Set(['1', '2', '3']);
+    expect(isCommitKey('9', live)).toBe(false);
+    expect(isCommitKey('0', live)).toBe(false);
+  });
+
+  it('Enter disarms only where the live set says Enter actually commits (match: no)', () => {
+    expect(isCommitKey('Enter', new Set(['Enter']))).toBe(true); // e.g. order/free_recall's real binding
+    expect(isCommitKey('Enter', new Set())).toBe(false); // match: no keyboard commit exists at all
   });
 
   // M2 fix: overlay disarm must fire only for a REAL commit button (MCQ/scenario option,

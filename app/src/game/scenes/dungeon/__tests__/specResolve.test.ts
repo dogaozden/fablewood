@@ -8,7 +8,11 @@ import {
   rewardText,
   rewardXp,
   isDungeonSpec,
+  unknownArchetypes,
+  archetypeError,
 } from '../specResolve';
+import type { DungeonSpec } from '../../../contracts';
+import devDungeon from '../__fixtures__/dev.dungeon.json';
 
 const quest = (id: string, title: string, region: string, reward?: Quest['reward']): Quest => ({
   id,
@@ -112,5 +116,68 @@ describe('isDungeonSpec', () => {
     expect(isDungeonSpec({ id: 'x', name: 'X', rooms: [] })).toBe(false);
     expect(isDungeonSpec({ id: 'x', name: 'X' })).toBe(false);
     expect(isDungeonSpec({ id: 'x', name: 'X', rooms: [{ id: 'r1' }] })).toBe(false);
+  });
+});
+
+// Ch. VIII — archetype-id validation. The gap the seam scout named: a typo'd archetype passes
+// isDungeonSpec's shape check (it only asks that `enemies` be an array), reaches makeEnemy,
+// indexes ENEMY_STATS to `undefined`, and crashes on `s.hp` at COMBAT LAUNCH — rooms away from
+// the load that carried it. These two functions move the failure to load time and name it.
+describe('archetype validation (Ch. VIII)', () => {
+  const spec = (archetypes: string[], roomId = 'r1'): DungeonSpec =>
+    ({
+      id: 'd', name: 'D',
+      rooms: [{ id: roomId, name: 'Room', enemies: archetypes.map((a) => ({ archetype: a })) }],
+    } as unknown as DungeonSpec);
+
+  it('accepts every archetype the engine knows, the three newcomers included', () => {
+    const all = spec(['wisp', 'wraith', 'construct', 'warden', 'lurker', 'husk', 'pall']);
+    expect(unknownArchetypes(all)).toEqual([]);
+    expect(archetypeError(all, 'vc-law')).toBeNull();
+  });
+
+  it('collects unknown ids, de-duplicated in first-seen order, across every room', () => {
+    const bad = {
+      id: 'd', name: 'D',
+      rooms: [
+        { id: 'r1', name: 'One', enemies: [{ archetype: 'lurkr' }, { archetype: 'wisp' }] },
+        { id: 'r2', name: 'Two', enemies: [{ archetype: 'grue' }, { archetype: 'lurkr' }] },
+      ],
+    } as unknown as DungeonSpec;
+    expect(unknownArchetypes(bad)).toEqual(['lurkr', 'grue']);
+  });
+
+  it('names the bad id, its room, and the legal set in the load-time error', () => {
+    const msg = archetypeError(spec(['lurkr'], 'under-1'), 'vc-law');
+    expect(msg).not.toBeNull();
+    expect(msg).toContain('"lurkr"');
+    expect(msg).toContain('vc-law');
+    expect(msg).toContain('under-1');
+    // tells an author what they MAY write, not only what they may not
+    expect(msg).toContain('lurker');
+    expect(msg).toContain('husk');
+    expect(msg).toContain('pall');
+  });
+
+  // Ch. VIII fix round 1 (M1) — the fixture map now runs through the same gate a pack's map does
+  // (DungeonScene.useFixture). This pins the in-repo map itself as buildable: it is the one map
+  // every ?dev=1 run and a dozen e2e specs actually walk, so a typo here would fail far from its
+  // cause. Guards the assertion too — a validator that silently accepted everything would pass
+  // this line for the wrong reason, so the negative case above is what gives it teeth.
+  it('the shipped dev fixture names only archetypes the engine can build', () => {
+    expect(unknownArchetypes(devDungeon as unknown as DungeonSpec)).toEqual([]);
+    expect(archetypeError(devDungeon as unknown as DungeonSpec, 'dev-fixture')).toBeNull();
+  });
+
+  it('tolerates a room with no enemies array and a non-string archetype', () => {
+    const odd = {
+      id: 'd', name: 'D',
+      rooms: [
+        { id: 'r1', name: 'One' },
+        { id: 'r2', name: 'Two', enemies: [{ archetype: 7 }, null, { }] },
+      ],
+    } as unknown as DungeonSpec;
+    expect(() => unknownArchetypes(odd)).not.toThrow();
+    expect(unknownArchetypes(odd)).toEqual(['7']);
   });
 });

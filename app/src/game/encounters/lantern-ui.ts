@@ -20,10 +20,21 @@ export function redrawSentinel(enc: {
   };
 }
 
-/** True for a key gesture that COMMITS an answer (Enter submits; digits are MCQ hotkeys).
- *  Committing disarms the lantern — a submitted answer must never be dodgeable mid-judge. */
-export function isCommitKey(key: string): boolean {
-  return key === 'Enter' || /^[0-9]$/.test(key);
+/** The keys that COMMIT an answer right now, for whichever kind is currently rendering —
+ *  published by the renderer (kinds.ts) through the overlay (see Overlay.setLiveCommitKeys in
+ *  overlay.ts), consulted by isCommitKey below. A plain set of key strings: the consumer stays
+ *  kind-agnostic, same spirit as isCommitTarget's data-commit attribute for clicks. */
+export type CommitKeySet = ReadonlySet<string>;
+
+/** True for a key gesture that COMMITS an answer for the CURRENTLY RENDERED kind — `live`
+ *  names exactly which keys do that right now (mcq's live digits minus any struck option,
+ *  Enter only where a kind actually binds it to submit/select — see kinds.ts). Replaces the
+ *  old blanket "any digit, or Enter" test, which disarmed the lantern on dead keys: a
+ *  Scrivener's-Hint-struck MCQ digit commits nothing, yet used to cost the raise anyway (W8
+ *  lantern ticket). Committing disarms the lantern — a submitted answer must never be
+ *  dodgeable mid-judge. */
+export function isCommitKey(key: string, live: CommitKeySet): boolean {
+  return live.has(key);
 }
 
 /** True for a click target that COMMITS an answer (kinds.ts marks those buttons

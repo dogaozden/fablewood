@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildInitiative, nextInOrder } from '../initiative';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles, hasLineOfFire,
-  blocksSight, forceMove, type TileGrid, type ForceMoveBoard,
+  blocksSight, forceMove, filterDauntedField, type TileGrid, type ForceMoveBoard,
 } from '../grid';
 import { resolveAction, isFlanked } from '../damage';
 import { SPELLBOOK, resolveSpell, type SpellId } from '../spells';
@@ -147,6 +147,75 @@ describe('forceMove — forced movement (§4.3)', () => {
 
   it('is direction-agnostic — a pull (toward-caster Dir) resolves under the same rules as a push', () => {
     expect(forceMove({ c: 2, r: 2 }, 'left', board(tiles))).toMatchObject({ moved: true, bump: false, to: { c: 1, r: 2 } });
+  });
+
+  it('Ch. VIII — bypasses Daunted BY CONSTRUCTION: its signature takes a raw Coord, never a UnitState/statuses, so a forced move toward a "source" cannot be gated even in principle', () => {
+    // The mover here would be excluded from ending on this exact tile by filterDauntedField
+    // (below) if it were a WILLING move toward the same coordinate — forceMove has no such
+    // concept at all, and moves it anyway. This is the "verify, don't build a bypass" the
+    // brief calls for: proof, not a new code path.
+    const source = { c: 0, r: 2 };
+    void source; // documents what "closer" would mean here; forceMove never consults it
+    expect(forceMove({ c: 2, r: 2 }, 'left', board(tiles))).toMatchObject({ moved: true, to: { c: 1, r: 2 } }); // moves ONE STEP CLOSER to (0,2) unconditionally
+  });
+});
+
+describe('filterDauntedField — Ch. VIII Daunted move-field filter (grid.ts pure variant)', () => {
+  it('excludes tiles strictly closer to the source than the start tile, keeps equal/farther', () => {
+    const tiles = floorGrid(11, 6);
+    const start = { c: 5, r: 3 };
+    const source = { c: 5, r: 0 }; // straight north of start, distance 3
+    const field = computeMoveField(start, 3, tiles, new Set());
+    const filtered = filterDauntedField(field, start, source, tiles);
+
+    // (5,1) is 2 tiles closer to source (dist 1) than start (dist 3) — excluded.
+    expect(field.cost.has(key(5, 1))).toBe(true); // sanity: reachable before filtering
+    expect(filtered.cost.has(key(5, 1))).toBe(false);
+    // (5,2) is 1 tile closer to source (dist 2 < 3) — excluded.
+    expect(filtered.cost.has(key(5, 2))).toBe(false);
+    // (5,4) is FARTHER from source (dist 4 >= 3) — kept.
+    expect(filtered.cost.has(key(5, 4))).toBe(true);
+    // (6,2) is EQUAL distance to source (|6-5|+|2-0| = 3, same as start's 3) — kept.
+    expect(filtered.cost.has(key(6, 2))).toBe(true);
+  });
+
+  it('a kept tile reachable only by PASSING THROUGH an excluded tile still paths correctly — only ENDING closer is forbidden', () => {
+    const tiles = floorGrid(11, 6);
+    tiles[3][6] = 'wall'; // blocks the (5,3)->(6,3)->(6,2) route, forcing the (5,2) detour
+    const start = { c: 5, r: 3 };
+    const source = { c: 5, r: 0 };
+    const field = computeMoveField(start, 3, tiles, new Set());
+    const filtered = filterDauntedField(field, start, source, tiles);
+
+    // (5,2): dist-to-source 2 < start's 3 — excluded. (6,2): dist-to-source 3 — kept. With
+    // (6,3) walled, the ONLY cost-2 route from start to (6,2) passes through (5,2).
+    expect(filtered.cost.has(key(5, 2))).toBe(false);
+    expect(filtered.cost.has(key(6, 2))).toBe(true);
+
+    const path = pathTo(filtered, { c: 6, r: 2 });
+    expect(path).not.toBeNull();
+    expect(path![0]).toEqual(start);
+    expect(path![path!.length - 1]).toEqual({ c: 6, r: 2 });
+    expect(path).toContainEqual({ c: 5, r: 2 }); // passes THROUGH the excluded tile en route
+  });
+
+  it('the start tile is never excluded (equal to itself)', () => {
+    const tiles = floorGrid(11, 6);
+    const start = { c: 5, r: 3 };
+    const source = { c: 5, r: 0 };
+    const field = computeMoveField(start, 3, tiles, new Set());
+    const filtered = filterDauntedField(field, start, source, tiles);
+    expect(filtered.cost.get(key(5, 3))).toBe(0);
+  });
+
+  it('gracefully no-ops when the start tile cannot path to the source at all (walled off)', () => {
+    const tiles = floorGrid(11, 6);
+    for (let c = 0; c < 11; c++) tiles[1][c] = 'wall'; // seals row 0 off from every row below it
+    const start = { c: 5, r: 3 };
+    const source = { c: 5, r: 0 }; // unreachable from start
+    const field = computeMoveField(start, 3, tiles, new Set());
+    const filtered = filterDauntedField(field, start, source, tiles);
+    expect(filtered.cost.size).toBe(field.cost.size); // nothing excluded — "closer" is meaningless here
   });
 });
 
@@ -591,6 +660,36 @@ describe('AI v2 archetype directives (§8)', () => {
   });
 });
 
+describe('Ch. VIII Task 4 — decideEnemy respects Daunted (enemy-side extension; party-side is the requirement)', () => {
+  const tiles = floorGrid(GRID_W, GRID_H);
+
+  it('without a dauntedSourceCoord (the pre-existing 5-arg call), an enemy closes in and attacks as always', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    const keeper = makeKeeper(1, 5); // 4 away, straight west
+    const intent = decideEnemy(wisp, [keeper], tiles, new Set([key(1, 5)]));
+    expect(intent.moveTo).toEqual({ c: 2, r: 5 });
+    expect(intent.attackTargetId).toBe('keeper');
+  });
+
+  it('Daunted (source due west, same distance as the keeper): the only tiles that close on the keeper also close on the source, so the enemy holds position instead', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    const keeper = makeKeeper(1, 5);
+    const source = { c: 0, r: 5 }; // 5 away from (5,5) — one step further west than the keeper
+    const intent = decideEnemy(wisp, [keeper], tiles, new Set([key(1, 5)]), [], source);
+    expect(intent.moveTo).toBeNull(); // every closing tile is also a closer-to-source tile — excluded
+    expect(intent.attackTargetId).toBeNull(); // never got into range
+  });
+
+  it('Daunted with the source BEHIND the enemy (away from the keeper): closing in is unaffected', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    const keeper = makeKeeper(1, 5);
+    const source = { c: 9, r: 5 }; // east — opposite the keeper, so approaching west moves AWAY from it
+    const intent = decideEnemy(wisp, [keeper], tiles, new Set([key(1, 5)]), [], source);
+    expect(intent.moveTo).toEqual({ c: 2, r: 5 }); // identical to the undaunted case above
+    expect(intent.attackTargetId).toBe('keeper');
+  });
+});
+
 describe('opportunity strikes — eligibility (§4.2)', () => {
   it('eligible: alive, opposing team, orthogonally adjacent to the vacated tile, unspent, unstaggered', () => {
     const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
@@ -618,6 +717,27 @@ describe('opportunity strikes — eligibility (§4.2)', () => {
     expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [sameTeam])).toEqual([]);
     expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [farWisp])).toEqual([]);
   });
+
+  // Ch. VIII — mid-rise (a Toppled unit that just stood at its own turn start) disables the
+  // opportunity latch until turn end, same idiom as Staggered above, but Toppled itself carries
+  // no duration to check via hasStatus (it's consumed by the rise) — the scene tracks it as a
+  // separate turn-scoped mark instead, threaded in as this 4th, optional, default-empty
+  // parameter so every pre-existing call site (including every test above) keeps compiling and
+  // behaving identically without passing it.
+  it('suppressed when the striker is mid-rise (Ch. VIII), even though otherwise eligible', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp], new Set(['wisp-0']))).toEqual([]);
+  });
+
+  it('an unrelated id in midRiseIds does not suppress a striker not in the set', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp], new Set(['some-other-unit'])).map((u) => u.id)).toEqual(['wisp-0']);
+  });
+
+  it('omitting midRiseIds entirely (every pre-existing call site) is unaffected — defaults to no exclusions', () => {
+    const wisp = makeEnemy({ archetype: 'wisp' }, 0, 5, 5);
+    expect(opportunityStrikers({ c: 5, r: 6 }, 'party', [wisp]).map((u) => u.id)).toEqual(['wisp-0']);
+  });
 });
 
 describe('Careful Step movement math (§4.2)', () => {
@@ -626,7 +746,12 @@ describe('Careful Step movement math (§4.2)', () => {
     expect(carefulStepMove(5)).toBe(2);
     expect(carefulStepMove(3)).toBe(1);
     expect(carefulStepMove(1)).toBe(1);
-    expect(carefulStepMove(0)).toBe(1);
+  });
+
+  it('zero-preserving (fix round, I1 — tollRise\'s pre-existing sibling): a move-0 unit (e.g. ' +
+    'Bound) halves to 0, not 1 — the floor guards a MOBILE unit\'s halving, it never overrides ' +
+    'a zero another law already made', () => {
+    expect(carefulStepMove(0)).toBe(0);
   });
 });
 

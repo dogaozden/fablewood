@@ -28,6 +28,9 @@ export const UNIT_KEYS: Record<string, string> = {
   wraith: 'enemy.wraith',
   construct: 'enemy.construct',
   warden: 'enemy.warden',
+  lurker: 'enemy.lurker',
+  husk: 'enemy.husk',
+  pall: 'enemy.pall',
 };
 
 export const ICON_KEYS: Record<string, string> = {
@@ -41,13 +44,15 @@ export const ICON_KEYS: Record<string, string> = {
   wait: 'icon.wait',
   press_on: 'icon.press-on',
   brace: 'icon.brace',
+  shove: 'icon.shove',
 };
 
 /**
- * The 8 condition ids (combat/status.ts §3). Kept as a LOCAL literal union here,
- * not imported, so this placeholder-bake module carries zero build dependency on
- * the sibling-owned status.ts — the two are structurally identical string unions,
- * so a real `StatusId` value indexes straight into CHIP_KEYS with no cast needed.
+ * The 11 condition ids (combat/status.ts §3 + Ch. VIII's three). Kept as a LOCAL
+ * literal union here, not imported, so this placeholder-bake module carries zero
+ * build dependency on the sibling-owned status.ts — the two are structurally
+ * identical string unions, so a real `StatusId` value indexes straight into
+ * CHIP_KEYS with no cast needed.
  */
 export type StatusGlyphId =
   | 'kindled'
@@ -57,7 +62,10 @@ export type StatusGlyphId =
   | 'inked'
   | 'emboldened'
   | 'weakened'
-  | 'staggered';
+  | 'staggered'
+  | 'toppled'
+  | 'daunted'
+  | 'unwritten';
 
 /**
  * Status→texture-key manifest (docs/design/magic-combat-depth.md §3 chip column,
@@ -75,6 +83,9 @@ export const CHIP_KEYS: Record<StatusGlyphId, string> = {
   emboldened: 'status.emboldened',
   weakened: 'status.weakened',
   staggered: 'status.staggered',
+  toppled: 'status.toppled',
+  daunted: 'status.daunted',
+  unwritten: 'status.unwritten',
 };
 
 export function ensureTextures(scene: Phaser.Scene): void {
@@ -91,6 +102,9 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, UNIT_KEYS.wraith, CELL, CELL, (g) => drawWraith(g));
   bake(scene, UNIT_KEYS.construct, CELL, CELL, (g) => drawConstruct(g));
   bake(scene, UNIT_KEYS.warden, CELL, CELL, (g) => drawWarden(g));
+  bake(scene, UNIT_KEYS.lurker, CELL, CELL, (g) => drawLurker(g));
+  bake(scene, UNIT_KEYS.husk, CELL, CELL, (g) => drawHusk(g));
+  bake(scene, UNIT_KEYS.pall, CELL, CELL, (g) => drawPall(g));
 
   bake(scene, ICON_KEYS.strike, ICON, ICON, drawIconStrike);
   bake(scene, ICON_KEYS.smite, ICON, ICON, drawIconSmite);
@@ -102,6 +116,7 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, ICON_KEYS.wait, ICON, ICON, drawIconWait);
   bake(scene, ICON_KEYS.press_on, ICON, ICON, drawIconPressOn);
   bake(scene, ICON_KEYS.brace, ICON, ICON, drawIconBrace);
+  bake(scene, ICON_KEYS.shove, ICON, ICON, drawIconShove);
 
   bake(scene, CHIP_KEYS.kindled, CHIP, CHIP, drawChipKindled);
   bake(scene, CHIP_KEYS.bound, CHIP, CHIP, drawChipBound);
@@ -111,6 +126,9 @@ export function ensureTextures(scene: Phaser.Scene): void {
   bake(scene, CHIP_KEYS.emboldened, CHIP, CHIP, drawChipEmboldened);
   bake(scene, CHIP_KEYS.weakened, CHIP, CHIP, drawChipWeakened);
   bake(scene, CHIP_KEYS.staggered, CHIP, CHIP, drawChipStaggered);
+  bake(scene, CHIP_KEYS.toppled, CHIP, CHIP, drawChipToppled);
+  bake(scene, CHIP_KEYS.daunted, CHIP, CHIP, drawChipDaunted);
+  bake(scene, CHIP_KEYS.unwritten, CHIP, CHIP, drawChipUnwritten);
 }
 
 function bake(
@@ -310,6 +328,58 @@ function drawWarden(g: Phaser.GameObjects.Graphics): void {
   g.fillStyle(P.glowCore, 1).fillCircle(cx - 3, 14, 1).fillCircle(cx + 3, 14, 1);
 }
 
+// ---- Ch. VIII's three (greybox only — the real grids live in art/sprites/set-bestiary.ts,
+//      which registers the SAME keys at boot and wins; these draw only if it hasn't run) ----
+
+/** The Lurker — low, wide and many-legged, nesting in the gutter of the page. Deliberately the
+ *  only enemy silhouette that is wider than it is tall: at a glance it reads as a thing that
+ *  belongs to the floor, not a figure standing on it. */
+function drawLurker(g: Phaser.GameObjects.Graphics): void {
+  const cx = CELL / 2;
+  const cy = CELL / 2 + 6;
+  g.lineStyle(2, P.outline, 1);
+  for (let i = -3; i <= 3; i++) {
+    if (i === 0) continue;
+    g.lineBetween(cx + i * 2, cy, cx + i * 6, cy + 9); // legs
+  }
+  g.fillStyle(P.duskDeep, 1).fillEllipse(cx, cy, 24, 13);
+  g.strokeEllipse(cx, cy, 24, 13);
+  g.fillStyle(P.duskViolet, 1).fillEllipse(cx - 3, cy - 3, 12, 5); // lit top-left
+  g.fillStyle(P.amber, 1).fillCircle(cx - 5, cy - 1, 1.6).fillCircle(cx + 5, cy - 1, 1.6); // low eyes
+}
+
+/** The Husk — a heavy standing mass with the name gnawed out of it: the hollow is the point, so
+ *  it is drawn as a void in the chest rather than as any kind of face. */
+function drawHusk(g: Phaser.GameObjects.Graphics): void {
+  const cx = CELL / 2;
+  g.lineStyle(2, P.outline, 1).fillStyle(P.bark, 1);
+  g.fillRoundedRect(cx - 14, 9, 28, CELL - 12, 4).strokeRoundedRect(cx - 14, 9, 28, CELL - 12, 4);
+  g.fillStyle(P.timber, 1).fillRect(cx - 11, 11, 12, 5); // warm top-left key
+  g.fillStyle(P.barkShadow, 1).fillRect(cx + 6, 16, 6, CELL - 22); // cool shadow side
+  g.fillStyle(P.shadowPlum, 1).fillRoundedRect(cx - 7, 20, 14, 12, 3); // the gnawed-out name
+  g.lineStyle(1, P.darkBark, 1).strokeRoundedRect(cx - 7, 20, 14, 12, 3);
+}
+
+/** The Pall — a hung shade: a curtain with no feet, hem tattered, bottom edge never touching
+ *  the floor line the other enemies stand on. */
+function drawPall(g: Phaser.GameObjects.Graphics): void {
+  const cx = CELL / 2;
+  g.lineStyle(2, P.outline, 1).fillStyle(P.duskDeep, 1);
+  g.beginPath();
+  g.moveTo(cx - 13, 8);
+  g.lineTo(cx + 13, 8);
+  g.lineTo(cx + 11, CELL - 9);
+  g.lineTo(cx + 5, CELL - 13);
+  g.lineTo(cx, CELL - 8);
+  g.lineTo(cx - 5, CELL - 13);
+  g.lineTo(cx - 11, CELL - 9);
+  g.closePath();
+  g.fillPath();
+  g.strokePath();
+  g.fillStyle(P.duskMauve, 0.85).fillRect(cx - 10, 10, 7, CELL - 22); // one lit fold, top-left
+  g.fillStyle(P.duskViolet, 1).fillRect(cx + 2, 12, 4, CELL - 26); // a second, dimmer
+}
+
 // ---- action icons -------------------------------------------------------
 
 function iconBase(g: Phaser.GameObjects.Graphics): void {
@@ -434,6 +504,31 @@ function drawIconBrace(g: Phaser.GameObjects.Graphics): void {
   g.strokePoints(shield, true);
   g.fillStyle(P.waterLight, 1).fillTriangle(12, 10, 18, 8, 14, 18); // lit facet
   g.fillStyle(P.glowCore, 0.9).fillCircle(18, 16, 2.5); // core rivet
+}
+
+/** Shove's HUD icon (Ch. VIII Task 3) — a driving wedge (the shoulder) striking a displaced
+ *  block (the target), with two short motion-lines trailing behind it: physical impact and
+ *  displacement, deliberately distinct from Press On's forward double-chevron (that reads as
+ *  travel, not a hit) and from Strike's diagonal blade. Same outline-then-tint double-stroke
+ *  technique as drawIconPressOn/drawIconBrace. */
+function drawIconShove(g: Phaser.GameObjects.Graphics): void {
+  iconBase(g);
+  // trailing motion-lines behind the displaced block
+  g.lineStyle(3, P.stoneGrey, 0.8);
+  g.lineBetween(8, 14, 14, 14).lineBetween(6, 22, 12, 22);
+  // the displaced block (the shoved target), pushed toward the right edge
+  g.lineStyle(2, P.outline, 1).fillStyle(P.timberLight, 1);
+  g.fillRoundedRect(21, 9, 11, 18, 3).strokeRoundedRect(21, 9, 11, 18, 3);
+  g.fillStyle(P.parchment, 0.5).fillRect(22, 11, 3, 14); // lit facing edge
+  // the driving wedge (the shove itself), striking the block's left face
+  const wedge = [
+    new Phaser.Geom.Point(4, 18),
+    new Phaser.Geom.Point(19, 11),
+    new Phaser.Geom.Point(19, 25),
+  ];
+  g.lineStyle(2, P.outline, 1);
+  g.fillStyle(P.timber, 1).fillPoints(wedge, true);
+  g.strokePoints(wedge, true);
 }
 
 function star(g: Phaser.GameObjects.Graphics, cx: number, cy: number, rad: number, color: number): void {
@@ -567,4 +662,44 @@ function drawChipStaggered(g: Phaser.GameObjects.Graphics): void {
   chipBlock(g, 2, 2, 1, 1, P.duskPeach);
   chipBlock(g, 1, 3, 1, 1, P.duskPeach);
   chipBlock(g, 3, 3, 1, 1, P.duskPeach);
+}
+
+// ---- Ch. VIII's three (the Bestiary newcomers) --------------------------
+// Silhouettes deliberately chosen from the shapes the shipped eight DON'T use.
+// Taken: triangle, square ring, solid blob, diamond ring, diagonal slash, up
+// arrow, down arrow, sparkle. Free, and used here: stacked horizontals, a
+// HORIZONTAL arrow (both existing arrows are vertical), and separated dots.
+
+/** Toppled — timber ▼: a body tipped over above the ground it came down on. Two
+ *  stacked horizontal bars, the lower one wider — the one silhouette family none
+ *  of the shipped eight uses, so it never has to out-argue them. Deliberately NOT
+ *  a down-arrow: Weakened already owns that shape, and Toppled is a position, not
+ *  a decrease. */
+function drawChipToppled(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 1, 2, 3, 1, P.timber); // the fallen body, lying flat
+  chipBlock(g, 1, 4, 4, 1, P.timber); // the ground under it
+}
+
+/** Daunted — dusk-mauve ↚: an arrow pointing AWAY (cannot willingly close on the
+ *  source). Horizontal, where Emboldened/Weakened are vertical, so the axis alone
+ *  separates them before color does. Built with Emboldened's own iter-2 fix: the
+ *  wings sit off the tip's ROW (here, off its column-2 centre cell) so tip + wings
+ *  + shaft never close into a plain plus-sign. */
+function drawChipDaunted(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 1, 2, 1, 1, P.duskMauve); // tip, pointing left/away
+  chipBlock(g, 2, 1, 1, 1, P.duskMauve); // upper wing
+  chipBlock(g, 2, 3, 1, 1, P.duskMauve); // lower wing
+  chipBlock(g, 3, 2, 1, 1, P.duskMauve); // shaft
+  chipBlock(g, 4, 2, 1, 1, P.duskMauve); // shaft
+}
+
+/** Unwritten — parchment ◌: three separated dots, a line the Ledger hasn't taken
+ *  down yet. Disconnected on purpose — every other glyph is one connected mass, so
+ *  "not yet joined up" is doing the work that a third hollow ring could not (Bound
+ *  and Warded already hold the ring and the diamond). Spans the full 6 cells rather
+ *  than the usual 1-4 inset, which also keeps it from reading as a shrunken blob. */
+function drawChipUnwritten(g: Phaser.GameObjects.Graphics): void {
+  chipBlock(g, 0, 2, 1, 1, P.parchment);
+  chipBlock(g, 2, 2, 1, 1, P.parchment);
+  chipBlock(g, 4, 2, 1, 1, P.parchment);
 }

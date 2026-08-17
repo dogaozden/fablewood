@@ -75,8 +75,12 @@ test('V1-1: clicking a room node at 0 HP heals in place instead of bouncing to h
     await waitReady(page, 'vaults');
     await page.waitForTimeout(400);
 
-    // fixture layout: camp at x~96, room0 ("under-1") at x~290, y=300 (5 nodes evenly spaced)
-    await canvasClick(page, 290, 300);
+    // fixture layout: VaultView.renderMap spreads camp + every room evenly across x 96..(960-86)
+    // at STRIP_Y=300, so a node's x is a function of the ROOM COUNT: x_i = 96 + i*(778/(rooms)).
+    // Ch. VIII (W8 T6) added a 5th dev room ("under-bestiary"), moving room0 ("under-1") from
+    // x~290 (4 rooms: 96 + 778/4) to x~252 (5 rooms: 96 + 778/5). Node radius is only 22, so the
+    // old coordinate missed entirely. Recompute this if the dev fixture ever gains another room.
+    await canvasClick(page, 252, 300);
     await page.waitForTimeout(500);
 
     expect(await currentScene(page), 'stays in vaults — no bounce to hamlet').toBe('vaults');

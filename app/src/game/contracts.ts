@@ -77,7 +77,10 @@ export type Judge = (args: { prompt: string; answer: string; rubric: string }) =
 
 // ---------------------------------------------------------------- combat & dungeon
 
-export type EnemyArchetype = 'wisp' | 'wraith' | 'construct' | 'warden';
+/** Ch. VIII (the Bestiary) grows the closed enum from four to seven — lurker/husk/pall.
+ *  Runtime membership lives with the stats that define it: combat/units.ts's isEnemyArchetype,
+ *  whose `Record<EnemyArchetype, StatBlock>` backing makes it exhaustive by construction. */
+export type EnemyArchetype = 'wisp' | 'wraith' | 'construct' | 'warden' | 'lurker' | 'husk' | 'pall';
 
 export interface EnemySpec {
   archetype: EnemyArchetype;

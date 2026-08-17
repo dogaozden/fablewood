@@ -14,7 +14,7 @@ export type TileType = 'floor' | 'wall' | 'gold' | 'lantern' | 'brazier' | 'mist
 export type Team = 'party' | 'enemy';
 export type UnitKind = 'keeper' | 'mira' | EnemyArchetype;
 
-export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'satchel' | 'wait' | 'press_on' | 'brace';
+export type ActionKind = 'strike' | 'smite' | 'weave' | 'sequence' | 'cast' | 'parley' | 'satchel' | 'wait' | 'press_on' | 'brace' | 'shove';
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
 export interface Coord {
@@ -131,6 +131,20 @@ export const ACTIONS: Record<Exclude<ActionKind, 'wait'>, ActionMeta> & { wait: 
   brace: {
     kind: 'brace', label: 'Brace', hotkey: '9', encounter: null, range: 0,
     shape: 'self', tint: 0x9ebad4, blurb: 'Raise a one-point ward — no attack.',
+  },
+  // Ch. VIII Task 3 — Shove: a free-lane push beside Strike/Brace, never damage. TARGETED like
+  // Strike (adjacent enemy, shape:'single', range 1) — unlike Satchel/Press On/Brace above, this
+  // is NOT self-cast, so CombatScene.onPickAction does not special-case it; it flows through the
+  // same validTargets → enterTargeting → runPlayerAction path Strike uses, with its own 'shove'
+  // branch there (CombatScene.shove()). tint 0xb47e46 = P.timberLight, a warm physical/blunt
+  // tone distinct from all ten other action tints and from the button chrome (P.bark/P.darkBark
+  // are the menu button's own hover/idle fill colors — an outline in either would vanish against
+  // its own background). Appended last (same reasoning as press_on/brace above) so hotkeys 1-9
+  // and every existing Object.keys(ACTIONS) index stay untouched; shove is purely additive at
+  // index 10.
+  shove: {
+    kind: 'shove', label: 'Shove', hotkey: '0', encounter: null, range: 1,
+    shape: 'single', tint: 0xb47e46, blurb: 'Push them back — no damage, ever.',
   },
 };
 

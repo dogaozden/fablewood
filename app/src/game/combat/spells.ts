@@ -406,6 +406,14 @@ function primaryAmount(base: number, opts: ResolveSpellOpts, welded: boolean): n
     overglow: !!opts.overglow,
     weld: welded,
     rider: !!opts.rider,
+    // Ch. VIII — moot with attackerStatuses empty (no 'daunted'/'unwritten' to gate); false is
+    // the inert value for both.
+    attackerDauntedSourceAlive: false,
+    attackerUnwrittenOpeningTempo: false,
+    // Task 8b — moot: this pass has no board access (no attacker/target position at all) and
+    // targetStatuses is always empty, so there is no 'toppled' for the term to react to either
+    // way. False is the inert value, same reasoning as the two flags above.
+    adjacent: false,
   });
   return hpDamage + (opts.miraBonus ?? 0);
 }

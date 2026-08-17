@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked } from '../turnBudget';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise } from '../turnBudget';
 import { carefulStepMove } from '../ai';
+import { effectiveMove } from '../status';
 
 describe('turnBudget (Ch. VI spendable movement: move -> act -> move the remainder)', () => {
   it('mkTurnBudget: fresh budget has left===total and nothing spent', () => {
@@ -154,5 +155,74 @@ describe('Ch. VI compose law — Careful Step + Press On, ONE halving over the C
     expect(b.left).toBe(2); // 0 remaining + 2 bonus, not refilled to the new total
     expect(b.actionSpent).toBe(true);
     expect(turnExhausted(b)).toBe(false); // action spent, but 2 tiles are still banked
+  });
+});
+
+describe('Ch. VIII — the rise toll (tollRise): a Toppled unit\'s turn-start movement base is halved, house floor, BEFORE stance', () => {
+  it('halves and floors: an even base halves cleanly', () => {
+    expect(tollRise(4)).toBe(2);
+  });
+
+  it('halves and floors: an odd base floors down', () => {
+    expect(tollRise(3)).toBe(1);
+  });
+
+  it('the house floor: base 1 tolls to 1, NOT 0 — rising never zeroes a unit\'s movement', () => {
+    expect(tollRise(1)).toBe(1);
+  });
+
+  it('zero-preserving (fix round, I1): base 0 tolls to 0, NOT 1 — the house floor guards a ' +
+    'MOBILE unit\'s halving; it never overrides a zero another law already made', () => {
+    expect(tollRise(0)).toBe(0);
+  });
+
+  it('the I1 composition, exactly as CombatScene:983 calls it — a Bound unit\'s effectiveMove ' +
+    'is 0 before the toll ever runs, and the toll must not resurrect that zero', () => {
+    expect(tollRise(effectiveMove(4, [{ id: 'bound', turnsLeft: 1, magnitude: 0 }]))).toBe(0);
+  });
+});
+
+describe('Ch. VIII compose law — rise-toll first, stance second: Ch. VI\'s Careful Step + Press On ' +
+  'identity holds RELATIVE TO THE TOLLED BASE on a rising turn (not the raw effectiveMove)', () => {
+  // Mirrors the Ch. VI describe block above exactly, substituting tollRise(eff) for eff
+  // everywhere the chapter's identity is checked — proving composition order (toll, THEN
+  // stance) rather than re-deriving stance math the Ch. VI block already owns.
+  it('tolled-normal identity at eff=3 (odd, the exact live Dimmed value the Ch. VI review named)', () => {
+    const eff = 3;
+    const tolled = tollRise(eff); // floor(3/2) = 1
+    const turnStart = mkTurnBudget(carefulStepMove(tolled)); // Careful Step over the TOLLED base
+    const combined = carefulStepMove(tolled + tolled); // one halving over the combined TOLLED base
+    expect(tolled).toBe(1);
+    expect(combined, 'Careful Step + Press On lands back on the TOLLED distance, not the raw one').toBe(tolled);
+    const bonus = combined - turnStart.total;
+    expect(bonus, 'Press On grant is never negative').toBeGreaterThanOrEqual(0);
+    expect(grantPressOn(turnStart, bonus).total).toBe(tolled);
+  });
+
+  it("tolled-normal identity at eff=4 (Keeper's own un-Dimmed base move — measured-turn.spec.ts's live fact)", () => {
+    const eff = 4;
+    const tolled = tollRise(eff); // floor(4/2) = 2
+    const turnStart = mkTurnBudget(carefulStepMove(tolled));
+    const combined = carefulStepMove(tolled + tolled);
+    expect(tolled).toBe(2);
+    expect(combined).toBe(tolled);
+    const bonus = combined - turnStart.total;
+    expect(bonus, 'Press On grant is never negative').toBeGreaterThanOrEqual(0);
+    expect(grantPressOn(turnStart, bonus).total).toBe(tolled);
+  });
+
+  it('the O1 case, eff=1: toll+the house floor already collapse the base to its minimum — the Press ' +
+    'On grant this composes to must be exactly +0, never negative (the invariant a broken composition ' +
+    'order could violate)', () => {
+    const eff = 1;
+    const tolled = tollRise(eff); // house floor: max(1, floor(1/2)) = 1, not 0
+    expect(tolled).toBe(1);
+    const turnStart = mkTurnBudget(carefulStepMove(tolled)); // carefulStepMove(1) = 1 (its own floor)
+    const combined = carefulStepMove(tolled + tolled); // carefulStepMove(2) = 1
+    expect(turnStart.total).toBe(1);
+    expect(combined).toBe(1);
+    const bonus = combined - turnStart.total;
+    expect(bonus, 'the degenerate all-floors case grants exactly +0').toBe(0);
+    expect(bonus, 'never negative — the invariant').toBeGreaterThanOrEqual(0);
   });
 });

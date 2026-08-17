@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitReady, readState } from './helpers';
+import { waitReady, readState, waitForCombat, tileClick, CORRECT_BRANCH_PREFIX, closeCastTurnIfOpen } from './helpers';
 
 // crucible-2 fix wave, the two findings whose defect lives in CombatScene WIRING rather than
 // in a pure module — the others (weld q1 gate, T1 weld reachability, reclaimed tally) are
@@ -67,27 +67,6 @@ async function debugSetGlow(page: Page, pips: number): Promise<void> {
   }, pips);
 }
 
-/** tileToScreen: ORIGIN(192,48) + c*48+24, r*48+24 (the formula every combat spec uses). */
-async function clickTile(page: Page, c: number, r: number): Promise<void> {
-  const canvas = page.locator('canvas').first();
-  const box = await canvas.boundingBox();
-  if (!box) throw new Error('canvas has no bounding box');
-  await page.mouse.click(box.x + ((192 + c * 48 + 24) / 960) * box.width, box.y + ((48 + r * 48 + 24) / 540) * box.height);
-}
-
-async function waitForCombat(page: Page, pred: (s: Snap) => boolean, message: string, timeout = 40_000): Promise<Snap> {
-  await expect.poll(async () => (pred(await snap(page)) ? 'yes' : 'no'), { message, timeout }).toBe('yes');
-  return snap(page);
-}
-
-// The pack's authored correct-branch text per phase (packs/vc-law/pack.json). reskin() shuffles
-// branch ORDER, so options are matched BY TEXT, never by slot (boss-victory.spec.ts's header).
-const CORRECT_BRANCH_PREFIX = [
-  'Cite the standard',
-  'Counter to nonparticipating',
-  'Counter both terms',
-];
-
 async function driveParley(page: Page, phaseNum: number): Promise<void> {
   await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 40_000 });
   const labels = await page.locator('.fw-optlabel').allTextContents();
@@ -99,7 +78,7 @@ async function driveParley(page: Page, phaseNum: number): Promise<void> {
   const cont = page.getByRole('button', { name: 'Onward ▸' });
   await cont.waitFor({ state: 'visible', timeout: 20_000 });
   await cont.click();
-  await waitForCombat(page, (s) => s?.state === 'playerMove' || s?.state === 'over',
+  await waitForCombat(() => snap(page), (s) => s?.state === 'playerMove' || s?.state === 'over',
     `phase ${phaseNum} handed control back`);
 }
 
@@ -135,7 +114,7 @@ test('attestation-phase-skip: a T3 Verbatim Decree at the Warden advances the bo
 
     await driveParley(page, 1); // phase 1's automatic Parley; phaseIndex is now 0
 
-    const s = await waitForCombat(page, (x) => x?.state === 'playerMove', 'a party turn opened');
+    const s = await waitForCombat(() => snap(page), (x) => x?.state === 'playerMove', 'a party turn opened');
     expect(s!.rank, '?rank=3 took effect, so the T3 row is reachable').toBe(3);
     const active = s!.activeId;
 
@@ -156,7 +135,7 @@ test('attestation-phase-skip: a T3 Verbatim Decree at the Warden advances the bo
     await page.waitForTimeout(150);
     expect((await snap(page))?.state, `Verbatim Decree entered targeting; flyout was ${JSON.stringify(rows)}`)
       .toBe('playerTarget');
-    await clickTile(page, 6, 3);
+    await tileClick(page, 6, 3);
 
     // Answer the free_recall the Decree fires.
     await page.locator('.fw-textarea').waitFor({ state: 'visible', timeout: 20_000 });
@@ -174,19 +153,7 @@ test('attestation-phase-skip: a T3 Verbatim Decree at the Warden advances the bo
     } catch { /* a fully auto-resolving pass needs no continue click */ }
     await page.locator('.fw-textarea').waitFor({ state: 'detached', timeout: 20_000 });
 
-    // Step 0c (T6 boss-cluster bisect): debugSetPos never spends the movement leg, so post-T2
-    // (move·act·move, End Turn) the turn stays open ("Steps remain") after this single Cast —
-    // advanceTurn() (the only place that consumes pendingBossPhase and opens the next Parley)
-    // never runs otherwise. Press End Turn like a real player standing still with movement left
-    // over would (boss-cluster-diagnosis.md) — never touches debugSetPos itself. The scene
-    // briefly holds `state:'resolving'` while the encounter/SRS/banner chain settles
-    // (CombatScene.ts's Phase type) — wait it out before deciding whether the turn is open.
-    const afterCast = await waitForCombat(page, (s) => s?.state !== 'resolving',
-      'the post-Cast state settled (left "resolving")', 5_000);
-    if (afterCast?.state === 'playerMove') {
-      await page.keyboard.press('7'); // End Turn
-      await page.waitForTimeout(400);
-    }
+    await closeCastTurnIfOpen(() => snap(page), page); // Step 0c — see helpers.ts's own doc comment
 
     // THE VERDICT: the T3 cast re-armed the next boss phase, so phase 2's Parley opens on its
     // own. Before the fix castGatedSpell never touched phaseIndex and this never appeared —
@@ -217,7 +184,7 @@ test('rank1-shielded-noop: a Rank-1 Art refuses a shielded Warden instead of eat
     await waitReady(page, 'combat');
 
     await driveParley(page, 1);
-    const s = await waitForCombat(page, (x) => x?.state === 'playerMove', 'a party turn opened');
+    const s = await waitForCombat(() => snap(page), (x) => x?.state === 'playerMove', 'a party turn opened');
     expect(s!.rank, 'this is the Rank-1 path — no flyout exists to grey the row').toBe(1);
     const active = s!.activeId;
 

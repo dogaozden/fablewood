@@ -13,14 +13,56 @@ interface StatBlock {
   attack: number;
   range: number;
   ranged: boolean;
+  /** Ch. VIII — can a landed Shove knock this archetype Toppled? Per-entry bestiary data. */
+  toppleable: boolean;
 }
 
 export const ENEMY_STATS: Record<EnemyArchetype, StatBlock> = {
-  wisp: { hp: 2, speed: 3, move: 3, attack: 1, range: 1, ranged: false },
-  wraith: { hp: 3, speed: 4, move: 3, attack: 1, range: 3, ranged: true },
-  construct: { hp: 5, speed: 2, move: 2, attack: 2, range: 1, ranged: false }, // §8: bruiser must survive one full Weave
-  warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false },
+  wisp: { hp: 2, speed: 3, move: 3, attack: 1, range: 1, ranged: false, toppleable: false },
+  wraith: { hp: 3, speed: 4, move: 3, attack: 1, range: 3, ranged: true, toppleable: false },
+  construct: { hp: 5, speed: 2, move: 2, attack: 2, range: 1, ranged: false, toppleable: false }, // §8: bruiser must survive one full Weave
+  warden: { hp: 8, speed: 3, move: 2, attack: 2, range: 1, ranged: false, toppleable: false },
+  // Ch. VIII — the three Bestiary entries. The chapter fixes the LAWS ("low HP, fast";
+  // "slow, heavy, high HP"; "middling HP, drifting speed"); these numbers place them on the
+  // shipped board, where the Keeper is 10hp/move4/speed5 and Mira 6hp/move4/speed4.
+  //   lurker — the floor of the HP ladder (ties the wisp: one clean hit ends it) bought with
+  //     the ceiling of speed and reach: speed 5 is the fastest thing here, but initiative's
+  //     party-first tie-break still opens the round with the Keeper, so the ambush answers
+  //     rather than pre-empts; move 4 (no other enemy exceeds 3) is what "strikes and
+  //     relocates" costs. attack 1 reads as 2 on the opening tempo (+1 from the unseen) —
+  //     a real sting that still leaves Mira, the softest target at 6hp, standing.
+  //   husk — speed 1 is the slowest line on the board, under the construct's 2, and that is
+  //     the price of the heave: attack 2 matches the construct's, then adds a push AND a
+  //     Toppled on a landed one, so it must arrive late and rarely. hp 7 (over the construct,
+  //     under the Root-Husk's 8) is the "heavy" the chapter asks for — a wall to walk around.
+  //   pall — 4hp sits between the wraith's 3 and the construct's 5 ("middling" exactly);
+  //     speed/move 3 is the board's median, the "drifting" register. attack 1 because the
+  //     touch is not the payload: a battle-long −1 that also forbids closing is.
+  lurker: { hp: 2, speed: 5, move: 4, attack: 1, range: 1, ranged: false, toppleable: false },
+  husk: { hp: 7, speed: 1, move: 2, attack: 2, range: 1, ranged: false, toppleable: true },
+  pall: { hp: 4, speed: 3, move: 3, attack: 1, range: 1, ranged: false, toppleable: false },
 };
+
+/**
+ * Ch. VIII — runtime membership test for the closed `EnemyArchetype` enum, for the seams that
+ * take an id from OUTSIDE the type system: a pack's dungeon JSON (specResolve's load-time
+ * validation) and the `?enemies=` harness param. Backed by ENEMY_STATS, which is
+ * `Record<EnemyArchetype, StatBlock>` — its keys ARE the enum, exhaustively, by compile-time
+ * construction, so a future archetype cannot join the type without joining this guard too.
+ *
+ * Closes the gap the seam scout named: today a typo'd archetype reaches makeEnemy, indexes
+ * ENEMY_STATS to `undefined`, and crashes on `s.hp` at COMBAT LAUNCH — long after the pack
+ * that carried the typo was loaded.
+ */
+export function isEnemyArchetype(x: unknown): x is EnemyArchetype {
+  return typeof x === 'string' && Object.prototype.hasOwnProperty.call(ENEMY_STATS, x);
+}
+
+/** Ch. VIII — every archetype the engine can build, sorted, for error messages that tell an
+ *  author what they MAY write rather than only what they may not. */
+export function knownArchetypes(): EnemyArchetype[] {
+  return (Object.keys(ENEMY_STATS) as EnemyArchetype[]).sort();
+}
 
 /**
  * §9.1 — the BOSS Warden's own pool, 8 → 12. Verbatim Decree deals 6 against a boss (§7), so
@@ -51,6 +93,10 @@ const ENEMY_LABEL: Record<EnemyArchetype, string> = {
   // real boss carries elsewhere, reading in every turn/strike banner as if the boss itself were
   // a second, lesser copy of itself. Stats (ENEMY_STATS.warden) are unchanged — cosmetic only.
   warden: 'Root-Husk',
+  // Ch. VIII — the three entries, named from the chapter's own flavour lines.
+  lurker: 'Margin-Lurker',
+  husk: 'Name-Husk',
+  pall: 'Evening-Pall',
 };
 
 function base(partial: Partial<UnitState> & Pick<UnitState, 'id' | 'name' | 'team' | 'kind' | 'c' | 'r' | 'hp' | 'maxHp' | 'move' | 'speed'>): UnitState {

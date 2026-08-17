@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   STATUS_DEFS, hasStatus, statusMagnitude, clearStatus, applyStatus,
-  tickTurnStart, decayTurnEnd, effectiveMove, computeHit,
+  tickTurnStart, decayTurnEnd, effectiveMove, computeHit, CONSUMED_ON_OWN_ACTION,
   type StatusId, type StatusInstance,
 } from '../status';
-import { makeKeeper, makeEnemy } from '../units';
+import { makeKeeper, makeEnemy, ENEMY_STATS } from '../units';
 
 const STATUS_IDS: StatusId[] = [
   'kindled', 'bound', 'dimmed', 'warded', 'inked', 'emboldened', 'weakened', 'staggered',
@@ -222,7 +222,11 @@ describe('effectiveMove — bound-still-acts & dimmed floor (§3)', () => {
 });
 
 describe('computeHit — the one pipeline (§3 rule 4)', () => {
-  const noMods = { attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false };
+  const noMods = {
+    attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+    flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+    attackerUnwrittenOpeningTempo: false, adjacent: false,
+  };
 
   it('base only, no modifiers', () => {
     expect(computeHit({ base: 3, ...noMods })).toMatchObject({ hpDamage: 3, absorbed: 0 });
@@ -285,5 +289,369 @@ describe('computeHit — the one pipeline (§3 rule 4)', () => {
     const res = computeHit({ base: 1, ...noMods, targetStatuses });
     expect(res.absorbed).toBe(0);
     expect(res.targetStatuses).toBe(targetStatuses); // same reference — no needless copy
+  });
+});
+
+describe('Bestiary newcomers (Ch. VIII) — Task 1: pure groundwork', () => {
+  const NEWCOMER_IDS: StatusId[] = ['toppled', 'daunted', 'unwritten'];
+
+  describe('STATUS_DEFS', () => {
+    it('defines toppled/daunted/unwritten, each refresh-stacking with a real glyph', () => {
+      for (const id of NEWCOMER_IDS) {
+        expect(STATUS_DEFS[id].id).toBe(id);
+        expect(STATUS_DEFS[id].stack).toBe('refresh');
+        expect(STATUS_DEFS[id].glyph.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('none of the three carry a tickStart hook — their lifecycles are event-driven, wired outside this module', () => {
+      for (const id of NEWCOMER_IDS) {
+        expect(STATUS_DEFS[id].tickStart).toBeUndefined();
+      }
+    });
+  });
+
+  describe('decayTurnEnd — none of the three decay by time', () => {
+    it('toppled never ticks or expires, no matter how many turn-ends pass — it has no duration, only the rise consumes it', () => {
+      let statuses: StatusInstance[] = [{ id: 'toppled', turnsLeft: 1, magnitude: 0 }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'toppled', turnsLeft: 1, magnitude: 0 }]);
+    });
+
+    it('daunted never decays by time — battle-long until its source falls, a later seam', () => {
+      let statuses: StatusInstance[] = [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }]);
+    });
+
+    it('unwritten never decays by time — cleared only by acting or taking damage, both later seams', () => {
+      let statuses: StatusInstance[] = [{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }];
+      for (let i = 0; i < 10; i++) statuses = decayTurnEnd(statuses);
+      expect(statuses).toEqual([{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }]);
+    });
+  });
+
+  describe('applyStatus — keep-the-larger stands untouched for the three newcomers', () => {
+    it('toppled refresh-stacks like every other status: one instance, turnsLeft/magnitude keep the larger', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) };
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) }; // re-knocked mid-rise: still one instance
+      expect(u.statuses).toEqual([{ id: 'toppled', turnsLeft: 1, magnitude: 0 }]);
+      expect(u.statuses).toHaveLength(1);
+    });
+
+    it('unwritten refresh-stacks like every other status', () => {
+      let u = makeEnemy({ archetype: 'wisp' }, 0, 0, 0);
+      u = { ...u, statuses: applyStatus(u, 'unwritten', -1, 0) };
+      expect(u.statuses).toEqual([{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }]);
+    });
+
+    it("daunted keeps the larger turnsLeft/magnitude on refresh, exactly like Warded's max rule", () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 5, 2) }; // bigger re-application
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: 5, magnitude: 2, sourceId: 'pall-1' }]);
+    });
+  });
+
+  describe('StatusInstance.sourceId — additive-optional, only Daunted sets it', () => {
+    it('a fresh Daunted apply sets sourceId to the given source', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: 1, magnitude: 1, sourceId: 'pall-1' }]);
+    });
+
+    it('sourceId survives a refresh that omits it — it is not dropped', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 2, 1) }; // refresh, no sourceId argument this time
+      expect(u.statuses[0].sourceId).toBe('pall-1');
+    });
+
+    it('a later apply can overwrite sourceId with a new source', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', 1, 1, 'pall-2') };
+      expect(u.statuses[0].sourceId).toBe('pall-2');
+    });
+
+    it('toppled and unwritten never carry a sourceId — the key is absent, not just undefined', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'toppled', 1, 0) };
+      expect('sourceId' in u.statuses[0]).toBe(false);
+    });
+  });
+
+  describe('CONSUMED_ON_OWN_ACTION — the fourth lifecycle', () => {
+    it('contains exactly unwritten; the consuming hook itself lands at the CombatScene seam, later', () => {
+      expect(CONSUMED_ON_OWN_ACTION.has('unwritten')).toBe(true);
+      expect(CONSUMED_ON_OWN_ACTION.size).toBe(1);
+    });
+  });
+
+  describe('ENEMY_STATS.toppleable — topple-ability is per-entry data (units.ts)', () => {
+    it('topple-ability across all seven archetypes: only the Husk stands toppleable', () => {
+      // Carried rider (T8 sweep ratification): the original four (checked below solo) plus
+      // the lurker/pall pair — neither newcomer topples — pinned alongside the Husk's own YES.
+      for (const archetype of ['wisp', 'wraith', 'construct', 'warden', 'lurker', 'pall'] as const) {
+        expect(ENEMY_STATS[archetype].toppleable, archetype).toBe(false);
+      }
+      expect(ENEMY_STATS.husk.toppleable, 'husk').toBe(true);
+    });
+  });
+
+  describe('regression: the newcomers coexist with the original eight, no cross-contamination', () => {
+    it('decayTurnEnd ticks a co-applied Weakened down by 1 while Toppled sits untouched beside it', () => {
+      const statuses: StatusInstance[] = [
+        { id: 'weakened', turnsLeft: 2, magnitude: 1 },
+        { id: 'toppled', turnsLeft: 1, magnitude: 0 },
+      ];
+      expect(decayTurnEnd(statuses)).toEqual([
+        { id: 'weakened', turnsLeft: 1, magnitude: 1 },
+        { id: 'toppled', turnsLeft: 1, magnitude: 0 },
+      ]);
+    });
+
+    it('computeHit is unaffected by an unrelated Daunted status (with sourceId) sitting in the array', () => {
+      const res = computeHit({
+        base: 1,
+        attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
+        targetStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 0, sourceId: 'pall-1' }],
+        flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+        attackerUnwrittenOpeningTempo: false, adjacent: false,
+      });
+      expect(res.hpDamage).toBe(2); // base 1 + emboldened 1; daunted/sourceId untouched — no pipeline change this task
+    });
+  });
+});
+
+describe('Bestiary (Ch. VIII) — Task 4: Daunted mechanics', () => {
+  describe('computeHit — the −1 fold, active only while the source stands (mirrors weakened)', () => {
+    const base2 = {
+      base: 2, targetStatuses: [] as StatusInstance[], flank: false, overglow: false, weld: false, rider: false,
+      attackerUnwrittenOpeningTempo: false, adjacent: false,
+    };
+    const dauntedStatus = (magnitude = 1): StatusInstance[] => [{ id: 'daunted', turnsLeft: -1, magnitude, sourceId: 'pall-1' }];
+
+    it('source alive-on-board: deals −1', () => {
+      const res = computeHit({ ...base2, attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(1);
+    });
+
+    it('source NOT alive: no penalty, even though the status is still sitting on the attacker', () => {
+      const res = computeHit({ ...base2, attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: false });
+      expect(res.hpDamage).toBe(2);
+    });
+
+    it('attackerDauntedSourceAlive:true is a no-op when the attacker does not carry daunted at all', () => {
+      const res = computeHit({ ...base2, attackerStatuses: [], attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(2);
+    });
+
+    it('floors at 0, never negative — same floor rule as weakened', () => {
+      const res = computeHit({
+        base: 1, targetStatuses: [], flank: false, overglow: false, weld: false, rider: false,
+        attackerStatuses: dauntedStatus(), attackerDauntedSourceAlive: true,
+        attackerUnwrittenOpeningTempo: false, adjacent: false,
+      });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('stacks with weakened — both are −1 folds, applied together', () => {
+      const res = computeHit({
+        ...base2,
+        attackerStatuses: [...dauntedStatus(), { id: 'weakened', turnsLeft: 1, magnitude: 1 }],
+        attackerDauntedSourceAlive: true,
+      });
+      expect(res.hpDamage).toBe(0); // 2 - 1 (daunted) - 1 (weakened) = 0
+    });
+
+    it('reads magnitude via statusMagnitude exactly like weakened — not a hardcoded −1 literal', () => {
+      const res = computeHit({ ...base2, base: 3, attackerStatuses: dauntedStatus(2), attackerDauntedSourceAlive: true });
+      expect(res.hpDamage).toBe(1); // 3 - 2
+    });
+  });
+
+  describe('sourceId — repeated touches from the SAME source (T6 Pall sanity-check)', () => {
+    it('re-touching with an identical sourceId is a no-op for sourceId while turns/magnitude still keep-the-larger', () => {
+      let u = makeKeeper(0, 0);
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 1, 'pall-1') };
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 1, 'pall-1') }; // the Pall touches again, same instance
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 1, sourceId: 'pall-1' }]);
+
+      // A bigger re-touch (e.g. a stronger variant landing later) still keeps-the-larger on
+      // turns/magnitude, and sourceId — explicitly re-passed as the SAME id — stays put; this
+      // composes correctly because "overwrite" with an identical value is indistinguishable
+      // from "no-op" for sourceId specifically, while magnitude still refreshes to the max.
+      u = { ...u, statuses: applyStatus(u, 'daunted', -1, 3, 'pall-1') };
+      expect(u.statuses).toEqual([{ id: 'daunted', turnsLeft: -1, magnitude: 3, sourceId: 'pall-1' }]);
+    });
+  });
+});
+
+describe('Bestiary (Ch. VIII) — Task 5: Unwritten mechanics', () => {
+  describe('computeHit — the opening-tempo +1 fold (rides the act that consumes the status)', () => {
+    // Local equivalent of the "computeHit — the one pipeline" describe block's own `noMods`
+    // (that one is scoped to its own callback, not reachable here) — same shape, minus the
+    // field under test in this block.
+    const noMods = {
+      attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+      flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+      adjacent: false,
+    };
+
+    it('true adds a flat +1, same shape as flank/overglow/weld/rider', () => {
+      expect(computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true }).hpDamage).toBe(2);
+    });
+
+    it('false (the default, every-other-hit case): no bonus', () => {
+      expect(computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false }).hpDamage).toBe(1);
+    });
+
+    it('reacts to the FLAG only, not to whether attackerStatuses happens to carry the unwritten id — the caller decides which hit this is, this pure module just folds what it is told', () => {
+      const withStatusInArray = computeHit({
+        base: 1, ...noMods, attackerUnwrittenOpeningTempo: true,
+        attackerStatuses: [{ id: 'unwritten', turnsLeft: -1, magnitude: 0 }],
+      });
+      const withoutStatusInArray = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      expect(withStatusInArray.hpDamage).toBe(2);
+      expect(withoutStatusInArray.hpDamage).toBe(2);
+    });
+
+    it('stacks additively with other modifiers (emboldened + flank + opening tempo, all at once)', () => {
+      const res = computeHit({
+        base: 1, ...noMods, attackerUnwrittenOpeningTempo: true, flank: true,
+        attackerStatuses: [{ id: 'emboldened', turnsLeft: 1, magnitude: 1 }],
+      });
+      expect(res.hpDamage).toBe(4); // 1 + 1(emboldened) + 1(tempo) + 1(flank)
+    });
+
+    it('folds BEFORE the floor, like every other modifier — a heavily Weakened attacker still floors at 0 even with the tempo bonus stacked on top', () => {
+      // base 0, weakened(2) => pre-floor -2, tempo +1 => pre-floor -1 => floors to 0. If the
+      // bonus were (wrongly) applied AFTER the floor instead, this would read 1, not 0 — the
+      // number pins the pipeline ORDER, not just the sign.
+      const res = computeHit({
+        base: 0, ...noMods, attackerUnwrittenOpeningTempo: true,
+        attackerStatuses: [{ id: 'weakened', turnsLeft: 1, magnitude: 2 }],
+      });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('exactly-once, pinned at the pure-function level: two sequential calls modeling "the consuming act" then "the next act" both read correctly off whatever the caller passes', () => {
+      // Mirrors CombatScene's own sequence (enemyStrike): hit 1 fires while attacker.statuses
+      // still carries 'unwritten', so the caller passes true; consumeOnOwnAction then clears
+      // it; hit 2 fires with the caller now passing false, since attacker.statuses no longer
+      // carries it. This module has no memory between calls — exactly-once is a property of
+      // the CALLER's wiring (proven at the CombatScene/e2e level) — but this pins that
+      // computeHit itself never "remembers" a prior true and always reflects the current call.
+      const consumingAct = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const nextAct = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(consumingAct.hpDamage, 'the consuming act carries +1').toBe(2);
+      expect(nextAct.hpDamage, 'the next act is plain base — never again').toBe(1);
+    });
+
+    // Fix round 1 — controller ruling: an opportunity strike IS the holder acting, exactly like
+    // a turn-action hit (enemyStrike) — CombatScene now reads the SAME hasStatus/consumeOnOwnAction
+    // pattern at BOTH resolveOpportunityStrikes and enemyStrike. computeHit itself can't tell
+    // which of the two CombatScene seams a given call came from (it only ever sees the boolean
+    // the caller hands it) — these two tests pin that the arithmetic is correct and symmetric
+    // regardless of which seam fires FIRST for a given unit, which is the actual cross-path
+    // guarantee CombatScene's wiring relies on. Full end-to-end proof through the real OA
+    // machinery is deferred to Task 6 (no Unwritten unit can be walked-past in the shipped game
+    // until the Lurker exists) — these are this round's unit-level evidence.
+    it('cross-path exactly-once: an OA-from-unseen carries the tempo (and would consume the status); the SAME unit\'s later turn-action hit carries none', () => {
+      // Models resolveOpportunityStrikes firing first — the striker is still Unwritten going
+      // into its OA, so the caller passes true — then enemyStrike firing later that same round;
+      // the OA's own consumeOnOwnAction already cleared 'unwritten' by then, so the caller now
+      // passes false.
+      const oaHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const turnActionHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(oaHit.hpDamage, 'the OA is the first act from the unseen — it carries +1').toBe(2);
+      expect(turnActionHit.hpDamage, 'the turn-action hit is a LATER act — already revealed by the OA, no bonus').toBe(1);
+    });
+
+    it('cross-path exactly-once, the inverse ordering: a turn-action fires first and carries the tempo; a LATER OA from the same unit carries none', () => {
+      // Models enemyStrike firing first (still Unwritten, caller passes true) — its own
+      // consumeOnOwnAction clears the status — then a later OA from the same unit that round;
+      // the caller now passes false, since attacker.statuses no longer carries 'unwritten'.
+      const turnActionHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: true });
+      const oaHit = computeHit({ base: 1, ...noMods, attackerUnwrittenOpeningTempo: false });
+      expect(turnActionHit.hpDamage, 'the turn-action is the first act from the unseen — it carries +1').toBe(2);
+      expect(oaHit.hpDamage, 'a later OA from the same (already-revealed) unit carries no bonus').toBe(1);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 8b (plan amendment) — Ch. V/Ch. VIII's own text, twice over: "adjacent attackers deal +1
+// against it, non-adjacent −1" / "Damage vs a Toppled unit: adjacent attackers +1, non-adjacent
+// −1 (the ±1 idiom, both directions)." Task 8's completeness sweep proved this was never wired —
+// e2e/bestiary.spec.ts's "bestiary FINDING" pin is the acceptance floor this implementation flips
+// green. The term is TARGET-side (reads targetStatuses for 'toppled', like inked) gated by a
+// caller-supplied `adjacent` input (like flank — board geometry this pure module can't compute
+// itself), and joins the SAME pre-floor modifier family as daunted/weakened/unwritten-tempo — no
+// special-casing, no new floor law.
+// ---------------------------------------------------------------------------------------
+describe('Bestiary (Ch. V/Ch. VIII) — Task 8b: Toppled damage, the ±1 idiom', () => {
+  describe('computeHit — the toppled fold, target-side + caller-supplied adjacency', () => {
+    // Local equivalent of the "computeHit — the one pipeline" describe block's own `noMods`
+    // (not reachable here, same reason Task 5's own local copy exists above) — same shape, plus
+    // this task's own `adjacent` field passed explicitly per-test (never defaulted here, so
+    // every case below states its own intent).
+    const noMods = {
+      attackerStatuses: [] as StatusInstance[], targetStatuses: [] as StatusInstance[],
+      flank: false, overglow: false, weld: false, rider: false, attackerDauntedSourceAlive: false,
+      attackerUnwrittenOpeningTempo: false,
+    };
+    const toppledStatus: StatusInstance[] = [{ id: 'toppled', turnsLeft: 1, magnitude: 1 }];
+
+    it('adjacent attacker deals +1 against a Toppled target', () => {
+      const res = computeHit({ base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      expect(res.hpDamage).toBe(3);
+    });
+
+    it('non-adjacent attacker deals −1 against a Toppled target', () => {
+      const res = computeHit({ base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: false });
+      expect(res.hpDamage).toBe(1);
+    });
+
+    it('un-toppled target: adjacent is a no-op either way — no term applies without the status', () => {
+      expect(computeHit({ base: 2, ...noMods, adjacent: true }).hpDamage).toBe(2);
+      expect(computeHit({ base: 2, ...noMods, adjacent: false }).hpDamage).toBe(2);
+    });
+
+    it('stacks with the attacker-side Daunted −1: adjacent-Toppled(+1) and Daunted(−1) net to zero — base passes through unchanged', () => {
+      const res = computeHit({
+        base: 2, ...noMods, targetStatuses: toppledStatus, adjacent: true,
+        attackerStatuses: [{ id: 'daunted', turnsLeft: -1, magnitude: 1, sourceId: 'pall-1' }],
+        attackerDauntedSourceAlive: true,
+      });
+      expect(res.hpDamage).toBe(2); // 2 +1 (toppled, adjacent) −1 (daunted) = 2 — the two ±1s cancel
+    });
+
+    it('symmetric by construction: an enemy blow against a Toppled party member folds the identical +1 a party Strike gets against a Toppled enemy', () => {
+      // computeHit has no notion of "team" anywhere in its signature — only ever
+      // attackerStatuses/targetStatuses — so nothing here COULD special-case a direction. Each
+      // side gets its own realistic base (Keeper's Strike is 1; the Husk's own blow reads off
+      // ENEMY_STATS rather than a hardcoded literal) so this reads as two distinct scenarios,
+      // not one literal duplicate.
+      const keeperStrikesToppledHusk = computeHit({ base: 1, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      const huskHitsToppledKeeper = computeHit({ base: ENEMY_STATS.husk.attack, ...noMods, targetStatuses: toppledStatus, adjacent: true });
+      expect(keeperStrikesToppledHusk.hpDamage, 'party-vs-toppled-enemy: base 1 +1').toBe(2);
+      expect(huskHitsToppledKeeper.hpDamage, "enemy-vs-toppled-party: base (husk's own attack) +1").toBe(ENEMY_STATS.husk.attack + 1);
+    });
+
+    it('floors at 0, never negative — same floor rule as weakened/daunted (non-adjacent −1 alone on a 0 base)', () => {
+      const res = computeHit({ base: 0, ...noMods, targetStatuses: toppledStatus, adjacent: false });
+      expect(res.hpDamage).toBe(0);
+    });
+
+    it('floor interaction inherited: non-adjacent −1 stacks with Weakened −1 and still floors at 0, never negative', () => {
+      const res = computeHit({
+        base: 1, ...noMods, targetStatuses: toppledStatus, adjacent: false,
+        attackerStatuses: [{ id: 'weakened', turnsLeft: 1, magnitude: 1 }],
+      });
+      expect(res.hpDamage).toBe(0); // 1 −1 (toppled, non-adjacent) −1 (weakened) = −1 → floors to 0
+    });
   });
 });

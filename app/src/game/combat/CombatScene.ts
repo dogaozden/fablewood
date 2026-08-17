@@ -24,7 +24,7 @@ import {
 } from './types';
 import {
   buildLayout, computeMoveField, reachableTiles, pathTo, crossTiles, lineTiles,
-  forceMove, blocksSight, hasLineOfFire, type Layout, type MoveField, type ForceMoveBoard,
+  forceMove, blocksSight, hasLineOfFire, filterDauntedField, type Layout, type MoveField, type ForceMoveBoard,
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction, isFlanked, applyAmendedMercy, stripPartyHarmOps, AMENDED_MERCY_LINE } from './damage';
@@ -33,12 +33,12 @@ import {
   shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
 } from './boss';
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
-import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE } from './units';
+import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
-import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, STATUS_DEFS, type StatusId } from './status';
-import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, type TurnBudget } from './turnBudget';
+import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId, type StatusInstance } from './status';
+import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
 import { CombatHud, type TierRow, type OverglowRow } from './hud';
-import { fixtureLaunch, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
+import { fixtureLaunch, parseEnemiesParam, FIXTURE_FACTS, FIXTURE_PACK_ID } from './fixtures';
 import { P, hex } from './palette';
 import { music } from '../../music/instance';
 import { usableSatchelItems, resolveHealUse } from './satchel';
@@ -260,6 +260,21 @@ export class CombatScene extends Phaser.Scene {
   private tileImages = new Map<string, Phaser.GameObjects.Image>();
   /** §4.2 — per-turn toggle ('c'): half move, provokes no opportunity strikes. Reset each turn. */
   private carefulStepOn = false;
+  /** Ch. VIII — this turn's rise-tolled movement base (raw effectiveMove halved by the house
+   *  floor via tollRise), set ONCE per unit in advanceTurn's shared turn-start seam. Both
+   *  moveBudgetFor (party) and runEnemyTurn's effMove (enemy) read this SAME field instead of
+   *  re-deriving from raw effectiveMove — one source of truth, so the budget/moveField/AI-input
+   *  can't disagree the way the W6 split-read bug let them. null = no toll this turn (the
+   *  common case); reset every turn, not just rising ones, so a past toll never leaks forward. */
+  private tolledMoveBase: number | null = null;
+  /** Ch. VIII — units currently mid-rise (Toppled just consumed this round): the opportunity
+   *  latch is disabled for them, the same idiom as Staggered (§4.2/opportunityStrikers), but
+   *  Toppled carries no duration to check via hasStatus — it's gone the instant the rise
+   *  happens. Turn-scoped scene state instead: added at the rise, cleared PER-UNIT at that
+   *  unit's own next turn start (fix round 1, I1 — NOT a bulk round-wrap clear: a non-first
+   *  unit's own next turn lands mid the FOLLOWING round, after that round's earlier actors
+   *  already moved, so a bulk clear at round-wrap would re-arm its latch one slot too early). */
+  private midRiseIds = new Set<string>();
   /** debounces the status hover-line banner so POINTER_MOVE doesn't retrigger it every pixel. */
   private hoveredStatusUnitId: string | null = null;
 
@@ -347,7 +362,12 @@ export class CombatScene extends Phaser.Scene {
       this.launch = data as CombatLaunch;
     } else {
       const seed = (data && 'seed' in data && typeof data.seed === 'number') ? data.seed : 1;
-      this.launch = fixtureLaunch(seed, params.get('boss') === '1', params.get('kit') === '1');
+      this.launch = fixtureLaunch(
+        seed, params.get('boss') === '1', params.get('kit') === '1',
+        // Ch. VIII Task 6 — `?enemies=lurker,husk,pall`: packless archetype selection for the
+        // dev/e2e harness, beside the three existing hardcoded fixture flags.
+        parseEnemiesParam(params.get('enemies')),
+      );
     }
   }
 
@@ -405,6 +425,8 @@ export class CombatScene extends Phaser.Scene {
     this.bossReveal = null;
     this.tileImages.clear();
     this.carefulStepOn = false;
+    this.tolledMoveBase = null;
+    this.midRiseIds.clear();
     this.hoveredStatusUnitId = null;
     this.rank = 1;
     this.rankInfo = { rank: 1, welded3: 0, welded4: 0 };
@@ -519,7 +541,14 @@ export class CombatScene extends Phaser.Scene {
     const enemies = this.launch.room.enemies ?? [];
     enemies.forEach((spec, i) => {
       const at = es[i % es.length] ?? { c: GRID_W - 2, r: 2 + i };
-      this.units.push(makeEnemy(spec, i, at.c, at.r));
+      const enemy = makeEnemy(spec, i, at.c, at.r);
+      // Ch. VIII — the Lurker "begins combat Unwritten" (the chapter's own words), so the status
+      // is granted at SPAWN, before initiative is even built: it is not something the entry does
+      // on its first turn, it is the state it is discovered in. Everything after this is the
+      // shipped Unwritten lifecycle — untargetable by Strike/Shove, +1 on its opening act,
+      // consumed by acting or by taking damage — with no Lurker-specific branch anywhere.
+      if (enemy.kind === 'lurker') enemy.statuses = applyStatus(enemy, 'unwritten', 1, 1);
+      this.units.push(enemy);
     });
 
     if (this.launch.room.boss) {
@@ -669,16 +698,39 @@ export class CombatScene extends Phaser.Scene {
     this.updateDanger(u);
   }
 
-  /** §3/§12.3 — up to 3 status chips (CHIP_KEYS glyphs) under the HP bar, overflow '+'. */
+  /**
+   * Ch. VIII Task 6 — the statuses a unit SHOWS, as opposed to the ones it carries.
+   *
+   * An INERT Daunted (its source off the board) still sits on `statuses`: the chapter consumes
+   * that condition by event, not by decay. But it has stopped applying in every way that matters
+   * — computeHit's penalty, the move-field filter and the AI's own read all gate on
+   * source-alive — so no presentation surface should go on announcing a fear that has lifted.
+   * Hidden, never cleared: removing the instance would be a mechanical change, and every caller
+   * of this is presentation only.
+   *
+   * ONE definition, consulted by BOTH condition-rendering surfaces (the chip row below and the
+   * §12.3 hover banner). Fix round 1 landed because the first pass filtered only the chip row,
+   * leaving the banner to announce "Daunted 1" over an empty row — a second surface drifting
+   * from the same law is exactly what a shared helper prevents. Mechanical readers keep reading
+   * `statuses` directly and are deliberately untouched.
+   */
+  private visibleStatuses(u: UnitState): StatusInstance[] {
+    return u.statuses.filter((s) => s.id !== 'daunted' || this.dauntedSourceAlive(u));
+  }
+
+  /** §3/§12.3 — up to 3 status chips (CHIP_KEYS glyphs) under the HP bar, overflow '+'.
+   *  Everything downstream (MAX, the overflow '+') reads the VISIBLE list, so a hidden chip
+   *  can't leave a phantom slot or a '+' counting something invisible. */
   private drawStatusChips(u: UnitState, v: UnitView, chipY: number): void {
     for (const c of v.chips) c.destroy();
     v.chips = [];
-    if (!u.statuses.length) return;
+    const visible = this.visibleStatuses(u);
+    if (!visible.length) return;
     const SIZE = 10;
     const GAP = 2;
     const MAX = 3;
-    const shown = u.statuses.slice(0, MAX);
-    const overflow = u.statuses.length > MAX;
+    const shown = visible.slice(0, MAX);
+    const overflow = visible.length > MAX;
     const n = shown.length + (overflow ? 1 : 0);
     let cx = -(n * SIZE + (n - 1) * GAP) / 2 + SIZE / 2;
     for (const s of shown) {
@@ -878,6 +930,19 @@ export class CombatScene extends Phaser.Scene {
     this.hud.setActive(unit.id, this.aliveIds());
     this.focusCue(unit);
 
+    // Ch. VIII fix round 1 (I1) — mid-rise clears PER-UNIT, at that unit's own next turn start,
+    // NOT in bulk at round-wrap. The chapter's law is "until the unit's NEXT turn" — for a unit
+    // that isn't first in initiative (every enemy; Mira), its own next turn lands MID the
+    // following round, strictly after that round's earlier actors already moved. A bulk clear
+    // at round-wrap (the original shape) would re-arm a non-first unit's latch at the TOP of
+    // the next round — before its own turn — wrongly exposing an early actor (e.g. the Keeper)
+    // to a strike the chapter says should still be suppressed. Unconditional and first thing in
+    // this unit's own turn-start processing: a stale mark from an earlier rise naturally expires
+    // the instant this next turn arrives, regardless of what the turn holds afterward (a
+    // Kindled death, a Staggered skip, or a normal turn) — mirrors how tickTurnStart's own
+    // Kindled/Staggered handling below runs unconditionally at turn start too.
+    this.midRiseIds.delete(unit.id);
+
     // §3 rule 2 — tick order at turn start: (a) Kindled damage via the damageUnit choke point
     // (may kill); (b) Staggered — consumed, turn ends here before the unit can act. Replaces
     // the old skipNextTurn read/write block (skipNextTurn itself stays on UnitState one release
@@ -902,6 +967,30 @@ export class CombatScene extends Phaser.Scene {
       this.time.delayedCall(650, () => this.advanceTurn());
       return;
     }
+
+    // Ch. VIII — the rise toll: a Toppled unit stands automatically at its own turn start,
+    // paying half THIS turn's movement base before anything else touches it (composition law:
+    // toll first, stance second — Ch. VI's halving identity holds relative to the TOLLED base).
+    // ONE shared seam for party and enemy alike — the Husk can Topple the retinue same as Shove
+    // topples the Husk (Ch. VIII) — so `tolledMoveBase` is set here, once, and BOTH
+    // moveBudgetFor (party, via beginPlayerTurn below) and runEnemyTurn's effMove read the same
+    // value rather than each re-deriving it from raw effectiveMove (the W6 split-read lesson).
+    // Reset here on every turn that reaches this point (not just a rise) so a previous turn's
+    // toll can never leak into a later budget read; the condition itself is consumed here too,
+    // per the chapter ("carries no duration — it is consumed by the rise"). M1 (fix round): the
+    // two early returns above (Kindled death, Staggered) skip this reset entirely — the actual
+    // guarantee against leakage isn't the reset's unconditionality, it's that neither path ever
+    // computes a budget or move field for a dead or turn-skipped unit; a stale value only leaks
+    // once something reads it, and nothing does.
+    if (hasStatus(unit.statuses, 'toppled')) {
+      unit.statuses = unit.statuses.filter((s) => s.id !== 'toppled');
+      this.tolledMoveBase = tollRise(effectiveMove(unit.move, unit.statuses));
+      this.midRiseIds.add(unit.id);
+      this.hud.showBanner(`${unit.name} rises, unsteady — half speed this turn.`, P.timber);
+    } else {
+      this.tolledMoveBase = null;
+    }
+
     if (unit.team === 'party') {
       // §5.1 Glow source 2 — a party unit starting ITS turn on a lit lantern tile grants +1
       // Glow. Checked exactly once, right here at turn start, so no stacking trick is possible;
@@ -936,7 +1025,7 @@ export class CombatScene extends Phaser.Scene {
     this.pendingAction = null;
     this.pendingSpell = null;
     this.overglowOn = false;
-    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.moveBudgetFor(unit));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -946,9 +1035,11 @@ export class CombatScene extends Phaser.Scene {
     if (this.demo) this.time.delayedCall(520, () => this.autoStep(unit));
   }
 
-  /** §3 Bound/Dimmed (effectiveMove) composed with §4.2 Careful Step's half-move toggle. */
+  /** §3 Bound/Dimmed (effectiveMove) composed with §4.2 Careful Step's half-move toggle. Ch.
+   *  VIII: on a rising turn, `tolledMoveBase` (set once in advanceTurn) REPLACES the raw
+   *  effectiveMove call as this turn's base — toll first, stance second, per the chapter. */
   private moveBudgetFor(unit: UnitState): number {
-    const eff = effectiveMove(unit.move, unit.statuses);
+    const eff = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     return this.carefulStepOn ? carefulStepMove(eff) : eff;
   }
 
@@ -980,7 +1071,7 @@ export class CombatScene extends Phaser.Scene {
       actionSpent: this.budget.actionSpent,
       pressedOn: this.budget.pressedOn,
     };
-    this.moveField = computeMoveField(unit, this.moveBudgetFor(unit), this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.moveBudgetFor(unit));
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -1001,9 +1092,12 @@ export class CombatScene extends Phaser.Scene {
    *  Reuses returnToActionMenu's own "recompute the move field off budget.left, then reshow the
    *  menu" idiom — Press On spends the action exactly like the five gated action handlers, just
    *  with no delayedCall presentation beat (nothing here can fell anyone, so there's no checkEnd
-   *  to run first). */
+   *  to run first). Ch. VIII: on a rising turn `tolledMoveBase` stands in for raw effectiveMove
+   *  here too — the identity above holds RELATIVE TO THE TOLLED BASE, per the chapter's
+   *  composition law (toll first, stance second), so Press On must combine off the same tolled
+   *  eff moveBudgetFor already used to seed `this.budget.total`, not the untolled one. */
   private pressOn(unit: UnitState): void {
-    const eff = effectiveMove(unit.move, unit.statuses);
+    const eff = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     const combined = this.carefulStepOn ? carefulStepMove(eff + eff) : eff + eff;
     const bonus = combined - this.budget.total;
     this.budget = grantPressOn(this.budget, bonus);
@@ -1200,10 +1294,99 @@ export class CombatScene extends Phaser.Scene {
     this.showMenu(unit);
   }
 
+  /** Ch. VIII — can a LANDED push knock `target` Toppled. Two answers, and the asymmetry is the
+   *  chapter's, not an oversight:
+   *   - The RETINUE always can. The chapter's symmetry clause is explicit — "the Husk's blow can
+   *     Topple the retinue" — and the Keeper and Mira carry no `toppleable` stat because they
+   *     are not bestiary entries, not because they are immovable. (Shove can never reach them:
+   *     validTargets' shove case is enemies-only, so this branch serves the Husk's heave alone.)
+   *   - An ENEMY answers from its own per-entry stat (units.ts ENEMY_STATS). Today exactly one
+   *     entry says yes: the Husk. `target.kind` narrows to EnemyArchetype once 'keeper'/'mira'
+   *     are excluded, so ENEMY_STATS indexes directly after that.
+   *  Task 3's debugForceToppleable hook is gone with this: it existed only to fake a toppleable
+   *  entry before one existed, and the real one is here now. */
+  private isToppleable(target: UnitState): boolean {
+    if (target.kind === 'keeper' || target.kind === 'mira') return true;
+    return ENEMY_STATS[target.kind].toppleable;
+  }
+
+  /** Ch. VIII — Unwritten cannot be TARGETED by Strikes (and Shove) while it holds; spells and
+   *  area effects reach it fine (the chapter's own distinction) — so this predicate belongs ONLY
+   *  on Strike/Shove's own validTargets branches, never weave/sequence/cast/smite/parley. Wired
+   *  into Shove's own case (Task 3) and, below, Strike's own case (Task 5) — the two the
+   *  chapter names explicitly, reusing this exact method by name rather than duplicating it. */
+  private isStrikeTargetable(target: UnitState): boolean {
+    return !hasStatus(target.statuses, 'unwritten');
+  }
+
+  /** Ch. VIII Task 5 — the fourth status lifecycle (status.ts's CONSUMED_ON_OWN_ACTION): clears
+   *  every status in that set the instant `unit` completes ITS OWN action. Generic over set
+   *  membership (`CONSUMED_ON_OWN_ACTION.has(s.id)`, never a hardcoded 'unwritten') per
+   *  status.ts's own documented intent, so a future addition to the set needs no second
+   *  CombatScene edit. Wired at BOTH branches of the enemy action-execution seam
+   *  (runEnemyTurn's doAttack, below): enemyStrike's base-kit hit calls this itself (ordering
+   *  matters there — see its own comment), and the Warden's phase script (runWardenScript) is
+   *  covered directly in doAttack, since either can be "the holder's own action" for a unit
+   *  that carries a consumed-on-own-action status. A safe no-op whenever `unit` carries none of
+   *  the set's members — i.e. every unit, every turn, until Task 6's Lurker exists. */
+  private consumeOnOwnAction(unit: UnitState): void {
+    if (unit.statuses.some((s) => CONSUMED_ON_OWN_ACTION.has(s.id))) {
+      const wasUnwritten = hasStatus(unit.statuses, 'unwritten');
+      unit.statuses = unit.statuses.filter((s) => !CONSUMED_ON_OWN_ACTION.has(s.id));
+      // Ch. VIII Task 6 (carried cosmetic) — trigger 1's half of the reveal notice; trigger 2's
+      // lives in damageUnit. Kept specific to 'unwritten' rather than firing for any future
+      // member of CONSUMED_ON_OWN_ACTION, whose reveal would want its own words.
+      if (wasUnwritten) this.revealNotice(unit);
+    }
+  }
+
+  /** Ch. VIII Task 6 (carried cosmetic) — the beat where a thing stops being Unwritten and
+   *  enters the Ledger. One word, parchment-toned, floated off the revealed unit: the entry is
+   *  no longer un-entered. Both triggers route here so the reveal never differs by cause. */
+  private revealNotice(unit: UnitState): void {
+    if (this.destroyed || !unit.alive) return;
+    this.floatText(unit, 'Written.', P.parchment);
+  }
+
+  /** Ch. VIII Task 4 — if `unit` is actively Daunted (carries the status AND its source is
+   *  still alive-on-board), the source's CURRENT tile; else null. The one scene-side seam
+   *  both consumers below read: neither status.ts's computeHit nor grid.ts's filterDauntedField
+   *  has board access to answer "is the source still standing" itself. A dead source's stale
+   *  StatusInstance is left in place (inert, not cleared) — this is a LIVE read of `unit.alive`
+   *  on the source every time, so the −1 fold and the move-field filter both lift the instant
+   *  the source falls (damageUnit's `alive = false`, or syncBoss's own — no separate sweep
+   *  needed, and no seam can forget to clear it since there's nothing cached to forget). */
+  private dauntedSourceCoord(unit: UnitState): Coord | null {
+    const inst = unit.statuses.find((s) => s.id === 'daunted');
+    if (!inst?.sourceId) return null;
+    const src = this.unitById(inst.sourceId);
+    return src?.alive ? { c: src.c, r: src.r } : null;
+  }
+
+  /** Ch. VIII Task 4 — computeHit's `attackerDauntedSourceAlive` input: true only while `unit`
+   *  is held by an active Daunted. */
+  private dauntedSourceAlive(unit: UnitState): boolean {
+    return this.dauntedSourceCoord(unit) !== null;
+  }
+
+  /** Ch. VIII Task 4 — every PARTY move-field site routes through this instead of calling
+   *  computeMoveField directly: when `unit` is actively Daunted, the raw field is further
+   *  filtered (grid.ts's filterDauntedField, excluding tiles closer to the source than `unit`'s
+   *  own current tile) before becoming `this.moveField`/`this.reachable`. Same budget/blockedFor
+   *  arguments as before at every call site — this composes with W6's budget.left recompute
+   *  idiom rather than replacing it. */
+  private partyMoveField(unit: UnitState, budget: number): MoveField {
+    const field = computeMoveField(unit, budget, this.layout.tiles, this.blockedFor(unit.id));
+    const src = this.dauntedSourceCoord(unit);
+    return src ? filterDauntedField(field, unit, src, this.layout.tiles) : field;
+  }
+
   private validTargets(unit: UnitState, action: ActionKind): UnitState[] {
     const enemies = this.units.filter((u) => u.alive && u.team === 'enemy');
     switch (action) {
-      case 'strike': return enemies.filter((e) => manhattan(unit, e) <= 1);
+      // Ch. VIII Task 5 — Strike excludes Unwritten, same law/predicate as Shove below
+      // (isStrikeTargetable); spells/area effects (every other case here) are untouched.
+      case 'strike': return enemies.filter((e) => manhattan(unit, e) <= 1 && this.isStrikeTargetable(e));
       case 'smite': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'weave': return enemies.filter((e) => manhattan(unit, e) <= 2);
       case 'cast': return enemies.filter((e) => manhattan(unit, e) <= 3);
@@ -1212,6 +1395,9 @@ export class CombatScene extends Phaser.Scene {
         // §4.4 — mist (and walls) block Ritecraft lines the same way they block LoF;
         // hasLineOfFire already encodes same-row/col + range + the intervening-tile check.
         return enemies.filter((e) => hasLineOfFire(unit, e, ACTIONS.sequence.range, this.layout.tiles));
+      // Ch. VIII Task 3 — Shove: adjacent only (range 1, same reach as Strike), Unwritten-excluded
+      // (isStrikeTargetable, above — the chapter names Strikes AND Shove explicitly).
+      case 'shove': return enemies.filter((e) => manhattan(unit, e) <= 1 && this.isStrikeTargetable(e));
       case 'satchel':
       case 'wait':
       case 'press_on':
@@ -1458,7 +1644,7 @@ export class CombatScene extends Phaser.Scene {
       // the REMAINING budget from the new position, so a spent-out move correctly reachables
       // to nothing (drawMoveRange then draws nothing) while a partial spend shows the
       // remainder — the affordance the "move the remainder" half of the turn depends on.
-      this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+      this.moveField = this.partyMoveField(unit, this.budget.left);
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();
@@ -1480,7 +1666,7 @@ export class CombatScene extends Phaser.Scene {
     if (carefulStep) return;
     for (const vacated of path.slice(0, -1)) {
       if (!mover.alive) return;
-      for (const striker of opportunityStrikers(vacated, mover.team, this.units)) {
+      for (const striker of opportunityStrikers(vacated, mover.team, this.units, this.midRiseIds)) {
         if (!mover.alive) break;
         // §9.3 — an opportunity strike is free-lane steel, so the Warden's Objection answers it
         // exactly like a Strike: negated, riposted, and the striker's one-per-round is still
@@ -1496,13 +1682,31 @@ export class CombatScene extends Phaser.Scene {
         // Strike bonus rides it too. The team guard is explicit for the same reason the Strike's
         // own Glow gain guards: this method resolves BOTH directions (enemies strike a party
         // mover as readily as the reverse), and the Fade never swings with the Keeper's level.
+        //
+        // Ch. VIII Task 5 fix round 1 — controller ruling: an opportunity strike IS the holder
+        // ACTING ("cleared the moment the holder ACTS" has no turn-action carve-out, and
+        // in-fiction the stab from the unseen is exactly what writes the thing into the
+        // Ledger). Read the tempo flag BEFORE computeHit (still true if `striker` is going
+        // into this swing still Unwritten), same read-then-consume shape as enemyStrike below.
+        const unwrittenOpeningTempo = hasStatus(striker.statuses, 'unwritten');
+        // Task 8b — computed for real, not hardcoded true, even though opportunityStrikers'
+        // own filter (ai.ts) only ever returns strikers already at manhattan(vacated, u) === 1:
+        // the census rule is uniform computation at every computeHit call site, no exceptions
+        // for sites where adjacency happens to be geometrically guaranteed.
+        const adjacent = manhattan(striker, vacated) === 1;
         const result = computeHit({
           base: 1 + (striker.team === 'party' ? this.strikeBonus : 0),
           attackerStatuses: striker.statuses, targetStatuses: mover.statuses,
           flank, overglow: false, weld: false, rider: false,
+          attackerDauntedSourceAlive: this.dauntedSourceAlive(striker),
+          attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
+          adjacent,
         });
         mover.statuses = result.targetStatuses;
         striker.oaSpent = true;
+        // Trigger 1 (own action): the striker just swung, regardless of whether it landed —
+        // consume unconditionally here, same as enemyStrike, not gated on result.hpDamage > 0.
+        this.consumeOnOwnAction(striker);
         if (result.hpDamage > 0) {
           this.hud.showBanner(`${striker.name} strikes as ${mover.name} withdraws.`, P.berry);
           this.damageUnit(mover, result.hpDamage, P.berry);
@@ -1593,6 +1797,10 @@ export class CombatScene extends Phaser.Scene {
       });
       return;
     }
+
+    // Ch. VIII Task 3 — Shove: targeted like Strike above (adjacent enemy, resolved once a
+    // target tile is picked), but never damage — resolves via its own gated handler.
+    if (action === 'shove') { this.shove(unit, target, tile); return; }
 
     // §12.2 — a T2/T3 spell chosen via the flyout resolves through the SpellDef/BoardOp
     // pipeline (castGatedSpell) instead of the T1 resolveAction/applyOutcome chain below,
@@ -2175,9 +2383,18 @@ export class CombatScene extends Phaser.Scene {
         const target = this.unitById(op.targetId);
         if (!target?.alive) continue;
         if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); continue; }
+        // Task 8b — a spell's real attacker/target board positions (unlike spells.ts's own
+        // pure pre-pass): the ranged half of the ±1 idiom lives here (a cast at range 2+ vs a
+        // Toppled target reads non-adjacent, −1).
+        const adjacent = manhattan(caster, target) === 1;
         const result = computeHit({
           base: op.amount, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
           flank: false, overglow: false, weld: false, rider: false,
+          attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
+          // Ch. VIII Task 5 — moot: `caster` here is always party-side (Unwritten is
+          // enemies-only), so attacker.statuses can never carry it; false is the inert value.
+          attackerUnwrittenOpeningTempo: false,
+          adjacent,
         });
         target.statuses = result.targetStatuses;
         if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, ACTIONS[action].tint);
@@ -2213,8 +2430,19 @@ export class CombatScene extends Phaser.Scene {
   /** §4.3 forced movement, applied to a spell's push (Cinder-Rebuke/Processional): same
    *  forceMove + bump-damage rules as the construct's Vault-Slam and the Warden's Writ of
    *  Seizure (enemyStrike below). `spell` carries the §9.2 shield gate for the bump damage —
-   *  null when the push came from an enemy kit rather than a cast. */
-  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, spell: SpellDef | null): void {
+   *  null when the push came from an enemy kit rather than a cast. Returns whether the push
+   *  LANDED (moved), so a caller can act on it (Ch. VIII Task 3 — Shove knocking a toppleable
+   *  target Toppled only on a landed push; the existing spell-push call site below ignores it,
+   *  same as it always ignored this method's prior `void` return).
+   *
+   *  Ch. VIII Task 3 — `opts.bump` (default true) parameterizes the shipped bump-damage branch:
+   *  Shove passes `{ bump: false }` so the bump is suppressed ALWAYS, even on a blocked push (the
+   *  chapter's own wording); the existing Cinder-Rebuke/Processional call site below passes no
+   *  opts, so it keeps its bump exactly as before — this default preserves every enemy push too,
+   *  should one ever route through this method instead of enemyStrike's own separate inline
+   *  forceMove call. */
+  private pushUnit(caster: UnitState, target: UnitState, dir: Dir, spell: SpellDef | null, opts: { bump?: boolean } = {}): boolean {
+    const { bump = true } = opts;
     const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
     const res = forceMove(target, dir, board);
     if (res.moved) {
@@ -2225,19 +2453,70 @@ export class CombatScene extends Phaser.Scene {
         v.container.setDepth(10 + target.r);
         this.tweens.add({ targets: v.container, x: p.x, y: p.y, duration: 140 });
       }
-      return;
+      return true;
     }
-    if (!res.bump) return;
-    if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return; }
+    if (!bump || !res.bump) return false;
+    if (wardenAbsorbs(spell, target.isBoss, this.shields)) { this.floatText(target, 'shielded', P.waterLight); return false; }
+    // Task 8b — real board positions: `target` never moved on this branch (the push was
+    // blocked, `!res.moved`), so its position here is still the live one the bump lands on.
+    const adjacent = manhattan(caster, target) === 1;
     const result = computeHit({
       base: 1, attackerStatuses: caster.statuses, targetStatuses: target.statuses,
       flank: false, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(caster),
+      // Ch. VIII Task 5 — moot: `caster` here is always party-side (Cinder-Rebuke/Processional's
+      // own push, or Shove's `unit`) — enemy heaves use enemyStrike's own separate inline
+      // forceMove, never this method. False is the inert value.
+      attackerUnwrittenOpeningTempo: false,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) {
       this.damageUnit(target, result.hpDamage, P.berry);
       this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
     }
+    return false;
+  }
+
+  /** Ch. VIII Task 3 — Shove: a free-lane push beside Strike/Brace, never damage. TARGETED like
+   *  Strike (called from runPlayerAction once a target tile is picked, unlike self-cast
+   *  Brace/Press On), so its own completion gate mirrors Brace's canonical shape exactly
+   *  (effect → feedback → delayedCall → alive-guard → spendAction → turnExhausted ?
+   *  endPlayerTurn : checkEnd-first + steps-remain + returnToActionMenu). Pushes 1 tile away;
+   *  blocked (wall/edge/occupied) = no move and the bump is suppressed ALWAYS (pushUnit's new
+   *  `{ bump: false }` — Cinder-Rebuke/Processional's own push and every enemy heave keep their
+   *  bump, unaffected). A LANDED push against a toppleable entry (isToppleable, above) also
+   *  knocks it Toppled. No contested checks, ever — costs the action either way (Ch. VI: "you
+   *  committed the shoulder"). */
+  private shove(unit: UnitState, target: UnitState | null, tile: Coord): void {
+    if (target) {
+      const dir = this.dirTo(unit, tile);
+      if (dir) {
+        const landed = this.pushUnit(unit, target, dir, null, { bump: false });
+        if (landed && target.alive && this.isToppleable(target)) {
+          target.statuses = applyStatus(target, 'toppled', 1, 1);
+          this.drawHpBar(target);
+          this.floatText(target, STATUS_DEFS.toppled.label, STATUS_DEFS.toppled.tint);
+        }
+      }
+    }
+    this.hud.showBanner('You put your shoulder in — the board shifts.', P.parchment);
+    this.actionLog.push({ action: 'shove', dmg: 0, overlay: false });
+    this.refreshParty();
+    this.time.delayedCall(440, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
   }
 
   /** Injunction-bad's enemy mend — a simple, un-gated heal-up (no SRS/death implications). */
@@ -2315,9 +2594,17 @@ export class CombatScene extends Phaser.Scene {
       return;
     }
     const flank = isFlanked(attacker, target, attacker.team, this.units);
+    // Task 8b — computed for real like every other site, even though Strike's own range (§4.1,
+    // range 1) geometrically guarantees this is always true: no always-true shortcuts.
+    const adjacent = manhattan(attacker, target) === 1;
     const result = computeHit({
       base, attackerStatuses: attacker.statuses, targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
+      // Ch. VIII Task 5 — moot: `attacker` here is always the party's own Strike-user (this
+      // method's own doc comment above), and Unwritten is enemies-only. False is the inert value.
+      attackerUnwrittenOpeningTempo: false,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, color);
@@ -2389,7 +2676,7 @@ export class CombatScene extends Phaser.Scene {
     // no-op cancel — a killed enemy's tile stayed permanently unreachable, and a tile a push just
     // occupied stayed clickable, without this. Same three-line idiom as movePlayerTo's
     // post-arrival recompute and toggleCarefulStep's own.
-    this.moveField = computeMoveField(unit, this.budget.left, this.layout.tiles, this.blockedFor(unit.id));
+    this.moveField = this.partyMoveField(unit, this.budget.left);
     this.reachable.clear();
     for (const t of reachableTiles(this.moveField, unit)) this.reachable.set(key(t.c, t.r), t);
     this.drawMoveRange();
@@ -2695,20 +2982,39 @@ export class CombatScene extends Phaser.Scene {
     const party = this.units.filter((u) => u.team === 'party');
     // §3 Bound/Dimmed feed the AI's OWN move budget without editing ai.ts: hand decideEnemy a
     // shallow clone whose `.move` is already the effective value (ai.ts stays pure/untouched).
-    const effMove = effectiveMove(unit.move, unit.statuses);
+    // Ch. VIII: `tolledMoveBase`, set by advanceTurn's shared rise-toll seam just before this
+    // call, stands in for raw effectiveMove on a rising turn — the SAME `effMove` const then
+    // feeds both the AI's decision input (selfForAi, just below) and the real move field
+    // (computeMoveField further down), so the two can never disagree (the W6 split-read lesson,
+    // now honored on the enemy side too).
+    const effMove = this.tolledMoveBase ?? effectiveMove(unit.move, unit.statuses);
     const selfForAi = effMove === unit.move ? unit : { ...unit, move: effMove };
-    const intent = decideEnemy(selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id));
+    // Ch. VIII Task 4 — enemy-side extension (party-side is the requirement): non-null only
+    // when THIS enemy is itself actively Daunted (no in-game caster grants that yet — nothing
+    // but the debug/e2e seam can produce it this wave — but the seam was free, so it's wired).
+    const intent = decideEnemy(
+      selfForAi, party, this.layout.tiles, occupancyExcept(this.units, unit.id), [],
+      this.dauntedSourceCoord(unit),
+    );
 
     const doAttack = () => {
       if (this.destroyed) return;
       // §9.4 — on the turns his phase script fires (Crown Injunction / Call the Clause) the
       // Warden spends his whole action on it; otherwise he falls through to his base kit, the
-      // Writ of Seizure (enemyStrike's push branch below).
-      if (!(unit.isBoss && this.runWardenScript(unit))) {
-        if (intent.attackTargetId) {
-          const tgt = this.unitById(intent.attackTargetId);
-          if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
-        }
+      // Writ of Seizure (enemyStrike's push branch below). Ch. VIII Task 5 — these are the
+      // enemy action-execution seam's two branches (the census this task's brief asked for):
+      // enemyStrike consumes CONSUMED_ON_OWN_ACTION statuses itself (ordering matters there —
+      // see its own comment); the scripted branch is covered right here, since either can be
+      // "the holder's own action" for a unit that carries one.
+      const scripted = unit.isBoss && this.runWardenScript(unit);
+      if (scripted) {
+        // The script (Bound/summon) deals no damage, so the opening-tempo +1 never applies
+        // here — nothing to fold it into. No boss carries Unwritten this wave; a safe no-op
+        // today, correct if that ever changes.
+        this.consumeOnOwnAction(unit);
+      } else if (intent.attackTargetId) {
+        const tgt = this.unitById(intent.attackTargetId);
+        if (tgt && tgt.alive) this.enemyStrike(unit, tgt);
       }
       this.endTurnDecay(unit);
       this.time.delayedCall(460, () => this.advanceTurn());
@@ -2861,16 +3167,28 @@ export class CombatScene extends Phaser.Scene {
     }
 
     const flank = !attacker.ranged && isFlanked(attacker, target, attacker.team, this.units);
+    // Task 8b — captured here, alongside flank and BEFORE the push/heave block below can move
+    // `target`'s position: both describe the geometry at the moment of THIS swing's contact,
+    // not wherever a same-blow push (e.g. the Husk's own heave) might relocate the target to
+    // afterward. Real for every enemy blow, melee or the wraith's own ranged reach alike.
+    const adjacent = manhattan(attacker, target) === 1;
     let bumpBonus = 0;
+    // Ch. VIII — did the Husk's heave actually MOVE its target (as opposed to bouncing it off a
+    // wall)? Only a landed push knocks Toppled, so the knock below needs this one bit, and it
+    // can only be learned here, inside the push branch.
+    let heaveLanded = false;
     // §8 construct Vault-Slam and §9.4 the Warden's Writ of Seizure are the same primitive: a
-    // melee hit that pushes 1, +1 bump damage when the destination is blocked.
-    if (attacker.kind === 'construct' || attacker.isBoss) {
+    // melee hit that pushes 1, +1 bump damage when the destination is blocked. Ch. VIII — the
+    // Husk's heave is that SAME primitive, bump and all: "push 1 (with the ordinary bump on
+    // blocked)". The no-damage rule belongs to Shove alone, never to an enemy's blow.
+    if (attacker.kind === 'construct' || attacker.kind === 'husk' || attacker.isBoss) {
       const dir = this.dirTo(attacker, target);
       if (dir) {
         const board: ForceMoveBoard = { tiles: this.layout.tiles, occupied: this.blockedFor(target.id) };
         const res = forceMove(target, dir, board);
         if (res.moved) {
           target.c = res.to.c; target.r = res.to.r;
+          heaveLanded = true;
           const v = this.views.get(target.id);
           if (v) {
             const p = this.tileToScreen(target);
@@ -2883,18 +3201,51 @@ export class CombatScene extends Phaser.Scene {
       }
     }
 
+    // Ch. VIII Task 5 — the opening-tempo bonus: true only while `attacker` still carries
+    // Unwritten going INTO this hit (its first act from the unseen — it may already be gone
+    // via trigger 2, damage taken earlier this same turn, in which case this correctly reads
+    // false). Read BEFORE consumeOnOwnAction (below) clears it, so the SAME act that spends
+    // the status is the one that gets the +1 — never again after, since attacker.statuses
+    // won't carry 'unwritten' the next time this method runs for the same unit.
+    const unwrittenOpeningTempo = hasStatus(attacker.statuses, 'unwritten');
     const result = computeHit({
       base: attacker.attack + bumpBonus,
       attackerStatuses: attacker.statuses,
       targetStatuses: target.statuses,
       flank, overglow: false, weld: false, rider: false,
+      attackerDauntedSourceAlive: this.dauntedSourceAlive(attacker),
+      attackerUnwrittenOpeningTempo: unwrittenOpeningTempo,
+      adjacent,
     });
     target.statuses = result.targetStatuses;
     if (attacker.kind === 'wraith' && result.hpDamage > 0) {
       target.statuses = applyStatus(target, 'dimmed', 1);
     }
+    // Ch. VIII — the Pall's touch Daunts, and the daunt carries its source: `attacker.id`, so
+    // the shipped source-alive gate (computeHit's attackerDauntedSourceAlive, the move-field
+    // filter, the lift-on-fell seam) all resolve against the Pall itself with no new plumbing.
+    // Gated on real damage, like the wraith's Dimmed above: a blow fully soaked by a Ward never
+    // landed, so it never marked anyone. Re-touching an already-daunted foe runs T1's refresh
+    // rule (overwrite-same source, keep the larger magnitude) rather than stacking a second −1.
+    if (attacker.kind === 'pall' && result.hpDamage > 0) {
+      target.statuses = applyStatus(target, 'daunted', 1, 1, attacker.id);
+    }
     if (result.hpDamage > 0) this.damageUnit(target, result.hpDamage, P.berry);
+    // Ch. VIII — the heave's knock. Deliberately mirrors shove()'s own gate line for line
+    // (landed && alive && isToppleable) because it IS the same law seen from the other side of
+    // the board, and enemyStrike's push is a separate code path from the party's pushUnit
+    // wrapper — there is no shared seam to inherit it from. Placed after damageUnit so a blow
+    // that fells its target never also topples a corpse.
+    if (heaveLanded && attacker.kind === 'husk' && target.alive && this.isToppleable(target)) {
+      target.statuses = applyStatus(target, 'toppled', 1, 1);
+      this.drawHpBar(target); // a fully-Warded heave deals 0, so damageUnit's own redraw may not have run
+      this.floatText(target, STATUS_DEFS.toppled.label, STATUS_DEFS.toppled.tint);
+    }
     if (bumpBonus > 0) this.actionLog.push({ action: 'bump', dmg: result.hpDamage, overlay: false });
+    // Ch. VIII Task 5 — trigger 1 (own action): `attacker` just took ITS action, so this is
+    // where Unwritten (if it still holds) is consumed. Must run AFTER the computeHit call
+    // above reads attacker.statuses, never before.
+    this.consumeOnOwnAction(attacker);
     // §9.4/§9.5 — the Warden's ordinary blow IS the Writ of Seizure, so it announces itself by
     // its (pack-relabelable) move name; the damage still reads off the target's own −N float,
     // exactly as it does for every other hit.
@@ -2941,6 +3292,20 @@ export class CombatScene extends Phaser.Scene {
 
   private damageUnit(unit: UnitState, amount: number, color: number): void {
     if (this.destroyed || amount <= 0 || !unit.alive) return;
+    // Ch. VIII Task 5 — trigger 2 (damage taken): "being struck writes you." damageUnit is the
+    // ONE choke every hp-loss source funnels through (crucible #10) — Strike, spells, OAs,
+    // bumps, Kindled ticks, self-chip, all of it — so this is the single place trigger 2 can
+    // live, and clearing it here means every source responds identically with no per-caller
+    // wiring. Cleared BEFORE the hp mutation below, so `unit` is never left
+    // untargetable-yet-hurt even transiently within this call.
+    if (hasStatus(unit.statuses, 'unwritten')) {
+      unit.statuses = clearStatus(unit.statuses, 'unwritten');
+      // Ch. VIII Task 6 (carried cosmetic) — the reveal used to be SILENT: the Lurker simply
+      // became targetable with nothing on screen to say why, which reads as a bug rather than
+      // as the ambush ending. Announced now at both reveal beats (here and consumeOnOwnAction);
+      // delayed past this call's own `−N` float so the two don't stack on the same pixels.
+      this.time.delayedCall(200, () => this.revealNotice(unit));
+    }
     const before = unit.hp;
     unit.hp = Math.max(0, unit.hp - amount);
     if (unit.team === 'party') {
@@ -3098,14 +3463,21 @@ export class CombatScene extends Phaser.Scene {
     this.input.on(Phaser.Input.Events.POINTER_MOVE, (pt: Phaser.Input.Pointer) => {
       const tile = this.screenToTile(pt.x, pt.y);
       const unit = tile ? this.unitAt(tile) : undefined;
-      const id = unit && unit.statuses.length ? unit.id : null;
+      // Ch. VIII Task 6 fix round 1 — the GATE, the LINE and the TINT all read the VISIBLE list
+      // (visibleStatuses, above), never the raw one. This was the last stale condition surface
+      // after the chip fix, and it read worse than the bug it was meant to close: hovering a unit
+      // whose only status was an inert Daunted announced "Keeper — Daunted 1" over a chip row
+      // showing nothing at all. The tint mattered too — `statuses[0]` could colour the banner
+      // from a condition the player has no way to see.
+      const visible = unit ? this.visibleStatuses(unit) : [];
+      const id = unit && visible.length ? unit.id : null;
       if (id === this.hoveredStatusUnitId) return;
       this.hoveredStatusUnitId = id;
       if (unit && id) {
-        const line = unit.statuses
+        const line = visible
           .map((s) => `${STATUS_DEFS[s.id].label} ${s.id === 'warded' ? s.magnitude : s.turnsLeft}`)
           .join(' · ');
-        this.hud.showBanner(`${unit.name} — ${line}`, STATUS_DEFS[unit.statuses[0].id].tint);
+        this.hud.showBanner(`${unit.name} — ${line}`, STATUS_DEFS[visible[0].id].tint);
       }
     });
 
@@ -3611,6 +3983,12 @@ export class CombatScene extends Phaser.Scene {
     keeper.hp = split.keeper;
     keeper.alive = keeper.hp > 0;
     keeper.statuses = [];
+    // Ch. VIII — defensive: `tolledMoveBase` is scene-level, keyed to "whichever turn last ran
+    // advanceTurn's seam," not to the Keeper specifically. The door can interrupt any unit's
+    // turn (not just a rising Keeper's), so without this reset a revived Keeper could inherit a
+    // stray toll left over from an unrelated unit. Statuses are already wiped above (any real
+    // Toppled the Keeper itself carried is gone too) — this just matches that "start fresh".
+    this.tolledMoveBase = null;
     this.reviveView(keeper); // undo fadeDead's death tween, same as a Satchel revival
     this.drawHpBar(keeper);
     // The pool moved with no battle event to account for it — the same re-anchor the Satchel
@@ -3846,7 +4224,10 @@ export class CombatScene extends Phaser.Scene {
     return {
       c: u.c, r: u.r, alive: u.alive, hp: u.hp, maxHp: u.maxHp, attack: u.attack,
       depth: this.views.get(id)?.container.depth ?? 0,
-      statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude })),
+      // Ch. VIII Task 6 — sourceId rides along (additive, undefined for every status but
+      // Daunted): without it a test can only infer "the Pall daunted me" from the fact that
+      // felling the Pall lifted it, which is a different claim from "the daunt names the Pall".
+      statuses: u.statuses.map((s) => ({ id: s.id, turnsLeft: s.turnsLeft, magnitude: s.magnitude, sourceId: s.sourceId })),
     };
   }
 
@@ -3858,12 +4239,34 @@ export class CombatScene extends Phaser.Scene {
   }
 
   /** Debug: apply a status directly, bypassing spellcasting (e2e-only — Phase 2 wires real
-   *  casts; this exercises Phase 1's board mechanics, e.g. Bound blocking a move, without it). */
-  debugApplyStatus(id: string, statusId: StatusId, turns: number, magnitude = 1): void {
+   *  casts; this exercises Phase 1's board mechanics, e.g. Bound blocking a move, without it).
+   *  Ch. VIII Task 4 — `sourceId` is additive-optional, threaded straight through to
+   *  applyStatus's own param of the same name (the only status that reads it is Daunted; every
+   *  other caller already omits it, unaffected). Stands in for the Pall's real touch (T6) the
+   *  same way debugForceToppleable stood in for the Husk's real toppleable:true. */
+  debugApplyStatus(id: string, statusId: StatusId, turns: number, magnitude = 1, sourceId?: string): void {
     const u = this.unitById(id);
     if (!u) return;
-    u.statuses = applyStatus(u, statusId, turns, magnitude);
+    u.statuses = applyStatus(u, statusId, turns, magnitude, sourceId);
     this.drawHpBar(u);
+  }
+
+  /** Debug: the ACTIVE unit's current move-field reachable tiles (e2e-only — Ch. VIII Task 4:
+   *  the only way a test can observe the Daunted move-field filter's effect on `this.reachable`
+   *  without fighting pixel-perfect click geometry for every excluded tile). Same read-only
+   *  debug-surface spirit as orderDebug/layoutDebug beside it. */
+  reachableDebug(): Coord[] {
+    return [...this.reachable.values()];
+  }
+
+  /** Debug: valid target ids for `action` from the ACTIVE unit's current position (e2e-only —
+   *  Ch. VIII Task 5: the only way a test can observe validTargets' Unwritten exclusion —
+   *  Strike/Shove only, never a spell — directly, without fighting menu-click geometry for
+   *  every case. Same read-only debug-surface spirit as reachableDebug just above.) */
+  validTargetsDebug(action: ActionKind): string[] {
+    const unit = this.unitById(this.activeId);
+    if (!unit) return [];
+    return this.validTargets(unit, action).map((u) => u.id);
   }
 
   /** Debug: teleport a living unit (e2e-only test setup — e.g. arranging a wall-adjacent
@@ -3886,7 +4289,7 @@ export class CombatScene extends Phaser.Scene {
       // Ch. VI — ranged by the REMAINING budget, not a fresh moveBudgetFor: this call now can
       // run mid-turn (after a leg is already spent), and moveBudgetFor would hand back the
       // full fresh total, letting a test click a tile the Keeper can no longer actually afford.
-      this.moveField = computeMoveField(u, this.budget.left, this.layout.tiles, this.blockedFor(u.id));
+      this.moveField = this.partyMoveField(u, this.budget.left);
       this.reachable.clear();
       for (const t of reachableTiles(this.moveField, u)) this.reachable.set(key(t.c, t.r), t);
       this.drawMoveRange();
