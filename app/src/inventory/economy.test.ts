@@ -27,10 +27,10 @@ const seq = (...vals: number[]) => {
 };
 
 describe('catalog integrity — ids are state-referenced and must stay coherent', () => {
-  it('has 14 unique kebab-case ids covering every rarity and type', () => {
+  it('has 20 unique kebab-case ids covering every rarity and type (Wave 9 Ch. IX growth: 14 -> 20)', () => {
     const ids = CATALOG.map((i) => i.id);
-    expect(ids).toHaveLength(14);
-    expect(new Set(ids).size).toBe(14);
+    expect(ids).toHaveLength(20);
+    expect(new Set(ids).size).toBe(20);
     for (const id of ids) expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     const rarities = new Set(CATALOG.map((i) => i.rarity));
     expect([...rarities].sort()).toEqual(['common', 'legendary', 'rare', 'uncommon', 'very_rare']);
@@ -51,13 +51,19 @@ describe('catalog integrity — ids are state-referenced and must stay coherent'
     expect(itemById('lantern-brand')).toMatchObject({ use: 'combat', sellable: false, effect: { kind: 'glow', amount: 2 } });
   });
 
-  it("Mira's stock is exactly the 3 draughts + 2 glow items + 3 tools (magic-combat-depth §11.1)", () => {
+  it('shopStock() = the 8 staples plus the two new Ch. IX wares leaking in pre-rotation (T4 reshapes this; catalog order)', () => {
+    // shopStock() filters by type alone (consumable|tool) — untouched this task (Task 4 owns
+    // rotation). superior-draught and sealed-page-geyser are both type:'consumable', so they
+    // appear here unconditionally until T4 adds the staples-vs-rotating-pool distinction. This
+    // is the expected, flagged consequence of Ch. IX's catalog growth, not a shopStock() change.
     expect(shopStock().map((i) => i.id)).toEqual([
       'embermend-draught',
       'lanternoil-tonic',
       'wardancers-restorative',
+      'superior-draught',
       'wick-tallow',
       'lantern-brand',
+      'sealed-page-geyser',
       'scriveners-hint',
       'second-wind-seal',
       'ward-of-focus',

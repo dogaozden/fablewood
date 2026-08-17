@@ -141,3 +141,26 @@ describe('consume.ts useItem — level-keyed heal cap (Wave 4)', () => {
     expect((services as unknown as { save: ReturnType<typeof makeFakeSave> }).save.get().hp).toBe(16);
   });
 });
+
+// Wave 9 Task 1 (Concordance Ch. IX — the Borne and the Bought): the union grows six kinds.
+describe('consume.ts useItem — Ch. IX relic + combat-scroll refusals', () => {
+  it('refuses a relic with the keepsake message, unchanged (type-keyed, not effect-keyed — proven on a NEW relic id)', async () => {
+    const bridge = new DelayedBridge();
+    bridge.seed('inventory.json', { version: 1, gold: 0, stacks: { 'unbroken-clasp': 1 } });
+    const store = new InventoryStore(bridge);
+    await store.ready();
+
+    const res = await useItem(store, 'unbroken-clasp');
+    expect(res).toEqual({ ok: false, message: 'A keepsake, not a tool.' });
+  });
+
+  it('refuses the Sealed Page of the Geyser (push_blast) outside battle — joins the glow refusal family', async () => {
+    const bridge = new DelayedBridge();
+    bridge.seed('inventory.json', { version: 1, gold: 0, stacks: { 'sealed-page-geyser': 1 } });
+    const store = new InventoryStore(bridge);
+    await store.ready();
+
+    const res = await useItem(store, 'sealed-page-geyser');
+    expect(res).toEqual({ ok: false, message: 'Only usable in battle.' });
+  });
+});
