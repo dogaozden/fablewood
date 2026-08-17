@@ -33,7 +33,7 @@ import {
   shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
 } from './boss';
 import { decideEnemy, occupancyExcept, carefulStepMove, opportunityStrikers } from './ai';
-import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS } from './units';
+import { makeKeeper, makeMira, makeEnemy, makeBoss, MIRA_MASTERY_GATE, ENEMY_STATS, KEEPER, MIRA } from './units';
 import { ensureTextures, TILE_KEYS, UNIT_KEYS, CHIP_KEYS } from './textures';
 import { tickTurnStart, decayTurnEnd, applyStatus, computeHit, effectiveMove, hasStatus, clearStatus, STATUS_DEFS, CONSUMED_ON_OWN_ACTION, type StatusId, type StatusInstance } from './status';
 import { mkTurnBudget, spendLeg, spendAction, grantPressOn, turnExhausted, stanceLocked, tollRise, type TurnBudget } from './turnBudget';
@@ -563,6 +563,49 @@ export class CombatScene extends Phaser.Scene {
       this.boss = makeBoss(this.launch.room.boss, at.c, at.r);
       this.units.push(this.boss);
     }
+    this.applyBornRelicSpawnState();
+  }
+
+  /**
+   * Ch. IX — the Waymark Heel (+1 party move base) / the Margin Lamp (enemies begin combat
+   * already written). Read live (`services.inventory.bornRelic()`) rather than cached — swap is
+   * impossible mid-combat (Ch. IX, enforced by the Satchel's own pane scoping), so one correct
+   * read is stable for the whole battle; nothing downstream needs to know either relic exists
+   * (effectiveMove/tollRise/moveBudgetFor already read `unit.move`/`unit.statuses` fresh every
+   * turn start, and the Unwritten lifecycle already reads `unit.statuses` fresh on every check).
+   *
+   * Idempotent by construction — recomputes `.move` from the KEEPER/MIRA base constants rather
+   * than accumulating, and clearing an absent 'unwritten' is a no-op — because it is called
+   * TWICE. `spawnUnits()` above calls it synchronously, before `services.inventory` is
+   * necessarily warm: this method runs before `loadContent()` below even starts (let alone
+   * awaits `services.inventory.ready()`), and this file's own header notes combat is "testable
+   * standalone" via `?scene=combat` — a packless dev/e2e launch that (unlike hamlet/dungeon)
+   * never warms the inventory store first, so `bornRelic()` can still read the pre-load default
+   * (null) on that FIRST call. Real play always reaches combat via hamlet/dungeon, which already
+   * warmed the exact same singleton store earlier in the session, so there this first call is
+   * already correct. `loadContent()`'s own call (below) re-runs this once `services.inventory
+   * .ready()` has genuinely resolved, correcting a cold-cache miss on the standalone path — a
+   * same-state no-op everywhere else.
+   */
+  private applyBornRelicSpawnState(): void {
+    let borne: string | null = null;
+    try { borne = services.inventory.bornRelic(); } catch { /* offline/stub → no relic passives */ }
+
+    const heel = borne === 'waymark-heel';
+    for (const u of this.units) {
+      if (u.team !== 'party') continue;
+      const rawBase = u.kind === 'keeper' ? KEEPER.move : u.kind === 'mira' ? MIRA.move : u.move;
+      u.move = rawBase + (heel ? 1 : 0);
+    }
+
+    // Ch. IX — the Margin Lamp: enemies begin combat already written. The reveal-on-act/damage
+    // lifecycle (CONSUMED_ON_OWN_ACTION, the damage-seam clear) is untouched — this only ever
+    // clears the SPAWN grant, never a status a battle event legitimately applied afterward.
+    if (borne === 'margin-lamp') {
+      for (const u of this.units) {
+        if (u.kind === 'lurker' && hasStatus(u.statuses, 'unwritten')) u.statuses = clearStatus(u.statuses, 'unwritten');
+      }
+    }
   }
 
   /**
@@ -787,6 +830,13 @@ export class CombatScene extends Phaser.Scene {
     // packless ?scene=combat dev/e2e harness (never visits hamlet/dungeon first) would
     // read InventoryStore's in-memory defaults instead of the persisted stacks.
     try { await services.inventory.ready(); } catch { /* stub or offline */ }
+    // Ch. IX — corrects a cold-cache miss: spawnUnits() already called applyBornRelicSpawnState()
+    // synchronously, before this await could possibly have resolved (see that method's own doc).
+    // Idempotent — a same-state no-op on every path where the store was already warm. Empirically
+    // load-bearing, not speculative: temporarily removing this call during authoring reproduced
+    // the exact predicted failure (Move 4/4 instead of 5/5; the Lurker still spawning Unwritten)
+    // on this same standalone-combat harness, 100% deterministic — not a flake to shrug off.
+    this.applyBornRelicSpawnState();
     // Wave 1 — decided ONCE per battle, before anything reads the pool (combatDrawReady()).
     this.drawGlobal = await combatDrawReady(this.launch.packId);
     try {
