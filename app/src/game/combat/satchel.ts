@@ -25,6 +25,15 @@
  * separately-scoped has landed. Unlike heal/glow, a tool does NOT consume on use here: it ARMS
  * (CombatScene owns the arm state via combat/aids.ts) and deducts only when the arm fires. Ward
  * of Focus (streak_shield) stays excluded — passive, never armed, never in this list.
+ *
+ * Phase 4 (Concordance Ch. IX, the Sealed Page of the Geyser) admits `push_blast`. Like the Glow
+ * items it is combat-only by design (catalog.ts's `use:'combat'`; consume.ts's useItem always
+ * refuses it outside battle), so this filter is the Page's ONLY route onto a screen. It is the
+ * first entry here whose effect is neither a self-cast nor an arm: picking it opens a target
+ * selection over enemies within reach, and the crumble happens when the target commits — the
+ * scene owns all of that (CombatScene's push_blast branch), exactly as it owns the heal's
+ * live-pool sync. Nothing about that flow belongs in this module; the rule this file states is
+ * only "the Page is a thing you can reach for in a battle."
  */
 import { CATALOG, type ItemDef } from '../../inventory/catalog';
 import type { InventorySnapshot } from '../contracts';
@@ -34,11 +43,13 @@ export interface UsableSatchelItem {
   qty: number;
 }
 
-/** Owned items with a combat-resolvable effect (heal, glow, or trial tool — see file header), qty > 0, catalog order. */
+/** Owned items with a combat-resolvable effect (heal, glow, trial tool, or the Sealed Page's
+ *  push — see file header), qty > 0, catalog order. */
 export function usableSatchelItems(snapshot: InventorySnapshot): UsableSatchelItem[] {
   return CATALOG.filter(
     (i) =>
-      (i.effect.kind === 'heal' || i.effect.kind === 'glow' || i.effect.kind === 'reveal_option' || i.effect.kind === 'retry_cast') &&
+      (i.effect.kind === 'heal' || i.effect.kind === 'glow' || i.effect.kind === 'reveal_option' ||
+        i.effect.kind === 'retry_cast' || i.effect.kind === 'push_blast') &&
       (snapshot.stacks[i.id] ?? 0) > 0,
   ).map((item) => ({
     item,

@@ -1190,6 +1190,20 @@ const PAGE_NAME = 'Sealed Page of the Geyser';
 /** Ruled copy (Ch. IX), verbatim — the banner the reading itself shows. */
 const PAGE_LINE = 'The page speaks water, once.';
 
+/**
+ * Long enough to clear dom.ts's GHOST-REOPEN GUARD (`REOPEN_SETTLE_MS = 150`, per-pane-scoped):
+ * any openPane() for the same pane id within that window of its last close is appended and
+ * self-closed before the browser paints, so a reopen inside it never becomes visible. That guard
+ * is a deliberate shipped mitigation for a Phaser stale-key-queue bug (see dom.ts's own header),
+ * and the Page is simply the FIRST flow that closes and reopens the combat Satchel inside a
+ * single turn — cancelling an aim and immediately re-pressing Q is exactly the shape the guard
+ * was written for. Doubled for margin rather than imported: dom.ts pulls in ./styles and the
+ * encounter overlay, which is more app surface than a Playwright spec should load to read one
+ * number. Root-caused live with an instrumented MutationObserver run (a reopen 65ms after the
+ * close appeared and vanished in the same millisecond) — not guessed from the timeout.
+ */
+const PANE_SETTLE_MS = 300;
+
 /** Own-file local copy, richer than budgetSnap above (T5's own "richer than the last"
  *  convention): the Page's assertions need the action LOG as well as the budget. */
 type PageSnap = {
@@ -1236,7 +1250,11 @@ const hasStatusId = (u: { statuses: Array<{ id: string }> } | null, id: string):
  *  pane. Asserts the row is THERE on the way past: the Page reaching the pane at all is
  *  usableSatchelItems' push_blast admission, proven end-to-end rather than by unit test alone. */
 async function readPageFromSatchel(page: Page): Promise<void> {
-  await page.keyboard.press('q');
+  // tapKey, not page.keyboard.press: the Page is the only flow that opens this pane TWICE in one
+  // battle, and an instant press is edge-detect-flaky on the second open (helpers.ts's tapKey
+  // exists for exactly this Phaser behaviour). The first open works either way, which is why
+  // every earlier single-open spec in this suite gets away with press().
+  await tapKey(page, 'q');
   await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
   await expect(page.locator('.inv-title')).toHaveText('Satchel');
   const row = page.locator('.inv-row', { hasText: PAGE_NAME });
@@ -1330,8 +1348,12 @@ test('the Sealed Page of the Geyser: read at reach 3, it pushes one tile, crumbl
       .poll(() => pagesOnDisk(page), { timeout: 10_000, message: 'the page crumbles after the reading' })
       .toBe(0);
 
-    // ...and the pane agrees: reopening the Satchel offers no Page at all.
-    await page.keyboard.press('q');
+    // ...and the pane agrees. This has to wait for the Keeper's NEXT turn: Ch. VI greys the
+    // Satchel button once the turn's one action is spent, and the reading just spent it — so 'q'
+    // is correctly refused for the rest of this turn, which is itself part of the law under test.
+    await page.keyboard.press('7'); // End Turn
+    await passUntilPartyTurn(page, 'keeper');
+    await tapKey(page, 'q');
     await expect(page.locator('.inv-overlay')).toBeVisible({ timeout: 5_000 });
     await expect(page.locator('.inv-row', { hasText: PAGE_NAME }), 'nothing left to read').toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath('relics-sealed-page-spent.png') });
@@ -1494,7 +1516,10 @@ test('backing out of the Page\'s targeting spends nothing — the page is kept a
     expect(untouched?.hp, 'nobody was hurt').toBe(before?.hp);
 
     // The action really is still available: the same page can be read again this very turn, and
-    // THAT reading resolves — proving the cancel left no half-armed state behind.
+    // THAT reading resolves — proving the cancel left no half-armed state behind. The wait is the
+    // pane's own reopen guard, not a flake patch (see PANE_SETTLE_MS): this is the one scenario
+    // in the suite that reopens the combat Satchel within a single turn.
+    await page.waitForTimeout(PANE_SETTLE_MS);
     await readPageFromSatchel(page);
     await waitForPageTargeting(page);
     await tileClick(page, 5, 1);
@@ -1524,20 +1549,29 @@ test('the Page REACHES the Unwritten, and a CLEAN push leaves it unwritten still
       data: { version: 1, gold: 0, stacks: { [PAGE_ID]: 1 }, bornRelicId: null },
     });
 
-    await page.goto('/?scene=combat&seed=7&enemies=lurker');
+    // A written foe rides along as the CONTROL: without it, "Strike cannot see the Lurker" would
+    // pass for the boring reason that Strike is range 1 and nothing was adjacent.
+    await page.goto('/?scene=combat&seed=7&enemies=lurker,wisp');
     await waitReady(page, 'combat');
     await passUntilPartyTurn(page, 'keeper');
 
-    await debugSetPos(page, 'keeper', 2, 1);
-    await debugSetPos(page, 'lurker-0', 5, 1);
+    await debugSetPos(page, 'keeper', 4, 1);
+    await debugSetPos(page, 'lurker-0', 5, 1); // adjacent right
+    await debugSetPos(page, 'wisp-1', 3, 1); // adjacent left, and entered in the Ledger
     const before = await pageUnit(page, 'lurker-0');
     expect(hasStatusId(before, 'unwritten'), 'sanity: the Lurker opens Unwritten (Ch. VIII spawn grant)').toBe(true);
 
-    // The contrast that makes the ruling visible: Strike refuses the same foe the Page reads.
-    // The Page is spell-family under Ch. VIII's "spells and area effects reach it fine" — it is
-    // a written thing's answer, not a shoulder — so isStrikeTargetable is deliberately NOT on
-    // its reach predicate.
-    expect(await validTargets(page, 'strike'), 'Strike still cannot see it').not.toContain('lurker-0');
+    // The contrast that makes the ruling visible: from ONE tile, with both foes adjacent, Strike
+    // sees the written wisp and refuses the Unwritten Lurker. The Page is spell-family under Ch.
+    // VIII's "spells and area effects reach it fine" — a written thing's answer, not a shoulder —
+    // so isStrikeTargetable is deliberately NOT on its reach predicate.
+    const strikeable = await validTargets(page, 'strike');
+    expect(strikeable, 'control: Strike genuinely reaches an adjacent written foe from here').toContain('wisp-1');
+    expect(strikeable, 'but refuses the Unwritten one standing just as close').not.toContain('lurker-0');
+
+    // Clear the control away and step back to the Page's own reach-3 line.
+    await debugSetPos(page, 'wisp-1', 10, 6);
+    await debugSetPos(page, 'keeper', 2, 1);
 
     await readPageFromSatchel(page);
     await waitForPageTargeting(page);
@@ -1557,7 +1591,11 @@ test('the Page REACHES the Unwritten, and a CLEAN push leaves it unwritten still
     expect(pushed?.hp, 'no damage — so trigger 2 (being struck writes you) never fires').toBe(before?.hp);
     expect(hasStatusId(pushed, 'unwritten'), 'and it did not ACT, so trigger 1 never fires either — it survives the shove')
       .toBe(true);
-    expect(await validTargets(page, 'strike'), 'still unwritten means still un-Strikeable, one tile further out').not.toContain('lurker-0');
+    // Still unwritten means still un-Strikeable, and this is read from ADJACENT again so it says
+    // something: the sibling blocked-push test runs this exact check from this exact distance and
+    // gets the opposite answer once the bump has revealed it.
+    await debugSetPos(page, 'keeper', 5, 1);
+    expect(await validTargets(page, 'strike'), 'un-Strikeable still, from one tile away').not.toContain('lurker-0');
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
   }
@@ -1580,12 +1618,17 @@ test('a BLOCKED page-push consumes the Unwritten — the bump IS damage taken (C
     await waitReady(page, 'combat');
     await passUntilPartyTurn(page, 'keeper');
 
-    await debugSetPos(page, 'keeper', 4, 1);
     await debugSetPos(page, 'lurker-0', 1, 1); // pinned against the west wall
+    await debugSetPos(page, 'keeper', 2, 1); // adjacent, for the before-reading control
     const before = await pageUnit(page, 'lurker-0');
     expect(hasStatusId(before, 'unwritten'), 'sanity: still Unwritten going in').toBe(true);
     expect(before?.hp, 'sanity: the Lurker has 2 hp, so a 1-point bump leaves it standing to be read').toBe(2);
+    // The control half: from THIS tile, right now, Strike cannot see it. The same read is taken
+    // from the same tile after the bump, so the only thing that changes is the status.
+    expect(await validTargets(page, 'strike'), 'before: Unwritten, so Strike is blind to it from one tile away')
+      .not.toContain('lurker-0');
 
+    await debugSetPos(page, 'keeper', 4, 1); // step back to the Page's reach-3 line
     await readPageFromSatchel(page);
     await waitForPageTargeting(page);
     await tileClick(page, 1, 1);
@@ -1601,7 +1644,9 @@ test('a BLOCKED page-push consumes the Unwritten — the bump IS damage taken (C
     // The other half of the composition: damage routes through damageUnit, which is where Ch.
     // VIII's trigger 2 lives, so THIS push writes the thing into the Ledger.
     expect(hasStatusId(revealed, 'unwritten'), 'being struck writes you — the bump consumed the Unwritten').toBe(false);
-    expect(await validTargets(page, 'strike'), 'and now Strike can see it, one blocked push later').toContain('lurker-0');
+    // Back to the control tile — same distance as before the reading, opposite answer.
+    await debugSetPos(page, 'keeper', 2, 1);
+    expect(await validTargets(page, 'strike'), 'after: written, so Strike can see it from that same tile').toContain('lurker-0');
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
   }

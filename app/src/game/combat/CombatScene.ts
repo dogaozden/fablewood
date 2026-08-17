@@ -243,6 +243,12 @@ export class CombatScene extends Phaser.Scene {
   private reachable = new Map<string, Coord>();
   private targetTiles = new Map<string, UnitState>();
   private pendingAction: ActionKind | null = null;
+  /** Ch. IX — the catalog id of a Sealed Page currently being aimed, else null. The Page is the
+   *  one Satchel item with a targeting phase, so it needs a scrap of state to carry the chosen
+   *  item across the gap between "picked in the pane" and "target committed" — exactly the role
+   *  `pendingSpell` plays for a flyout tier, and it is cleared at the same three sites
+   *  (scene reset, turn start, cancelTargeting) plus on read, so it can never go stale. */
+  private pendingPageId: string | null = null;
 
   private rangeGfx!: Phaser.GameObjects.Graphics;
   private hoverGfx!: Phaser.GameObjects.Graphics;
@@ -429,6 +435,7 @@ export class CombatScene extends Phaser.Scene {
     this.reachable.clear();
     this.targetTiles.clear();
     this.pendingAction = null;
+    this.pendingPageId = null;
     this.results = [];
     this.hpLost = 0;
     this.damageTaken = 0;
@@ -1106,6 +1113,7 @@ export class CombatScene extends Phaser.Scene {
     this.budget = mkTurnBudget(this.moveBudgetFor(unit));
     this.pendingAction = null;
     this.pendingSpell = null;
+    this.pendingPageId = null;
     this.overglowOn = false;
     this.moveField = this.partyMoveField(unit, this.moveBudgetFor(unit));
     this.reachable.clear();
@@ -1349,7 +1357,11 @@ export class CombatScene extends Phaser.Scene {
     this.enterTargeting(action, targets);
   }
 
-  private enterTargeting(action: ActionKind, targets: UnitState[]): void {
+  /** `label` overrides the banner's name for a targeting phase that is neither an action nor a
+   *  spell — today only the Sealed Page, which enters here under pendingAction 'satchel' but must
+   *  announce itself by the ITEM's name, not the button it was reached through. Omitted
+   *  everywhere else, so every existing caller keeps its exact banner. */
+  private enterTargeting(action: ActionKind, targets: UnitState[], label?: string): void {
     this.state = 'playerTarget';
     this.pendingAction = action;
     this.targetTiles.clear();
@@ -1358,14 +1370,19 @@ export class CombatScene extends Phaser.Scene {
     this.hoverGfx.clear();
     this.drawTargets();
     this.hud.hideActionMenu();
-    const label = this.pendingSpell?.label ?? ACTIONS[action].label;
-    this.hud.showBanner(`${label} — choose a target. (Esc cancels)`, ACTIONS[action].tint);
+    const shown = label ?? this.pendingSpell?.label ?? ACTIONS[action].label;
+    this.hud.showBanner(`${shown} — choose a target. (Esc cancels)`, ACTIONS[action].tint);
   }
 
   private cancelTargeting(unit: UnitState): void {
     this.state = 'playerMove';
     this.pendingAction = null;
     this.pendingSpell = null;
+    // Ch. IX — backing out of a Sealed Page's targeting is the ONE path that spends nothing: the
+    // page is not removed until the target commits (readSealedPage), so dropping the armed id
+    // here is the whole of "nothing was read." Same cancel path Strike/Shove already use, reached
+    // by Esc and right-click alike — the Page needed no cancel route of its own.
+    this.pendingPageId = null;
     this.targetTiles.clear();
     this.hoverGfx.clear();
     // Ch. VI — `this.reachable`/`this.moveField` already reflect whatever movement is left
@@ -1492,6 +1509,29 @@ export class CombatScene extends Phaser.Scene {
         return exhaustive;
       }
     }
+  }
+
+  /** Ch. IX — the Sealed Page of the Geyser's reach. Not an ActionKind (the Page is a Satchel
+   *  item, and giving it an action row would put a button on the bar for a thing most runs never
+   *  carry), so it gets its own predicate here rather than a case in validTargets above.
+   *
+   *  reach = hasLineOfFire, which IS the wraith's range idiom: ai.ts takes that branch for any
+   *  `ranged: true` archetype, and grid.ts's own doc names the wraith outright ("same row/col,
+   *  within range, no walls/mist"). A manhattan disk was the other reading and it does not work:
+   *  a push needs a Dir, dirTo is 4-way and returns null off the orthogonals, and a disk of 3
+   *  admits diagonals this engine has no "away" direction for — a rare item that silently did
+   *  nothing on a legal target. Ritual Sequence, the other directional player action at range 3,
+   *  already targets through this exact predicate. Consequences, both deliberate: mist and walls
+   *  stop the water-word the same way they stop the wraith's bolt, and a foe standing diagonally
+   *  cannot be paged at all — the Page is a straight jet, not a burst.
+   *
+   *  isStrikeTargetable is deliberately ABSENT (controller ruling, 2026-08-17): the Page REACHES
+   *  the Unwritten. Ch. VIII excludes Strikes and Shove by name and admits "spells and area
+   *  effects"; a written thing's answer is spell-family, not a shoulder. */
+  private pageTargets(unit: UnitState, reach: number): UnitState[] {
+    return this.units.filter(
+      (u) => u.alive && u.team === 'enemy' && hasLineOfFire(unit, u, reach, this.layout.tiles),
+    );
   }
 
   // ---- tier flyout (§12.2, Rank 2+) --------------------------------------
@@ -1816,6 +1856,19 @@ export class CombatScene extends Phaser.Scene {
     this.hud.hideActionMenu();
 
     const target = this.enemyAt(tile);
+
+    // Ch. IX — the Sealed Page's committed reading. `pendingPageId` is set by useSatchelItem's
+    // push_blast branch immediately before enterTargeting('satchel', …) and by nothing else, and
+    // 'satchel' reaches this method by no other route (onPickAction sends the Satchel button to
+    // openSatchel, and the demo pilot's action order never contains it), so this branch is
+    // reachable only from a genuine Page targeting phase — and the id it reads is always the one
+    // just armed, never a stale one. Consumed on read so a second commit can't double-fire.
+    if (action === 'satchel' && this.pendingPageId) {
+      const pageId = this.pendingPageId;
+      this.pendingPageId = null;
+      await this.readSealedPage(unit, target, tile, pageId);
+      return;
+    }
 
     // FREE STRIKE (friction redesign): no encounter, no question, cannot miss. It resolves
     // synchronously — reusing the attacker lunge + hit-flash — so plain fighting FLOWS with
@@ -2611,6 +2664,73 @@ export class CombatScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Ch. IX — the Sealed Page of the Geyser, read at a committed target: "the Decanter's third
+   * command word written down." Shove's own shape one seam over (pushUnit, the heave's knock
+   * gate, Ch. VI's action gate), with the two differences the chapter draws in ink:
+   *
+   *  - the bump is ON. Shove passes `{ bump: false }` because the no-damage purity is Shove's
+   *    alone; an item's push is an item's blow, so a blocked page-push bumps for the ordinary 1.
+   *    That makes bump-damage and the Toppled knock MUTUALLY EXCLUSIVE for the Page — damage only
+   *    on a blocked push, the knock only on a landed one — so the heave's "knock after damage"
+   *    ordering is inherited here for the gate's shape, never actually exercised by it.
+   *  - the page is spent on the READING, not on the outcome. removeItem runs first, before the
+   *    push resolves, so landed and blocked crumble it identically ("a blocked Shove still spends
+   *    the action — you committed the shoulder"; a read page is a read page). The only path that
+   *    spends nothing is backing out before committing, which never reaches this method at all.
+   *
+   * Consume-then-apply is also the glow branch's own order (useSatchelItem, above) and it earns
+   * its keep the same way: if the store refuses, nothing has happened yet and the turn is handed
+   * back intact rather than half-resolved.
+   */
+  private async readSealedPage(unit: UnitState, target: UnitState | null, tile: Coord, pageId: string): Promise<void> {
+    let removed = false;
+    try { removed = await services.inventory.removeItem(pageId, 1); } catch { removed = false; }
+    if (this.destroyed) return;
+    if (!removed) {
+      // Same refusal shape the glow branch uses for the same call: nothing spent, turn returned.
+      this.hud.showBanner('You have none left.', P.stoneGrey);
+      this.returnToActionMenu(unit);
+      return;
+    }
+
+    if (target?.alive) {
+      const dir = this.dirTo(unit, tile);
+      // Always resolves for a real Page target: pageTargets admits only same-row/col foes
+      // (hasLineOfFire), which is precisely why that predicate was chosen over a manhattan disk.
+      if (dir) {
+        const landed = this.pushUnit(unit, target, dir, null, { bump: true });
+        // Ch. VIII's heave gate, mirrored line for line (landed && alive && isToppleable) — the
+        // same law seen from the party's side of the board, and read AFTER the push has resolved
+        // so the corpse-never-topples discipline holds even though this push cannot fell anyone.
+        if (landed && target.alive && this.isToppleable(target)) {
+          target.statuses = applyStatus(target, 'toppled', 1, 1);
+          this.drawHpBar(target);
+          this.floatText(target, STATUS_DEFS.toppled.label, STATUS_DEFS.toppled.tint);
+        }
+      }
+    }
+
+    this.hud.showBanner('The page speaks water, once.', P.waterBlue);
+    this.actionLog.push({ action: 'satchel', dmg: 0, overlay: false });
+    this.refreshParty();
+    // Ch. VI's canonical action gate, verbatim from Shove/Brace/the Satchel's own siblings.
+    this.time.delayedCall(560, () => {
+      if (!unit.alive) { this.endPlayerTurn(); return; }
+      this.budget = spendAction(this.budget);
+      if (turnExhausted(this.budget)) {
+        this.endPlayerTurn();
+      } else {
+        const end = this.checkEnd();
+        if (end === 'retreat') { this.enterDeathsDoor(); return; }
+        if (end) { this.resolveBattle(end); return; }
+        this.hud.showBanner('Steps remain — press End Turn when done.', P.parchment);
+        this.returnToActionMenu(unit);
+        if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
+      }
+    });
+  }
+
   /** Injunction-bad's enemy mend — a simple, un-gated heal-up (no SRS/death implications). */
   private healUnit(target: UnitState, amount: number): void {
     const before = target.hp;
@@ -2734,6 +2854,11 @@ export class CombatScene extends Phaser.Scene {
     // playerTarget, same as Wait) — leave that cleanly first, like cancelTargeting.
     this.state = 'playerMove';
     this.pendingAction = null;
+    // Ch. IX — including a Sealed Page left mid-aim: re-opening the pane over an armed Page
+    // abandons that aim. Nothing was spent (the crumble waits for the target to commit), so this
+    // is a plain discard. Belongs with the two lines above for the same reason they are here —
+    // this method is the third way out of a targeting phase, beside Esc and right-click.
+    this.pendingPageId = null;
     this.targetTiles.clear();
     this.hoverGfx.clear();
     this.hud.hideActionMenu();
@@ -2882,6 +3007,27 @@ export class CombatScene extends Phaser.Scene {
           if (this.demo) this.time.delayedCall(340, () => this.autoStep(unit));
         }
       });
+      return;
+    }
+
+    // Ch. IX — the Sealed Page of the Geyser: the one Satchel item that resolves NOTHING on pick.
+    // Every other branch above (glow, the tools, the heal below) is self-cast and finishes here;
+    // the Page instead ARMS a targeting phase and hands control back to the board, so the reading
+    // — and with it the crumble and the action spend — happens in readSealedPage once a target
+    // commits. Nothing is spent on this path: a player who opens the pane, picks the Page and
+    // then thinks better of it walks away whole (cancelTargeting).
+    if (item.effect.kind === 'push_blast') {
+      const targets = this.pageTargets(unit, item.effect.reach);
+      if (!targets.length) {
+        // Reuses onPickAction's own shipped refusal vocabulary rather than inventing a line, and
+        // refuses BEFORE anything is spent — the same shape as the heal's "Already at full
+        // vigor." below (a refused Satchel pick costs no action).
+        this.hud.showBanner(`${item.name}: no foe within reach.`, P.stoneGrey);
+        this.returnToActionMenu(unit);
+        return;
+      }
+      this.pendingPageId = item.id;
+      this.enterTargeting('satchel', targets, item.name);
       return;
     }
 
