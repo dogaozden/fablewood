@@ -49,12 +49,12 @@ vi.mock('../VaultView', () => ({
     toast(msg: string): void { vv.log.push(`toast:${msg}`); }
     shakeNode(): void {}
     errorToast(msg: string): void { vv.log.push(`error:${msg}`); }
-    lootToast(): void { vv.log.push('lootToast'); }
+    lootToast(msg: string): void { vv.log.push(`lootToast:${msg}`); }
     async showBlurbCard(): Promise<void> { vv.log.push('blurb'); }
     async showCampCard(): Promise<void> { vv.log.push('camp'); }
     async showResumeChoice(): Promise<'continue'> { return 'continue'; }
     async combatFlash(): Promise<void> {}
-    async vaultOpensBeat(): Promise<void> { vv.log.push('vaultOpens'); }
+    async vaultOpensBeat(msg: string): Promise<void> { vv.log.push(`vaultOpens:${msg}`); }
     tooltipDebug(): null { return null; }
   },
 }));
@@ -248,7 +248,7 @@ describe('gate HP-out is not passage (crucible-2)', () => {
     scene.init({ seed: 7 });
     scene.create();
 
-    await waitFor(() => vv.log.includes('lootToast'), 'the room-clear loot');
+    await waitFor(() => vv.log.some((l) => l.startsWith('lootToast:')), 'the room-clear loot');
     // Fable_SPEC.md:31 — a wipe costs the loot roll, never story progress: no teaching card,
     // no second battle, straight back to the door that beat us.
     expect(vv.log).not.toContain('blurb');
@@ -270,7 +270,7 @@ describe('gate HP-out is not passage (crucible-2)', () => {
     scene.init({ seed: 7 });
     scene.create();
 
-    await waitFor(() => vv.log.includes('lootToast'), 'the room-clear loot');
+    await waitFor(() => vv.log.some((l) => l.startsWith('lootToast:')), 'the room-clear loot');
     expect(h.save().dungeon?.cleared).toEqual(['under-1', 'under-2', 'under-3']);
     expect(h.save().streak).toBe(1);
   });
@@ -312,7 +312,7 @@ describe('busy lock across the battle-return settlement (crucible-2)', () => {
 
     // Once the settlement finishes the lock must release — the click is deferred, not dead.
     h.addGoldGate.release();
-    await waitFor(() => vv.log.includes('lootToast'), 'the settlement to finish');
+    await waitFor(() => vv.log.some((l) => l.startsWith('lootToast:')), 'the settlement to finish');
     await tick();
     vv.handlers!.onRoom(1);
     await waitFor(
@@ -634,5 +634,71 @@ describe('flawless means untouched, not "no delta" (W4 T6 fix round)', () => {
 
   it('an outcome that omits damageTaken (the sim victory) still pays flawless', async () => {
     expect(await settledXp({ outcome: 'victory', hpLost: 0, results: [] })).toBe(40);
+  });
+});
+
+// Fix round 2 (review's carried concern #2): lootToast()/vaultOpensBeat()'s fakes used to
+// declare zero parameters, so nothing captured the MESSAGE TEXT the Wick's catch composes
+// into — only that a call happened. offerLantern only ever reaches spendLanternLight() (and
+// so the catch) once a Lantern-light raise is actually spent, so every scenario here needs
+// lanternLight:true; there is no "Wick catches with no lantern held" case to isolate — the
+// catch is nested inside the raise, by chapter law. Both expected strings below were verified
+// against the REAL roomClearLoot/bossLoot/mulberry32 chain via a throwaway node probe during
+// authoring (same discipline lantern-light.spec.ts's own seed-7 pins use), not hand-derived.
+describe('the Second Wick composes into the loot message, not a second toast (Ch. IX, fix round 2)', () => {
+  it('grantRoomLoot: the catch takes precedence over the refund explanation, in the SAME toast', async () => {
+    // room 0 ("The Dripping Threshold"), seed 7, edge:'advantage' (the auto-raised lantern):
+    // gold 13, no trinket — the exact precondition under which `refunding` would ALSO have
+    // been true had the Wick not caught the spend first. Precedence is what's under test.
+    setSearch('?dev=1&sim=1&auto=win');
+    const h = installServices({ hp: 16, lanternLight: true });
+    services.inventory.bornRelic = () => 'second-wick';
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => vv.log.some((l) => l.startsWith('lootToast:')), 'the room-clear loot');
+
+    const toast = vv.log.find((l) => l.startsWith('lootToast:'));
+    expect(toast).toBe('lootToast:The Dripping Threshold falls quiet. +13 coin. The second wick catches.');
+    expect(toast, 'the refund explanation never appears — the catch wins by construction').not.toContain(
+      'dust glitters',
+    );
+
+    expect(h.save().wickCaught, 'the catch fired').toBe(true);
+    expect(h.save().lanternLight, 'the light re-banked at once — still held, not cleared').toBe(true);
+  });
+
+  it("bossVictory: the catch appends to lootLine, the SAME text vaultOpensBeat shows once", async () => {
+    // seed 7's boss loot under edge:'advantage': 60 gold, Clerk's Silver Nib (drawn by the
+    // lantern's light — the trinket suffix), the Warden's signet. DEV_REWARD prefixes it (no
+    // pack in this fixture). bornRelic returns 'second-wick', never the Signet, so `edged`
+    // stays false — this exercises the Wick's append in isolation from the Signet's own edge.
+    setSearch('?dev=1&sim=1&auto=win');
+    const h = installServices({
+      hp: 16,
+      lanternLight: true,
+      dungeon: { roomIndex: 4, cleared: ['under-1', 'under-2', 'under-3', 'under-bestiary'] },
+    });
+    services.inventory.bornRelic = () => 'second-wick';
+
+    const env = makeEnv();
+    const scene = makeScene(env);
+    scene.init({ seed: 7 });
+    scene.create();
+
+    await waitFor(() => vv.log.some((l) => l.startsWith('vaultOpens:')), 'the boss victory beat');
+
+    const beat = vv.log.find((l) => l.startsWith('vaultOpens:'));
+    expect(beat).toBe(
+      'vaultOpens:the Undercroft falls quiet, and one knot in the Fade comes undone' +
+        " The Warden yields 60 coin, their signet, and a Clerk's Silver Nib" +
+        ' — drawn by the lantern\'s light. The second wick catches.',
+    );
+
+    expect(h.save().wickCaught, 'the catch fired').toBe(true);
+    expect(h.save().lanternLight, 'the light re-banked at once — still held, not cleared').toBe(true);
   });
 });

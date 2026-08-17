@@ -486,6 +486,49 @@ async function findAdjacentFloorPair(page: Page): Promise<[{ c: number; r: numbe
   throw new Error('no adjacent floor pair found in the room layout');
 }
 
+/** miras-stall.spec.ts's own idiom: every real installed fact id, read off the live packs API. */
+async function installedFactIds(page: Page): Promise<string[]> {
+  const res = await page.request.get('/api/packs');
+  expect(res.ok(), 'read installed packs').toBe(true);
+  const { packs } = (await res.json()) as { packs: Array<{ pack?: { facts?: Array<{ id: string }> } }> };
+  const ids: string[] = [];
+  for (const entry of packs) for (const f of entry.pack?.facts ?? []) ids.push(f.id);
+  expect(ids.length, 'the installed pack has facts to seed').toBeGreaterThan(0);
+  return ids;
+}
+
+// Fix round 2 (F2 re-opened) — the review ran the T2/T3 cast test cold 4 times and got a
+// byte-identical failure every time: the redraw showed the SAME encounter both draws. Root
+// cause (review's own diagnosis, confirmed against the real pack data below): the test's
+// "COMBAT_DRAW_COUNT=20 guarantees an alternative" comment was an assumption, not a guarantee —
+// the app's own wouldBe===result.encounterId safety net legitimately falls back to fate-holds
+// when the drawn pool's remainder happens to resolve to the same encounter, which this exact
+// seed/rank/tier combination does. Verified directly against packs/vc-law/pack.json: two
+// PREREQ-FREE facts that resolve to two GENUINELY DISTINCT mcq encounters —
+// vc.econ.valuation.pre-vs-post-money -> enc.mcq.pre-post-money, and
+// vc.econ.vesting.four-year-one-year-cliff -> enc.mcq.vesting-standard (the only two mcq
+// encounters reachable by a prereq-free fact in the whole pack, so both are eligible on a cold
+// save with zero history). Seeding BOTH as far-more-overdue than anything else installed
+// (miras-stall.spec.ts's own seedSrsBaseline idiom: seed every installed fact at a baseline,
+// override the two targets to win "most overdue" deterministically) removes the redraw pool's
+// dependence on ambient .state-e2e history entirely — the shown fact and the redraw target are
+// pinned, on two different encounters, regardless of what any other spec's run left behind.
+// Applied to BOTH combat tests (T1 passed cold before this fix, but on the same unguaranteed
+// assumption — this closes that gap too rather than leaving it merely lucky).
+const WICK_CAST_FACT_A = 'vc.econ.valuation.pre-vs-post-money'; // -> enc.mcq.pre-post-money
+const WICK_CAST_FACT_B = 'vc.econ.vesting.four-year-one-year-cliff'; // -> enc.mcq.vesting-standard
+
+async function seedWickCastFacts(page: Page): Promise<void> {
+  const ids = await installedFactIds(page);
+  const now = Date.now();
+  const facts: Record<string, { box: number; next_due: number; history: unknown[] }> = {};
+  for (const id of ids) facts[id] = { box: 1, next_due: now - 5_000, history: [] };
+  facts[WICK_CAST_FACT_A] = { box: 1, next_due: now - 999_999_999, history: [] };
+  facts[WICK_CAST_FACT_B] = { box: 1, next_due: now - 999_999_998, history: [] };
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded the two known-distinct-encounter facts').toBe(true);
+}
+
 /** Enter room.threshold via the real vaults map and ride the teaching cards to combat launch —
  *  lantern-light.spec.ts's own "combat cast" drive, cloned verbatim (own-file convention). A
  *  REAL packId is required here, not the packless dev fixture: that file's own file-level note
@@ -518,6 +561,7 @@ test('CombatScene T1 cast site: the catch banner is the exact verbatim string (F
   test.setTimeout(90_000);
   const beforeSave = await readState<LootSave>(page, 'save.json');
   const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+  const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
 
   try {
     // fixture: no dungeon progress (room.threshold reads as "first uncleared") — same shape as
@@ -528,6 +572,7 @@ test('CombatScene T1 cast site: the catch banner is the exact verbatim string (F
     await page.request.put('/api/state/inventory.json', {
       data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
     });
+    await seedWickCastFacts(page); // seed BEFORE goto — the due queue must see it from boot
 
     await enterThresholdCombat(page, 1);
 
@@ -569,6 +614,7 @@ test('CombatScene T1 cast site: the catch banner is the exact verbatim string (F
     try { await onward.waitFor({ state: 'visible', timeout: 1500 }); await onward.click(); } catch { /* auto-resolves */ }
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });
 
@@ -576,6 +622,7 @@ test('CombatScene T2/T3 cast site: the catch banner is the exact verbatim string
   test.setTimeout(90_000);
   const beforeSave = await readState<LootSave>(page, 'save.json');
   const beforeInv = await readState<LootInventory>(page, 'inventory.json');
+  const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
 
   try {
     await page.request.put('/api/state/save.json', {
@@ -584,6 +631,7 @@ test('CombatScene T2/T3 cast site: the catch banner is the exact verbatim string
     await page.request.put('/api/state/inventory.json', {
       data: { version: 1, gold: 20, stacks: { [WICK_ID]: 1 }, bornRelicId: WICK_ID },
     });
+    await seedWickCastFacts(page); // seed BEFORE goto — the due queue must see it from boot
 
     await enterThresholdCombat(page, 2);
 
@@ -625,6 +673,7 @@ test('CombatScene T2/T3 cast site: the catch banner is the exact verbatim string
     try { await onward.waitFor({ state: 'visible', timeout: 1500 }); await onward.click(); } catch { /* auto-resolves */ }
   } finally {
     await restoreLootState(page, beforeSave, beforeInv);
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });
 
