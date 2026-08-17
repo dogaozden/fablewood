@@ -1,5 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState } from './helpers';
+// The dev fixture's own spec, so "every room got cleared" stays a statement about the fixture
+// rather than a hardcoded count that silently rots the next time a room is added — which is
+// exactly what happened when Ch. VIII's "under-bestiary" made this a 5-room dungeon.
+// (Importing engine source into a spec follows miras-stall.spec.ts's own precedent.)
+// Read rather than `import ... with { type: 'json' }`: the runner's ESM loader rejects a bare
+// JSON import, and this needs no transpiler feature to work.
+import { readFileSync } from 'node:fs';
+const devDungeon = JSON.parse(
+  readFileSync(new URL('../app/src/game/scenes/dungeon/__fixtures__/dev.dungeon.json', import.meta.url), 'utf8'),
+) as { rooms: unknown[] };
 
 // Genuine Vault-Warden kills — the boss-victory path had zero suite coverage before this file
 // (promoted from a read-only boss-kill-lens playtest pilot that proved both routes live, on its
@@ -410,7 +420,10 @@ test('boss-victory (real dungeon path): Vault-Warden kill via auto=boss, persist
     expect(saveAfter?.scene, 'save persisted scene:hamlet (bossVictory saves BEFORE scene.start)').toBe('hamlet');
     expect(saveAfter?.streak, 'streak bumped by exactly 1 (a single boss-room clear)').toBe(1);
     expect(saveAfter?.dungeon?.cleared, 'dungeon.cleared includes the boss room id').toContain('under-boss');
-    expect(saveAfter?.dungeon?.cleared?.length, 'all 4 rooms (3 pre-boss + the boss room) are cleared').toBe(4);
+    expect(
+      saveAfter?.dungeon?.cleared?.length,
+      'every room in the fixture (all the pre-boss rooms + the boss room) is cleared',
+    ).toBe(devDungeon.rooms.length);
     expect(Number.isFinite(saveAfter?.hp), 'hp is not NaN after victory').toBe(true);
     expect(saveAfter?.hp).toBeGreaterThan(0);
 
