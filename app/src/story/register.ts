@@ -7,7 +7,9 @@
 import { services, type SaveData, type StoryBeat, type StorySurface } from '../game/contracts';
 import { StoryStore } from './store';
 import { nextBeatFor, T1_BEATS } from './beats';
-import { showBeatCard } from './ui';
+import { showBeatCard, openDeskUi } from './ui';
+import { CANTOS } from './cantos';
+import { cantoUnlocked, onwardOpenPage, weldCount } from './books';
 
 const store = new StoryStore();
 
@@ -23,8 +25,18 @@ services.story = {
     await showBeatCard(beat, opts);
   },
   openDesk: async (): Promise<void> => {
-    // Task 6 replaces this with the real two-book desk.
-    return Promise.resolve();
+    await Promise.all([store.ready(), services.srs.ready(), services.draw.indexReady()]);
+    const welds = weldCount(services.draw.allFactIds(), (id) => services.srs.boxOf(id));
+    const arcs = store.completedArcCount();
+    await openDeskUi({
+      cantos: CANTOS.map((c, i) => ({
+        roman: c.roman,
+        title: c.title,
+        body: c.body,
+        unlocked: cantoUnlocked(i, welds, arcs),
+      })),
+      onward: onwardOpenPage((id) => store.isSeen(id)),
+    });
   },
 };
 

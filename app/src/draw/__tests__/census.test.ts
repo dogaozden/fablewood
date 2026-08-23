@@ -45,7 +45,7 @@ import { join, relative } from 'path';
  *     alias-risk shape), OR an unrecognized method name (the DrawApi surface grew — worth a
  *     human's eyes either way).
  * Then assert: the FULL SET of files containing ANY occurrence (call, safe, OR suspicious) is
- * exactly the 3 consumer files plus the two known bare-only touchpoints below; suspicious
+ * exactly the 3 consumer files plus the three known bare-only touchpoints below; suspicious
  * occurrences are zero everywhere in today's tree; and the 3 consumers' CALL counts match the
  * enumeration above exactly. A bare occurrence in an unlisted file, a call hidden by
  * wrapping, or a due/fresh reference missing its call parens all now surface as a failure
@@ -64,6 +64,11 @@ import { join, relative } from 'path';
  * .encountersOf/.factOf for cross-pack fact/encounter resolution (pick()'s own docstring:
  * "encountersOf... is per-fact source resolution for step 2 ONLY") — never .due(/.fresh(, so
  * it never draws a new assignment. Allowlisted below as bare-only, same as draw/register.ts.
+ *
+ * T1-6 (the reading desk) added a third: story/register.ts's openDesk() calls
+ * services.draw.indexReady()/.allFactIds() to enumerate the global fact pool for weldCount()
+ * (books.ts) — an enumeration read, never a due()/fresh() draw. Same bare-only shape as the
+ * other two.
  */
 
 // Fix-round-1 (M1): this used to be `../../..` (3 levels up from __tests__, landing on app/,
@@ -83,7 +88,7 @@ const WIRING_FILE = 'draw/register.ts';
 // Bare-only non-consumer touchpoints: allowed to mention services.draw (safely — see
 // findDrawOccurrences), but never to CALL due()/fresh() on it — that would make them an
 // undeclared 6th consumer.
-const BARE_ONLY_FILES = [WIRING_FILE, 'game/encounters/register.ts'];
+const BARE_ONLY_FILES = [WIRING_FILE, 'game/encounters/register.ts', 'story/register.ts'];
 
 // The DrawApi surface besides due()/fresh() (draw/register.ts's own services.draw = {...}
 // literal is the ground truth for this list: ready, indexReady, due, fresh, allFactIds,

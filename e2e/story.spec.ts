@@ -81,3 +81,59 @@ test('a fresh save hears nothing — the story never fires early', async ({ page
   await page.waitForTimeout(1500);
   await expect(page.locator('.fw-story-card')).toHaveCount(0);
 });
+
+test('the desk: both books, canto I readable, canto III locked at zero welds', async ({ page }) => {
+  await page.request.put('/api/state/save.json', { data: CLEARED_SAVE });
+  await page.request.put('/api/state/story.json', {
+    data: { version: 1, seenBeats: { 'onward-01.dark-answers': '2026-08-21T00:00:00.000Z' }, completedArcs: {}, threadFragments: {} },
+  });
+  await bootToHamlet(page);
+  expect(await warpHamletTo(page, 'records')).toBe(true);
+  await tapKey(page, 'e');
+  // Advance the Clerk's pages; the first choice (The reading desk) is default-selected.
+  // DialogueBox types at 14ms/char (MAX_COLS 52 x MAX_ROWS 3): a page longer than the
+  // ~340ms tap cadence below eats ONE tap just to skip its typewriter, then a SECOND to
+  // actually advance — this 3-page conversation deterministically needs 6 taps to reach
+  // the choice and confirm it (traced empirically), so the loop carries real margin above
+  // that, matching the deliberately generous retry bound e2e/helpers.ts's
+  // enterVaultsViaGate() already uses for the same "advance NPC pages, then confirm the
+  // default choice" shape.
+  for (let i = 0; i < 10; i++) {
+    await tapKey(page, 'e');
+    await page.waitForTimeout(250);
+    if (await page.locator('.fw-desk').isVisible().catch(() => false)) break;
+  }
+  const desk = page.locator('.fw-desk');
+  await expect(desk).toBeVisible();
+  await expect(desk).toContainText('«The First Lantern»');
+  await expect(desk).toContainText('Before the world, there was nothing to forget.'); // canto I open by default
+  await expect(desk.locator('.fw-desk-locked').first()).toContainText('Canto III');
+
+  // «Onward» open page lists the seen beat and the Clerk's next line
+  await desk.getByRole('button', { name: /Chapter One/ }).click();
+  await expect(desk).toContainText('The Dark Answers');
+  await expect(desk).toContainText('Next wants doing: the south road.');
+  await page.keyboard.press('Escape');
+  await expect(desk).toHaveCount(0);
+});
+
+test('the desk opens with zero story progress too (fresh save)', async ({ page }) => {
+  await page.request.put('/api/state/save.json', { data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' } });
+  await page.request.put('/api/state/story.json', { data: { version: 1, seenBeats: {}, completedArcs: {}, threadFragments: {} } });
+  await bootToHamlet(page);
+  expect(await warpHamletTo(page, 'records')).toBe(true);
+  await tapKey(page, 'e');
+  // Loop bound: see the sibling desk test above — 6 taps needed, deterministically.
+  for (let i = 0; i < 10; i++) {
+    await tapKey(page, 'e');
+    await page.waitForTimeout(250);
+    if (await page.locator('.fw-desk').isVisible().catch(() => false)) break;
+  }
+  const desk = page.locator('.fw-desk');
+  await expect(desk).toBeVisible();
+  // The desk always opens on the first unlocked canto (canto I — see the sibling test),
+  // never on the Onward page by default; open the Onward book to see its own page.
+  await desk.getByRole('button', { name: /Chapter One/ }).click();
+  await expect(desk).toContainText('The page is ruled and waiting.');
+  await page.keyboard.press('Escape');
+});
