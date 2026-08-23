@@ -71,6 +71,7 @@ export class StoryStore {
       return;
     }
     this.cache = {
+      ...raw,
       version: 1,
       seenBeats: { ...raw.seenBeats },
       completedArcs: { ...raw.completedArcs },
@@ -82,7 +83,7 @@ export class StoryStore {
     return typeof this.cache.seenBeats[beatId] === 'string';
   }
   completedArcCount(): number {
-    return Object.keys(this.cache.completedArcs).length;
+    return Object.values(this.cache.completedArcs).filter((v) => typeof v === 'string').length;
   }
   hasFragment(fragmentId: string): boolean {
     return typeof this.cache.threadFragments[fragmentId] === 'string';
@@ -106,8 +107,17 @@ export class StoryStore {
   ): Promise<void> {
     const task = this.writeChain.then(async () => {
       const remote = await this.bridge.getState<unknown>(STORY_FILE);
-      const base: StoryState = isStoryState(remote) ? remote : this.cache;
+      const base: StoryState = isStoryState(remote)
+        ? {
+            ...remote,
+            version: 1,
+            seenBeats: { ...remote.seenBeats },
+            completedArcs: { ...remote.completedArcs },
+            threadFragments: { ...remote.threadFragments },
+          }
+        : this.cache; // null/corrupt mid-run → build on our cache, don't lose the write
       const merged: StoryState = {
+        ...base,
         version: 1,
         seenBeats: union(base.seenBeats, this.cache.seenBeats),
         completedArcs: union(base.completedArcs, this.cache.completedArcs),

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { StoryStore, type StoryState } from './store';
 
 /** In-memory fake of the two bridge calls (the srs/store.test.ts pattern). */
@@ -49,6 +49,23 @@ describe('StoryStore', () => {
     ]);
   });
 
+  it('an unknown top-level key survives a markSeen round-trip (forward-compat)', async () => {
+    const b = fakeBridge({
+      'story.json': {
+        version: 1,
+        seenBeats: {},
+        completedArcs: {},
+        threadFragments: {},
+        futureField: { x: 1 },
+      },
+    });
+    const s = new StoryStore(b);
+    await s.ready();
+    await s.markSeen('onward-01.dark-answers', 1000);
+    const file = b.files.get('story.json') as StoryState & { futureField?: unknown };
+    expect(file.futureField).toEqual({ x: 1 });
+  });
+
   it('concurrent ready() shares one in-flight load (no default-cache race)', async () => {
     const b = fakeBridge({
       'story.json': {
@@ -58,8 +75,10 @@ describe('StoryStore', () => {
         threadFragments: {},
       },
     });
+    const getSpy = vi.spyOn(b, 'getState');
     const s = new StoryStore(b);
-    const [,] = await Promise.all([s.ready(), s.ready()]);
+    await Promise.all([s.ready(), s.ready()]);
+    expect(getSpy).toHaveBeenCalledTimes(1);
     expect(s.isSeen('onward-01.dark-answers')).toBe(true);
   });
 
@@ -84,5 +103,29 @@ describe('StoryStore', () => {
     const file = b.files.get('story.json') as StoryState;
     expect(file.completedArcs['onward-01']).toBe(new Date(1000).toISOString());
     expect(file.threadFragments['frag.name.01-span-ledger']).toBe(new Date(2000).toISOString());
+  });
+
+  it('a failed write warns once, and the write chain survives for the next markSeen', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const files = new Map<string, unknown>();
+    let putCalls = 0;
+    const b = {
+      files,
+      getState: async <T,>(name: string) => (files.has(name) ? (files.get(name) as T) : null),
+      putState: async (name: string, data: unknown) => {
+        putCalls++;
+        if (putCalls === 1) return false; // simulate one failed persist
+        files.set(name, data);
+        return true;
+      },
+    };
+    const s = new StoryStore(b);
+    await s.ready();
+    await s.markSeen('onward-01.dark-answers', 1000); // fails to persist
+    expect(warn).toHaveBeenCalledOnce();
+    await s.markSeen('onward-01.barred-road', 2000); // chain must still be alive
+    const file = b.files.get('story.json') as StoryState;
+    expect(file.seenBeats['onward-01.dark-answers']).toBe(new Date(1000).toISOString());
+    expect(file.seenBeats['onward-01.barred-road']).toBe(new Date(2000).toISOString());
   });
 });
