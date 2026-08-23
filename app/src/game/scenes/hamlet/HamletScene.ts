@@ -477,6 +477,7 @@ export class HamletScene extends Phaser.Scene {
         services.settings.ready(),
         services.inventory.ready(),
         services.amendments.ready(),
+        services.story.ready(),
       ]);
     } catch {
       /* stubs/real impls both fine; ignore readiness errors */
@@ -513,6 +514,12 @@ export class HamletScene extends Phaser.Scene {
     }
 
     this.handleDemo();
+
+    // «Onward» hamlet-entry beat (story provider decides; the scene only asks).
+    // Covers both the live boss-victory return AND the backfill for saves that
+    // beat the Warden before the story layer shipped (design §5 "hook beat").
+    const entryBeat = services.story.nextBeatFor('hamlet-entry', services.save.get());
+    if (entryBeat) await services.story.showBeat(entryBeat);
   }
 
   private placePlayer(x: number, y: number): void {
@@ -752,14 +759,19 @@ export class HamletScene extends Phaser.Scene {
         case 'cottage':
           await this.doCottage();
           break;
-        case 'tavern':
+        case 'tavern': {
+          const tavernBeat = services.story.nextBeatFor('tavern', services.save.get());
+          if (tavernBeat) await services.story.showBeat(tavernBeat);
           await this.dialogue.run(berryConv(this.computeDue(), this.streak()));
           break;
-        case 'records':
+        }
+        case 'records': {
           // supersession-reteach.md §2 — amendments are presented BEFORE normal conversation.
           await this.doAmendments();
-          await this.dialogue.run(clerkConv(this.computeDue(), this.lastPlayed()));
+          const choice = await this.dialogue.run(clerkConv(this.computeDue(), this.lastPlayed()));
+          if (choice === 'desk') await services.story.openDesk();
           break;
+        }
         case 'wellspring':
           await this.doWellspring();
           break;
@@ -1132,6 +1144,8 @@ export class HamletScene extends Phaser.Scene {
   }
 
   private async doGate(): Promise<void> {
+    const gateBeat = services.story.nextBeatFor('south-gate', services.save.get());
+    if (gateBeat) await services.story.showBeat(gateBeat);
     const choice = await this.dialogue.run(alderConv(this.provinces));
     if (!choice || choice === '__cancel__') return;
     await this.dialogue.run(alderFarewell());

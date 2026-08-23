@@ -53,7 +53,15 @@ export function clerkConv(due: number, lastPlayed: string): Conversation {
   }
 
   pages.push('Renew them, or watch them Fade. Your ledger. Not mine.');
-  return { speaker: 'The Laconic Clerk', pages, portrait: 'portrait.clerk' };
+  return {
+    speaker: 'The Laconic Clerk',
+    pages,
+    choices: [
+      { label: 'The reading desk', value: 'desk' },
+      { label: 'Enough for now', value: '__cancel__' },
+    ],
+    portrait: 'portrait.clerk',
+  };
 }
 
 /** The South Gate — Gatewarden Alder. Province select (installed packs). */
