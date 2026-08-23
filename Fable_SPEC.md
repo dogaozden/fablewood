@@ -26,7 +26,7 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 | Depth | **~300 facts v1**, with *expansion* as a first-class pipeline verb — new sources merge into a live pack without disturbing fact IDs or SRS history |
 | LLM access | **No API keys, ever.** Runtime intelligence = headless `claude -p` / Agent SDK (Claude or Codex) on the author's subscriptions |
 | Name | **Fablewood** (chosen 2026-07-19 after six rounds — the author's register: cozy & whimsical; that register also informs art direction) |
-| World | **High fantasy: the Ledger Realms.** VC law = the Venture Coast; the Fablewood is the heart-forest, its hamlet the home base |
+| World | **High fantasy: the Ledger Realms.** VC law = the Venture Coast; the Fablewood is the heart-forest, its hamlet the home base. Provinces are story geography, not packs — knowledge sources live in the Library ("The Unsealing", 2026-08-02). The playable epic is «Onward», the Second Telling (2026-08-15 design). |
 | Combat | **Full grid tactics** — Fire Emblem/BG3-style movement, terrain, AoE, initiative |
 | Stakes | **Teeth, but fair** — wrong answers cost HP/resources; wipes = retreat to camp (lose the loot roll, never story progress) |
 | Pedagogy | **Teach AND test** — self-contained: mentor NPCs and discovered documents (verbatim source excerpts, cited) introduce facts; drills follow |
@@ -51,7 +51,7 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 - **The Laconic Clerk**: the Ledger's assessor. Appears when you cast from memory. Verdict, one line, gone.
 - **Companions**: your retinue — each province contributes candidates whose power mirrors your mastery of their domain. The Venture Coast merchant-princess grows as your VC law solidifies; neglect a domain and watch its champion dim.
 - **First dungeon:** *The Preference Vaults* — term sheet economics. Stacked-shield liquidation waterfalls, anti-dilution wraiths, an option-pool shuffle, and a pay-to-play gauntlet. Boss: a full term-sheet negotiation.
-- New pack = new province (Tax: a bureaucracy-labyrinth; Semiconductors: a fab-forge across the sea). The metaphor layer is maintained deliberately — every game concept maps to a real mechanic, documented in the pack.
+- New pack = new fables in the same Realms ("The Unsealing", 2026-08-02 — the former "new pack = new province" clause is struck; Venture Coast text is retained as historical flavor of the first vault, re-themed per D2). The metaphor layer is maintained deliberately — every game concept maps to a real mechanic, documented in the pack.
 
 ## 4. Knowledge packs (the contract)
 
@@ -60,7 +60,7 @@ the author reads books, attends lectures, collects gems — and forgets them. Fa
 - **meta**: id, title, version, sources[] (bibliographic + file paths into `raw/`)
 - **facts[]**: `{id, type: rule|concept|advice|do|dont|number|story, statement, detail, source_ref {file, loc, quote}, as_of, source_version, tags[], difficulty 1–5, prereqs[]}`
 - **encounters[]**: `{id, fact_ids[], kind: mcq|free_recall|scenario_branch|match|order, template_vars (parametric reskin slots), prompt, options/branches, answer, rubric, trap_notes}`
-- **quests[]**: `{id, title, region, encounter_ids[], dialogue[], reward}` · **npcs[]**: pack-flavored characters
+- **quests[]**: `{id, title, region, encounter_ids[], dialogue[], reward}` · **npcs[]**: pack-flavored characters (quests[], npcs[], region are legacy-optional since "The Unsealing" — grandfathered for vc-law; new packs ship facts + encounters + metaphor_map.)
 - **metaphor_map**: game-concept ↔ real-mechanic glossary (keeps the fantasy honest)
 
 Hard rules (Culture-Wiki lessons): source_refs are **Python-validated against source text, never LLM-trusted**; facts that fail validation are skipped, not shipped. SRS state (`state/`) references fact IDs and lives outside packs — regeneration and expansion never touch learning history.

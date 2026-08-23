@@ -5,7 +5,7 @@
   "description": "The pack contract — Fable_SPEC.md §4. One engine, many packs; this is the seam.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["meta", "facts", "encounters", "quests", "metaphor_map"],
+  "required": ["meta", "facts", "encounters", "metaphor_map"],
   "properties": {
     "meta": { "$ref": "#/definitions/meta" },
     "facts": { "type": "array", "items": { "$ref": "#/definitions/fact" } },

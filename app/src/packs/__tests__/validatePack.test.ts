@@ -81,4 +81,20 @@ describe('validatePack', () => {
     expect(validatePack({}).valid).toBe(false);
     expect(validatePack({ meta: { id: 'x' } }).valid).toBe(false);
   });
+
+  it('a pack with no quests[] validates — the Unsealing §4 contract (new packs ship facts + encounters + metaphor_map)', () => {
+    const minimal = {
+      meta: {
+        id: 'fixture-questless',
+        title: 'Questless Fixture',
+        version: '1.0.0',
+        sources: [{ title: 'Test Source' }],
+      },
+      facts: [],
+      encounters: [],
+      metaphor_map: [],
+    };
+    const result = validatePack(minimal);
+    expect(result.valid, JSON.stringify(result.errors)).toBe(true);
+  });
 });
