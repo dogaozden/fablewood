@@ -20,7 +20,7 @@ export function berryConv(due: number, streak: number): Conversation {
 
   if (due > 0) {
     pages.push(
-      `Folk in from the Coast swear the Waterfall Gallery groans again. ${plural(due, 'fable')} stir restless in the dark — the Fade's been gnawing while you were away.`,
+      `Folk in from the Morning Coast swear the Waterfall Gallery groans again. ${plural(due, 'fable')} stir restless in the dark — the Fade's been gnawing while you were away.`,
     );
   } else {
     pages.push(
@@ -79,7 +79,7 @@ export function alderConv(provinces: Province[]): Conversation {
   return {
     speaker: 'Gatewarden Alder',
     pages: [
-      'Beyond this gate lies the Venture Coast — and past its treaties, the Preference Vaults.',
+      'Beyond this gate lies the Morning Coast — and past its grey miles, the Vault of Worth, first of the sealed provinces to open.',
       'Which province will you ride for?',
     ],
     choices: [
