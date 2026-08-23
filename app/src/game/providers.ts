@@ -14,3 +14,4 @@ import './encounters/register';
 import '../srs/register';
 import '../draw/register';
 import '../inventory/register';
+import '../story/register';
