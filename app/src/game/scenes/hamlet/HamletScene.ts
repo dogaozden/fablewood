@@ -518,6 +518,7 @@ export class HamletScene extends Phaser.Scene {
     // «Onward» hamlet-entry beat (story provider decides; the scene only asks).
     // Covers both the live boss-victory return AND the backfill for saves that
     // beat the Warden before the story layer shipped (design §5 "hook beat").
+    await services.story.ready().catch(() => {}); // memoized; isolates story from the swallow-all Promise.all above
     const entryBeat = services.story.nextBeatFor('hamlet-entry', services.save.get());
     if (entryBeat) await services.story.showBeat(entryBeat);
   }

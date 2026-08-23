@@ -24,7 +24,7 @@ function ensureStyles(): void {
   .fw-story-page i { color:#4a3a24; }
   .fw-story-margin { font-size:.85rem; font-style:italic; color:#6b5638;
     border-top:1px solid rgba(138,107,63,.4); padding-top:8px; margin-top:4px; }
-  .fw-story-hint { font-size:.72rem; color:#8a6b3f; text-align:right; margin-top:10px; }
+  .fw-story-hint { font-size:.72rem; color:#6b5638; text-align:right; margin-top:10px; }
   .fw-desk { position:fixed; inset:0; z-index:60; display:flex; align-items:center;
     justify-content:center; background:rgba(20,14,26,.62); }
   .fw-desk-panel { width:min(760px, 94vw); height:min(560px, 86vh); display:flex;

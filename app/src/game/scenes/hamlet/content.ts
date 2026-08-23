@@ -64,6 +64,13 @@ export function clerkConv(due: number, lastPlayed: string): Conversation {
   };
 }
 
+/** C7 grandfather clause (Fable_SPEC, the Unsealing §4): pre-«Onward» pack data is
+ *  immutable, so vc-law's meta.title still reads "The Venture Coast — …". Presentation
+ *  surfaces show the «Onward» name; the map is display-only and never touches the pack. */
+const PROVINCE_DISPLAY_TITLES: Record<string, string> = {
+  'vc-law': 'The Vault of Worth — Term Sheet Economics',
+};
+
 /** The South Gate — Gatewarden Alder. Province select (installed packs). */
 export function alderConv(provinces: Province[]): Conversation {
   if (provinces.length === 0) {
@@ -79,11 +86,11 @@ export function alderConv(provinces: Province[]): Conversation {
   return {
     speaker: 'Gatewarden Alder',
     pages: [
-      'Beyond this gate lies the Morning Coast — and past its grey miles, the Vault of Worth, first of the sealed provinces to open.',
+      'Beyond this gate lies the Morning Coast — and past its grey miles, the Vault of Worth, first of the provinces to open.',
       'Which province will you ride for?',
     ],
     choices: [
-      ...provinces.map((p) => ({ label: p.title, value: p.id })),
+      ...provinces.map((p) => ({ label: PROVINCE_DISPLAY_TITLES[p.id] ?? p.title, value: p.id })),
       { label: 'Not yet', value: '__cancel__' },
     ],
     portrait: 'portrait.alder',
