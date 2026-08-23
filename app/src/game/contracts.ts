@@ -399,6 +399,40 @@ export interface AmendmentsApi {
   firstAmendedAppearance(factIds: readonly string[]): string | null;
 }
 
+// ---------------------------------------------------------------- the second telling
+
+/** One delivered story moment («Onward» design §5): a parchment card's worth of the
+ *  canonical text (docs/story/onward/), curated verbatim — never paraphrased. */
+export interface StoryBeat {
+  id: string;
+  title: string;
+  /** card pages, advanced like teaching-card pages */
+  pages: string[];
+  /** the Clerk's dated margin, rendered small beneath the last page (optional) */
+  margin?: string;
+}
+
+/** The T1 trigger surfaces. An arc's beats fire at existing seams — scenes ask, the
+ *  story provider decides; scenes never hold story logic (design §9 "triggers"). */
+export type StorySurface = 'hamlet-entry' | 'south-gate' | 'tavern';
+
+/** The «Onward» story spine: beat delivery + the Records Office reading desk.
+ *  Sync reads after ready(), like SrsApi. state/story.json is additive-only. */
+export interface StoryApi {
+  /** resolve cached state from state/story.json — call before sync reads */
+  ready(): Promise<void>;
+  isSeen(beatId: string): boolean;
+  /** The one beat (if any) that fires at this surface right now, canon order, seen
+   *  beats excluded. Pure given (store, save) — the eligibility table lives in
+   *  story/beats.ts. */
+  nextBeatFor(surface: StorySurface, save: SaveData): StoryBeat | null;
+  /** Show one beat's parchment card; marks it seen BEFORE resolving (a crash after
+   *  dismiss never refires it). `auto` mirrors showNightLedger's auto-drive. */
+  showBeat(beat: StoryBeat, opts?: { auto?: boolean }): Promise<void>;
+  /** The Records Office reading desk (both books); resolves on close. */
+  openDesk(opts?: { auto?: boolean }): Promise<void>;
+}
+
 // ---------------------------------------------------------------- night's ledger
 
 /**
@@ -432,6 +466,7 @@ export interface Services {
   inventory: InventoryApi;
   amendments: AmendmentsApi;
   draw: DrawServiceApi;
+  story: StoryApi;
   /** teach-and-test: modal "discovered documents" cards, resolves on dismiss (encounters agent owns UI) */
   showTeaching: (facts: FactLite[]) => Promise<void>;
   /** §3.2 the Night's Ledger run-harvest screen (encounters agent owns UI); resolves on dismiss.
