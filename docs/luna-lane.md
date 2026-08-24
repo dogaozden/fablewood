@@ -33,10 +33,19 @@ Why each flag:
 ## Field notes (2026-08-03 SRD digestion run — 13 execs, 11 briefs, zero redos)
 
 - **Long prompts via stdin**: `codex exec -s <mode> -` reads the prompt from stdin — use it for anything long or quote-heavy instead of shell-escaped inline strings.
-- **Wall time**: even a trivial PONG took ~90 s at max effort; real tasks blow past Bash's sync timeout. Always `run_in_background` + notification-driven waiting.
+- **Wall time**: even a trivial PONG took ~90 s at max effort; real tasks blow past Bash's sync timeout. Launch detached, then wait per the **Waiting contract** below — NEVER notification-driven waiting (superseded 2026-08-23).
 - **Files lie until exit**: Codex keeps silently revising its output file after it first appears (observed: a brief read mid-revision at 87 lines settled at 106 minutes later). Never judge an output until the process actually exits.
 - **Concurrency confirmed**: 3-way concurrent execs ran as genuinely independent OS processes (ps-verified, no serialization) — batch 3-wide freely within the 3–5 guidance.
 - **This SRD source specifically**: raw PDF-to-text, zero markdown — bare title-case line matches produce false positives (a wrong line-hint fed to Luna once; it caught it when told to verify independently). Tell workers to distrust structural hints and verify against content. Multi-column tables arrive scrambled; Luna un-scrambles them correctly when asked to reconstruct rather than transcribe.
+
+## Waiting contract (non-negotiable — 2026-08-23, after the FOURTH lost wake-up on this machine)
+
+Background-task events on this machine are unreliable for subagents AND the main session — and it is worse than lost notifications: pending background events (completion notices AND an agent's own backgrounded fallback poller) sit QUEUED until something else wakes the session. Three documented losses on 2026-08-14 (FABLEWOOD W4 cert), a fourth on 2026-08-23 (Of Counsel T1: the chaperone ended its turn to wait, Luna finished, nothing woke it until the orchestrator nudged). Therefore:
+
+1. **Launch detached** (`run_in_background: true`), streaming `--json` to a log file. Never start `codex exec` inside a foreground call that could time out — a killed foreground call can take the worker down mid-run. Any completion notification that later arrives is a bonus no-op, never the wake mechanism.
+2. **Wait by chained BOUNDED FOREGROUND polls — never end a turn to wait on any background signal.** Each poll is one foreground call, ~5–9 min bound (under the 10-min Bash cap so it returns instead of being killed): `until ! pgrep -f "<dispatch-unique marker>" >/dev/null; do sleep 15; done; echo EXITED` — the marker is unique to THIS dispatch (e.g. the `--output-schema` path) so parallel workers don't collide. Call returns without EXITED → immediately issue the next poll. Between polls it's fine to do real local work; it is NOT fine to end the turn.
+3. **Exit condition is process death, never file appearance** — files lie until exit (field note above). Only after EXITED do you judge the `-o` output and JSONL. A dead process with missing/non-conforming output is a FAILURE to handle per the chaperone contract, not a reason to keep waiting.
+4. **Orchestrator side, defense in depth:** ground-truth any silent agent (processes, output files, git log) BEFORE nudging, and nudge with status-asks, not accusations — the nudge itself is the wake event that flushes a starved worker's queue. A report-file watcher (`until test -f <report>; do sleep 10; done`, plain command text, backgrounded) is worth arming but is itself best-effort on this machine — the ground-truth-on-silence rule is the real guarantee. Every dispatch carries the file-delivery contract (report written to disk BEFORE the final message) — it is what makes all of this recoverable.
 
 ## Chaperone verification contract (non-negotiable)
 
