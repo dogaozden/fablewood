@@ -37,6 +37,7 @@ Why each flag:
 - **Files lie until exit**: Codex keeps silently revising its output file after it first appears (observed: a brief read mid-revision at 87 lines settled at 106 minutes later). Never judge an output until the process actually exits.
 - **Concurrency confirmed**: 3-way concurrent execs ran as genuinely independent OS processes (ps-verified, no serialization) — batch 3-wide freely within the 3–5 guidance.
 - **This SRD source specifically**: raw PDF-to-text, zero markdown — bare title-case line matches produce false positives (a wrong line-hint fed to Luna once; it caught it when told to verify independently). Tell workers to distrust structural hints and verify against content. Multi-column tables arrive scrambled; Luna un-scrambles them correctly when asked to reconstruct rather than transcribe.
+- **apply_patch vs compact JSON** (2026-08-24, Of Counsel T4): editing a one-line-per-section/minified JSON file broke `apply_patch` ~20k times in a single exec before Luna self-recovered via a guarded perl one-liner (result byte-correct). For compact/minified JSON edits, brief Luna up front to use `node -e`/`jq`/`perl`, never apply_patch.
 
 ## Waiting contract (non-negotiable — 2026-08-23, after the FOURTH lost wake-up on this machine)
 
