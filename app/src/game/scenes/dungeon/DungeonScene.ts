@@ -49,6 +49,7 @@ import { VaultView, type NodeHandlers } from './VaultView';
 import { FIXTURE_PACK_ID } from '../../combat/fixtures';
 import devSpecJson from './__fixtures__/dev.dungeon.json';
 import devFactsJson from './__fixtures__/dev.facts.json';
+import { engineSpecById } from './engineSpecs';
 import { grantXp } from '../../progression/grant';
 import { levelUpRows } from '../../progression/ceremony';
 import { maxHpForLevel } from '../../progression/xp';
@@ -85,6 +86,10 @@ export class DungeonScene extends Phaser.Scene {
   private seed = 0;
   private packId: string | null = null;
   private dev = false;
+  /** Set when this crawl is an ENGINE spec (arc content shipped in the engine, universe
+   *  design §9) rather than a pack's map. Drives the packless load path below and is the
+   *  `specId` every story trigger reports. */
+  private engineSpecId: string | null = null;
   private sim = false;
   private auto: string | null = null;
 
@@ -119,10 +124,15 @@ export class DungeonScene extends Phaser.Scene {
     super('vaults');
   }
 
-  init(data: { seed?: number; packId?: string }): void {
+  init(data: { seed?: number; packId?: string; spec?: string }): void {
     this.seed = data?.seed ?? 0;
     const params = new URLSearchParams(window.location.search);
     this.dev = params.get('dev') === '1';
+    // «Onward» engine specs: `scene.start('vaults', { spec: 'arc01-road' })` from the south
+    // gate, or `?spec=arc01-road` for dev/e2e. The query form is required, not a convenience:
+    // `?scene=vaults` routes through BootScene, which forwards only `{ seed }`
+    // (BootScene.ts:98), so launch data cannot survive that hop.
+    this.engineSpecId = data?.spec ?? params.get('spec');
     const simParam = params.get('sim');
     this.sim = simParam !== null ? simParam === '1' : this.dev; // sim closes the loop on the packless dev path
     this.auto = params.get('auto');
@@ -136,7 +146,8 @@ export class DungeonScene extends Phaser.Scene {
     // marker CombatScene's own dev-boss reconciler already recognizes (crucible #11,
     // FIXTURE_PACK_ID) instead — never a stale real id — so doCombat/runGate below
     // always launch an all-fixture or all-real object, never a mix.
-    this.packId = this.dev
+    // T2: an engine spec is packless for exactly the same reason and takes the same branch.
+    this.packId = this.dev || this.engineSpecId
       ? null
       : (data?.packId ?? (this.registry.get(PACKID_KEY) as string | undefined) ?? null);
     this.busy = false;
@@ -213,6 +224,7 @@ export class DungeonScene extends Phaser.Scene {
   // ---- loading --------------------------------------------------------------
 
   private async loadSpecAndFacts(): Promise<void> {
+    if (this.engineSpecId) return this.useEngineSpec();
     if (this.dev) return this.useFixture();
 
     const { packs } = await getPacks();
@@ -291,6 +303,40 @@ export class DungeonScene extends Phaser.Scene {
     this.spec = spec;
     this.facts = toFactMap(devFactsJson as unknown as FactLite[]);
     this.pack = null;
+  }
+
+  /**
+   * Load an engine-side arc spec (engineSpecs.ts). Same load-time gates the pack path and
+   * the dev fixture both get — an arc map is not exempt from archetype/relic validation.
+   *
+   * Facts: an arc spec references NO fact id (Arc Contract, universe design §60), so this
+   * builds the same GLOBAL fact map the pack path's drawGlobal branch builds — it is only a
+   * lookup table (id -> FactLite) for SRS type stamping and the teaching modal, never a
+   * content source. An unknown spec id degrades to the dev fixture instead of throwing, so a
+   * stale `?spec=` bookmark still lands somewhere playable.
+   */
+  private async useEngineSpec(): Promise<void> {
+    const spec = engineSpecById(this.engineSpecId);
+    if (!spec) {
+      this.engineSpecId = null;
+      return this.useFixture();
+    }
+    const archetypeProblem = archetypeError(spec, this.engineSpecId!);
+    if (archetypeProblem) throw new Error(archetypeProblem);
+    const relicProblem = relicError(spec, this.engineSpecId!);
+    if (relicProblem) throw new Error(relicProblem);
+    this.spec = spec;
+    this.pack = null;
+    this.drawGlobal = await dungeonDrawReady();
+    this.facts = this.drawGlobal
+      ? toFactMap(
+          services.draw
+            .allFactIds()
+            .map((id) => services.draw.factOf(id))
+            .filter((f): f is Fact => !!f)
+            .map(toFactLite),
+        )
+      : new Map();
   }
 
   private readProgress(): DungeonProgress {
@@ -785,12 +831,23 @@ export class DungeonScene extends Phaser.Scene {
     // accumulated together and returned for the caller's ONE combined ceremony card.
     const pending: number[] = [];
     for (let attempt = 0; attempt < 20; attempt++) {
+      const seed = this.seed + attempt;
       const res = await services.runEncounter({
         context: 'drill',
         encounterId: gate.encounterId,
         kinds: ['free_recall'],
+        // R19 — the drill's subject comes from the player's GLOBAL schedule, not from the
+        // spec's own pack. This is a no-op for every shipped pack map: pick()'s tier 1
+        // returns the forced encounterId whenever it resolves in the launch pack
+        // (game/encounters/engine.ts:110-113), and a pack's own gate id always does. It
+        // takes effect exactly where the forced id MISSES — an engine spec, whose gate ids
+        // exist in no pack — and there runEncounter's cross-pack `encountersOf`
+        // (game/encounters/register.ts:82-86) resolves the drawn fact's encounter from any
+        // installed pack. With zero packs the ladder ends empty and pick() falls to the
+        // fixture pack's own free_recall, so the zero-pack guarantee is unchanged.
+        factIds: this.gateDraw(seed),
         packId: this.packId ?? FIXTURE_PACK_ID,
-        seed: this.seed + attempt,
+        seed,
       });
       // Record the gate drill to SRS on BOTH paths, before branching — a failed ward
       // is exactly the Leitner demotion signal, and it was being dropped. (Combat
@@ -998,6 +1055,32 @@ export class DungeonScene extends Phaser.Scene {
       return seededShuffle(pool, mulberry32(seed))[0] ?? null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The waystone ladder — «Onward» Arc 1's gates are "attestation trials on global draws"
+   * (universe design §7; spec ruling R19). Same three tiers as trimDraw() just above and as
+   * combat's globalDraw()/ddDraw(): schedule (due) -> introduction (fresh) -> seed-shuffled
+   * pool, all inside one try/catch, so a draw-service fault degrades to "ask something" and
+   * never to "hang the ward".
+   *
+   * Returned as an array so it can be handed to EncounterRequest.factIds verbatim; an empty
+   * array is meaningful and safe — pick() treats `factIds: []` exactly like `undefined`
+   * (game/encounters/engine.ts:129, `req.factIds ?? []`).
+   */
+  private gateDraw(seed: number): string[] {
+    try {
+      const now = Date.now();
+      const due = services.draw.due({ kinds: ['free_recall'], count: 1, seed, now });
+      if (due[0]) return [due[0]];
+      const fresh = services.draw.fresh({ count: 1, seed, now });
+      if (fresh[0]) return [fresh[0]];
+      const pool = services.amendments.eligible(services.draw.allFactIds());
+      const pick = seededShuffle(pool, mulberry32(seed))[0];
+      return pick ? [pick] : [];
+    } catch {
+      return [];
     }
   }
 

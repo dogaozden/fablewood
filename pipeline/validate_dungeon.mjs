@@ -21,6 +21,14 @@
 //     keeps that duplicate honest).
 //
 // Usage: node pipeline/validate_dungeon.mjs [dungeon.json] [pack.json]
+//        node pipeline/validate_dungeon.mjs --engine <dungeon.json>
+//
+// --engine validates an ENGINE-side spec (app/src/game/scenes/dungeon/__fixtures__/*.json,
+// universe design §9): shape, room ids, archetypes, kinds, shields/phases, moveLabels and
+// relicId are all still checked. The pack cross-references (teaching fact ids, gate/phase
+// encounter ids, enemy and recall tags, packId match) are skipped, because there is no pack —
+// an arc's trials resolve through the global Draw Service at runtime, never through a named
+// pack asset.
 
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -42,12 +50,16 @@ export const RELIC_IDS = new Set([
 // the parity test (app/src/inventory/relicIdParity.test.ts) without reading
 // files off disk or exiting the process.
 // ---------------------------------------------------------------------------
-function main(dungeonPathArg, packPathArg) {
+function main(dungeonPathArg, packPathArg, { engine: ENGINE = false } = {}) {
   const dPath = resolve(root, dungeonPathArg || 'packs/vc-law/assets/preference-vaults.dungeon.json');
   const pPath = resolve(root, packPathArg || 'packs/vc-law/pack.json');
 
   const dun = JSON.parse(readFileSync(dPath, 'utf8'));
-  const pack = JSON.parse(readFileSync(pPath, 'utf8'));
+  // An engine spec (universe design §9) has no pack.json: packId is 'engine' and gate/phase
+  // encounter ids exist in no pack by design (they resolve through the global Draw Service at
+  // runtime instead). Synthesize an empty pack echoing the spec's own packId so the packId-
+  // match check below is trivially true, rather than special-casing it out entirely.
+  const pack = ENGINE ? { meta: { id: dun.packId }, facts: [], encounters: [] } : JSON.parse(readFileSync(pPath, 'utf8'));
 
   const factIds = new Set(pack.facts.map((f) => f.id));
   const factTags = new Set(pack.facts.flatMap((f) => f.tags ?? []));
@@ -59,7 +71,7 @@ function main(dungeonPathArg, packPathArg) {
   for (const k of ['id', 'name', 'region', 'packId']) {
     if (typeof dun[k] !== 'string' || !dun[k]) push(`dungeon.${k} must be a non-empty string`);
   }
-  if (dun.packId !== pack.meta.id) push(`packId '${dun.packId}' != pack meta.id '${pack.meta.id}'`);
+  if (!ENGINE && dun.packId !== pack.meta.id) push(`packId '${dun.packId}' != pack meta.id '${pack.meta.id}'`);
   if (!Array.isArray(dun.rooms) || dun.rooms.length === 0) push('dungeon.rooms must be a non-empty array');
 
   const roomIds = new Set();
@@ -72,21 +84,22 @@ function main(dungeonPathArg, packPathArg) {
     if (!r.name) push(at('room.name required'));
 
     for (const fid of r.teaching ?? []) {
-      if (!factIds.has(fid)) push(at(`teaching references unknown fact: ${fid}`));
+      if (!ENGINE && !factIds.has(fid)) push(at(`teaching references unknown fact: ${fid}`));
     }
     if (!Array.isArray(r.enemies)) push(at('room.enemies must be an array'));
     for (const e of Array.isArray(r.enemies) ? r.enemies : []) {
       if (!ARCHETYPES.has(e.archetype)) push(at(`bad enemy archetype: ${e.archetype}`));
       for (const k of e.kinds ?? []) if (!KINDS.has(k)) push(at(`bad enemy kind: ${k}`));
-      for (const t of e.tags ?? []) if (!factTags.has(t)) push(at(`enemy tag not on any fact: ${t}`));
+      for (const t of e.tags ?? []) if (!ENGINE && !factTags.has(t)) push(at(`enemy tag not on any fact: ${t}`));
       if (e.parley !== undefined && typeof e.parley !== 'boolean') push(at('enemy.parley must be boolean'));
     }
 
-    if (r.gate) {
+    if (r.gate && !ENGINE) {
       const e = encById.get(r.gate.encounterId);
       if (!e) push(at(`gate references unknown encounter: ${r.gate.encounterId}`));
       else if (e.kind !== 'free_recall') push(at(`gate encounter ${e.id} should be free_recall, is ${e.kind}`));
     }
+    if (r.gate && ENGINE && typeof r.gate.encounterId !== 'string') push(at('gate.encounterId must be a string'));
 
     if (r.boss) {
       bossCount++;
@@ -95,10 +108,14 @@ function main(dungeonPathArg, packPathArg) {
       if (!Number.isInteger(b.shields) || b.shields < 1) push(at(`boss.shields must be a positive integer, got ${b.shields}`));
       if (!Array.isArray(b.phases) || b.phases.length === 0) push(at('boss.phases must be non-empty'));
       for (const ph of Array.isArray(b.phases) ? b.phases : []) {
-        const e = encById.get(ph.branchEncounterId);
-        if (!e) push(at(`boss phase references unknown encounter: ${ph.branchEncounterId}`));
-        else if (e.kind !== 'scenario_branch') push(at(`boss phase encounter ${e.id} must be scenario_branch, is ${e.kind}`));
-        for (const t of ph.recallTags ?? []) if (!factTags.has(t)) push(at(`boss recallTag not on any fact: ${t}`));
+        if (typeof ph.branchEncounterId !== 'string' || !ph.branchEncounterId) {
+          push(at('boss phase branchEncounterId must be a non-empty string'));
+        } else if (!ENGINE) {
+          const e = encById.get(ph.branchEncounterId);
+          if (!e) push(at(`boss phase references unknown encounter: ${ph.branchEncounterId}`));
+          else if (e.kind !== 'scenario_branch') push(at(`boss phase encounter ${e.id} must be scenario_branch, is ${e.kind}`));
+        }
+        for (const t of ph.recallTags ?? []) if (!ENGINE && !factTags.has(t)) push(at(`boss recallTag not on any fact: ${t}`));
       }
       if (b.shields !== (b.phases ?? []).length) {
         push(at(`boss.shields (${b.shields}) != number of phases (${(b.phases ?? []).length}) — intended?`));
@@ -129,7 +146,11 @@ function main(dungeonPathArg, packPathArg) {
   if (bossCount === 0) push('dungeon has no boss room');
 
   console.log(`Validated ${dPath}`);
-  console.log(`  rooms: ${(dun.rooms ?? []).length} | bosses: ${bossCount} | against pack ${pack.meta.id}`);
+  console.log(
+    `  rooms: ${(dun.rooms ?? []).length} | bosses: ${bossCount} | against ${
+      ENGINE ? 'the DungeonSpec contract (engine spec, no pack)' : `pack ${pack.meta.id}`
+    }`,
+  );
   if (errors.length) {
     console.log(`\n${errors.length} problem(s):`);
     for (const e of errors) console.log('  -', e);
@@ -141,5 +162,8 @@ function main(dungeonPathArg, packPathArg) {
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  main(process.argv[2], process.argv[3]);
+  const argv = process.argv.slice(2);
+  const ENGINE = argv.includes('--engine');
+  const positional = argv.filter((a) => a !== '--engine');
+  main(positional[0], positional[1], { engine: ENGINE });
 }

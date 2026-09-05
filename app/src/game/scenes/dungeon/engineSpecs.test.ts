@@ -51,3 +51,22 @@ describe('the engine-spec registry', () => {
     for (const s of prose) expect(s, s).toMatch(/^\[T2-PLACEHOLDER\] /);
   });
 });
+
+describe('DungeonScene wiring for engine specs', () => {
+  const SRC = readFileSync(join(__dirname, 'DungeonScene.ts'), 'utf8');
+
+  it('init reads a spec id from launch data or the ?spec= query', () => {
+    expect(SRC).toContain("init(data: { seed?: number; packId?: string; spec?: string }): void");
+    expect(SRC).toContain("this.engineSpecId = data?.spec ?? params.get('spec');");
+  });
+
+  it('an engine spec forces the packless path, exactly as ?dev=1 does', () => {
+    expect(SRC, 'packId is nulled for an engine spec so no real pack id forms a hybrid').toContain(
+      'this.packId = this.dev || this.engineSpecId',
+    );
+  });
+
+  it('loadSpecAndFacts prefers the engine spec over any pack lookup', () => {
+    expect(SRC).toContain('if (this.engineSpecId) return this.useEngineSpec();');
+  });
+});
