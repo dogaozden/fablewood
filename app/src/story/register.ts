@@ -4,14 +4,36 @@
  * DEV harness: ?story=<beatId> renders that beat's card directly on boot (the
  * ?overlay= pattern) — e2e/dev only, DEV-gated exactly like encounters/register's.
  */
-import { services, type BeatContext, type SaveData, type StoryBeat, type StorySurface } from '../game/contracts';
+import {
+  services,
+  type BeatContext,
+  type SaveData,
+  type StoryBeat,
+  type StoryDestination,
+  type StorySurface,
+} from '../game/contracts';
 import { StoryStore } from './store';
-import { nextBeatFor, ARC1_BEATS, BEAT_AFTER_EFFECTS } from './beats';
+import { nextBeatFor, ARC1_BEATS, BEAT_AFTER_EFFECTS, PLACEHOLDER } from './beats';
 import { showBeatCard, openDeskUi } from './ui';
 import { CANTOS } from './cantos';
-import { cantoUnlocked, onwardOpenPage, weldCount } from './books';
+import { cantoUnlocked, onwardOpenPage, roadsFor, weldCount } from './books';
 
 const store = new StoryStore();
+
+/**
+ * Engine destinations and what opens them (spec §4.3). Kept here rather than in a scene: the
+ * gate asks, the provider answers. `arc01-road` opens once the Keeper has heard the fable —
+ * beat III is the one that names the stone past Hollis's fence, so it is the earliest point
+ * at which riding south is a thing the Keeper knows to do.
+ *
+ * `id: 'arc01-road'` is a deliberate duplicate of engineSpecs.ts's ROAD_SPEC_ID — the same
+ * story/-must-not-import-scenes reason beats.ts's own ROAD_SPEC constant is duplicated
+ * (contracts.ts header; beats.ts:32-36). Unlike that copy, this one is not yet independently
+ * pinned by a test against the engine registry — flagged for the reviewer, not fixed here.
+ */
+const ENGINE_DESTINATIONS: ReadonlyArray<StoryDestination & { requiresBeat: string }> = [
+  { id: 'arc01-road', title: `${PLACEHOLDER} The Road South`, requiresBeat: 'onward-01.fable-waywright' },
+];
 
 services.story = {
   ready: () => store.ready(),
@@ -41,9 +63,13 @@ services.story = {
         body: c.body,
         unlocked: cantoUnlocked(i, welds, arcs),
       })),
-      onward: onwardOpenPage((id) => store.isSeen(id)),
+      onward: onwardOpenPage((id) => store.isSeen(id), { arcComplete: store.isArcComplete('onward-01') }),
+      roads: roadsFor((id) => store.isArcComplete(id)),
     }, opts);
   },
+  completedArcCount: () => store.completedArcCount(),
+  engineDestinations: (): StoryDestination[] =>
+    ENGINE_DESTINATIONS.filter((d) => store.isSeen(d.requiresBeat)).map(({ id, title }) => ({ id, title })),
 };
 
 // DEV-only direct-render harness: /?story=<beatId>

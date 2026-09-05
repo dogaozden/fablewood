@@ -435,6 +435,14 @@ export interface BeatContext {
   roomId?: string;
 }
 
+/** A place the south gate can send the Keeper that is not an installed pack — an arc's own
+ *  engine spec (universe design §7's world-map surface v1). The story provider owns which
+ *  are open; the scene only renders what it is handed. */
+export interface StoryDestination {
+  id: string;
+  title: string;
+}
+
 /** The «Onward» story spine: beat delivery + the Records Office reading desk.
  *  Sync reads after ready(), like SrsApi. state/story.json is additive-only. */
 export interface StoryApi {
@@ -450,6 +458,12 @@ export interface StoryApi {
   showBeat(beat: StoryBeat, opts?: { auto?: boolean }): Promise<void>;
   /** The Records Office reading desk (both books); resolves on close. */
   openDesk(opts?: { auto?: boolean }): Promise<void>;
+  /** How many arcs are finished — the global milestone the hamlet's Return ambience and the
+   *  desk's canto gating both read. Sync after ready(), like isSeen. */
+  completedArcCount(): number;
+  /** The engine destinations open to the Keeper right now, in canon order. Eligibility is
+   *  the provider's (story/register.ts); the scene never decides. */
+  engineDestinations(): StoryDestination[];
 }
 
 // ---------------------------------------------------------------- night's ledger

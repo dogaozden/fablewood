@@ -88,6 +88,11 @@ export class StoryStore {
   hasFragment(fragmentId: string): boolean {
     return typeof this.cache.threadFragments[fragmentId] === 'string';
   }
+  /** T2 — a read accessor only. The persisted shape is untouched (spec §6): this reads the
+   *  same completedArcs map completedArcCount() already reads, by id instead of by count. */
+  isArcComplete(arcId: string): boolean {
+    return typeof this.cache.completedArcs[arcId] === 'string';
+  }
 
   markSeen(beatId: string, now: number = Date.now()): Promise<void> {
     return this.write('seenBeats', beatId, now);

@@ -360,6 +360,44 @@ export class HamletScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * The Return's dusk wisp-stream (universe design §7 "Ambient: dusk wisp-stream on the
+   * hamlet's road edge") — freed lines walking home now that the ways are tended. HOOK ONLY
+   * (spec ruling R21): the visual feel is creative work still to come. Reuses the existing
+   * 'fx.spark' texture and the same ADD-blend drift vocabulary buildFireflies already uses.
+   *
+   * Called from bootstrap(), not create(), because it gates on story state that is only
+   * known after services.story.ready(). That means create()'s
+   * `this.uiCam.ignore(this.worldGroup.getChildren())` snapshot (:179) has ALREADY been
+   * taken, so each sprite must be handed to uiCam.ignore individually or it double-draws
+   * at native resolution over the UI camera.
+   */
+  private buildWispStream(): void {
+    const gate = this.map.locations.find((l) => l.id === 'gate');
+    if (!gate) return;
+    const rng = mulberry32(this.seed ^ 0x51d3);
+    for (let i = 0; i < 6; i++) {
+      const x = gate.door.x + (rng() * 26 - 13);
+      const y = gate.door.y + 26 + rng() * 10;
+      const s = this.add
+        .image(x, y, 'fx.spark')
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(6000)
+        .setAlpha(0.1 + rng() * 0.3);
+      this.worldGroup.add(s);
+      this.uiCam.ignore(s);
+      this.tweens.add({
+        targets: s,
+        y: y - 40 - rng() * 16,
+        alpha: 0.05,
+        duration: 4200 + rng() * 2600,
+        repeat: -1,
+        delay: rng() * 3200,
+        ease: 'Sine.inOut',
+      });
+    }
+  }
+
   private buildPlayer(): void {
     const s = this.map.spawn;
     this.player = this.add.sprite(s.x, s.y, 'char.keeper').setOrigin(0.5, 1).setDepth(s.y);
@@ -559,6 +597,13 @@ export class HamletScene extends Phaser.Scene {
         this.input?.keyboard?.resetKeys();
         this.busy = false;
       }
+    }
+
+    // Ambient Return hook — only once an arc has actually closed (spec §4.3 / R21).
+    try {
+      if (services.story.completedArcCount() > 0) this.buildWispStream();
+    } catch {
+      /* story stub — no ambience, no crash */
     }
   }
 
@@ -781,7 +826,7 @@ export class HamletScene extends Phaser.Scene {
       case 'records':
         return clerkConv(this.computeDue(), this.lastPlayed());
       case 'gate':
-        return alderConv(this.provinces);
+        return alderConv(this.provinces, services.story.engineDestinations());
       case 'cottage':
         return cottageConv();
       case 'wellspring':
@@ -1186,11 +1231,14 @@ export class HamletScene extends Phaser.Scene {
   private async doGate(): Promise<void> {
     const gateBeat = services.story.nextBeatFor('south-gate', services.save.get());
     if (gateBeat) await services.story.showBeat(gateBeat);
-    const choice = await this.dialogue.run(alderConv(this.provinces));
+    const choice = await this.dialogue.run(alderConv(this.provinces, services.story.engineDestinations()));
     if (!choice || choice === '__cancel__') return;
     await this.dialogue.run(alderFarewell());
     await this.persist();
-    this.scene.start('vaults', { packId: choice });
+    // `spec:` marks an engine destination (content.ts alderConv) — a pack id can never
+    // contain the prefix, so the two namespaces cannot collide.
+    if (choice.startsWith('spec:')) this.scene.start('vaults', { spec: choice.slice(5) });
+    else this.scene.start('vaults', { packId: choice });
   }
 
   /** Mira the Factor: dismiss on cancel, or open her shop (inventory-handoff §9). */
