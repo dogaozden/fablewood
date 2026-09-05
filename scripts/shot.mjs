@@ -2,6 +2,13 @@
 // Screenshot harness. Starts the dev server if one isn't already on the port
 // (reuses it otherwise), waits for the boot scene's ready flag, and shoots the page.
 //   node scripts/shot.mjs '/?scene=boot' screenshots/boot.png
+//
+// Port (backlog D3/2.14): 5173 is the author's protected live dev server — this script must never
+// default to it. Resolution order: --port <n> CLI flag > FABLEWOOD_SHOT_PORT env var >
+// DEFAULT_PORT (5177, unused elsewhere in the repo's port map). The resolved port is passed
+// straight through to the spawned `vite` process too (--port/--strictPort), so a server this
+// script starts always binds the exact port it then polls and screenshots — it can never
+// silently drift onto 5173 or any other port.
 import { chromium } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
@@ -9,15 +16,28 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = 5173;
-const BASE = `http://localhost:${PORT}`;
+const DEFAULT_PORT = 5177;
 
-const [target, out] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const positional = [];
+let cliPort;
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === '--port') {
+    cliPort = rawArgs[++i];
+  } else {
+    positional.push(rawArgs[i]);
+  }
+}
+const [target, out] = positional;
 if (!target || !out) {
-  console.error("usage: node scripts/shot.mjs <path-with-query> <out.png>");
+  console.error("usage: node scripts/shot.mjs [--port <n>] <path-with-query> <out.png>");
   console.error("example: node scripts/shot.mjs '/?scene=boot' screenshots/boot.png");
+  console.error(`port: --port <n> or FABLEWOOD_SHOT_PORT env; default ${DEFAULT_PORT} (never 5173)`);
   process.exit(1);
 }
+
+const PORT = Number(cliPort ?? process.env.FABLEWOOD_SHOT_PORT ?? DEFAULT_PORT);
+const BASE = `http://localhost:${PORT}`;
 
 async function serverUp() {
   try {
@@ -43,8 +63,12 @@ async function main() {
   if (await serverUp()) {
     console.log('[shot] reusing dev server on', BASE);
   } else {
-    console.log('[shot] starting dev server…');
-    child = spawn('npm', ['run', 'dev'], { cwd: REPO_ROOT, stdio: 'ignore', env: process.env });
+    console.log('[shot] starting dev server on', BASE);
+    child = spawn(
+      'npm',
+      ['run', 'dev', '--', '--port', String(PORT), '--strictPort'],
+      { cwd: REPO_ROOT, stdio: 'ignore', env: process.env },
+    );
     child.on('error', (e) => console.error('[shot] dev server spawn error:', e.message));
     await waitFor(serverUp, { label: 'dev server' });
   }
