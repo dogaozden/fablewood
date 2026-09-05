@@ -114,6 +114,28 @@ test('a non-object moveLabels is REJECTED (array and scalar alike)', () => {
 });
 
 // ============================================================================
+// 2.3 — boss.relicId parity: mirrors the enemy.archetype precedent (a closed set,
+// checked only when present — relicId is optional, same shape as moveLabels above).
+// ============================================================================
+
+test('relicId absent stays valid — every shipped dungeon before this ticket predates it', () => {
+  const { ok, out } = runValidator({});
+  assert.equal(ok, true, out);
+});
+
+test('a known relicId (the shipped Warden Signet) passes', () => {
+  const { ok, out } = runValidator({ relicId: 'warden-signet-of-terms' });
+  assert.equal(ok, true, out);
+});
+
+test('an unknown relicId is REJECTED (a typo must not silently ship an unresolvable grant)', () => {
+  const { ok, out } = runValidator({ relicId: 'not-a-real-relic' });
+  assert.equal(ok, false);
+  assert.match(out, /bad boss\.relicId: not-a-real-relic/);
+  assert.match(out, /DUNGEON VALIDATION FAILED/);
+});
+
+// ============================================================================
 // crucible-2 — non-array rooms/enemies/phases must be REPORTED, not crash the
 // validator with a TypeError. Each field already had an Array.isArray() check
 // that pushed a clean error message — but the for-of loop right after it ran
