@@ -33,7 +33,7 @@ type ArcBeat = StoryBeat & {
  *  as a plain string rather than imported: story/ must not import from game/scenes/ (the
  *  provider/consumer direction is one-way — contracts.ts header). engineSpecs.test.ts pins
  *  the id itself; the T2 eligibility tests pin this copy. */
-const ROAD_SPEC = 'arc01-road';
+export const ROAD_SPEC = 'arc01-road';
 const clearedIn = (save: SaveData): readonly string[] => save.dungeon?.cleared ?? [];
 
 export const T1_BEATS: ReadonlyArray<ArcBeat> = [
