@@ -196,3 +196,107 @@ test('Night\'s Ledger on retreat: "a wise withdrawal" subtitle after stabilizing
     await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
   }
 });
+
+test('multi-room accumulation: the Night\'s Ledger sums gold across every room played (auto=full), not the last room alone', async ({ page }) => {
+  test.setTimeout(60_000);
+  // §2.10 — auto=boss's own markRoomCleared loop never calls accrueHarvest for any pre-boss
+  // room (it skips them entirely, per DungeonScene.runAuto's case 'boss'), so a ledger built
+  // that way can never prove real accumulation. auto=full is the one auto mode that drives
+  // EVERY room through the real enterRoom()/resolveCombat() path (case 'full', a few lines
+  // above case 'boss'), so gold genuinely accrues room-by-room here.
+  const beforeSave = await readState<Record<string, unknown>>(page, 'save.json');
+  const beforeSrs = await readState<{ version: number; facts: Record<string, unknown> }>(page, 'srs.json');
+  try {
+    // Fresh crawl: `dungeon` omitted entirely. PUT fully replaces state/save.json (bridge/
+    // plugin.ts's writeState is a whole-file overwrite, never a merge), so omitting it resets
+    // readProgress() to {roomIndex:0, cleared:[]} regardless of what an earlier test in this
+    // shared STATE_DIR left behind (the boss-victory test above marks every pre-boss room
+    // cleared via auto=boss's own markRoomCleared loop).
+    await page.request.put('/api/state/save.json', {
+      data: { scene: 'vaults', hp: 16, streak: 0, embers: 2, lastPlayed: '' },
+    });
+
+    await page.goto('/?scene=vaults&dev=1&auto=full&seed=7');
+
+    // The dev fixture dungeon's ONE gated room (under-3, DungeonScene's own dev.dungeon.json)
+    // draws a REAL free_recall encounter and genuinely blocks on a real overlay: its gate's
+    // encounterId ('moss.gate.recall') exists in no installed pack, so engine.ts's pick() falls
+    // through to its own kind-only match instead of returning null — confirmed empirically
+    // (a live probe against this exact route) to land on the real vc-law pack's
+    // enc.fr.economics-vs-control ("name the only two things that ultimately matter in a VC
+    // term-sheet negotiation"). auto=full's own loop does not, and structurally cannot,
+    // auto-answer this, so the test answers it for real, same as an interactive player would.
+    // 'Economics and control.' is that exact fact's (vc.econ.overview.economics-vs-control)
+    // established, already-verified-correct answer — the SAME string leveling.spec.ts,
+    // deaths-door.spec.ts, redemption-bell.spec.ts, combat.spec.ts and miras-stall.spec.ts all
+    // already rely on for this fact.
+    const gateTextarea = page.locator('.fw-overlay .fw-textarea');
+    const ledgerTitle = page.locator('.fw-overlay .fw-ledger-title');
+    await expect(
+      gateTextarea.or(ledgerTitle),
+      'the gate drill opens (or, failing that, the run-end ledger does)',
+    ).toBeVisible({ timeout: 30_000 });
+    if (await gateTextarea.isVisible()) {
+      await page.waitForTimeout(450); // overlay.ts's paint-anchored answer guard (shared idiom)
+      await gateTextarea.fill('Economics and control.');
+      await page.getByRole('button', { name: 'Cast' }).click();
+      const onward = page.getByRole('button', { name: 'Onward ▸' });
+      await onward.waitFor({ state: 'visible', timeout: 15_000 });
+      await onward.click();
+    }
+
+    // Cannot reuse captureLedger() here: bossVictory's own sequence is vaultOpensBeat → THIS
+    // ledger → (if a level crossed) presentPendingLevelUp, and the level-up ceremony's header
+    // reuses the exact same .fw-ledger-title class (overlay.ts) for visual consistency. A
+    // fresh save's boss kill reliably crosses a level — DungeonScene.ts's own comment on
+    // grantXp('boss'): "flat +150 crosses L1→L2 on any fresh save" — and this test's reset
+    // save above is genuinely fresh (no level/xp field at all), so a level-up card reliably
+    // follows. captureLedger's own two-step wait-then-evaluate (separate round-trips) can
+    // land on the SECOND (level-up) overlay if the first has already auto-advanced (auto:true)
+    // by the time the second round-trip runs — reproduced on repeated runs, not just under
+    // load. page.waitForFunction's predicate polls (rAF-cadence) AND returns the extracted
+    // data in the SAME atomic browser round-trip the instant the title is EXACTLY "The
+    // Night's Ledger" (not just present), so it cannot be fooled by the later, same-class card.
+    const handle = await page.waitForFunction(
+      () => {
+        const root = document.querySelector('.fw-overlay');
+        const title = root?.querySelector('.fw-ledger-title')?.textContent ?? '';
+        if (title !== "The Night's Ledger") return false;
+        return {
+          title,
+          sub: root!.querySelector('.fw-ledger-sub')?.textContent ?? '',
+          rows: Array.from(root!.querySelectorAll('.fw-ledger-row')).map((r) => ({
+            label: r.querySelector('.fw-ledger-label')?.textContent ?? '',
+            val: r.querySelector('.fw-ledger-val')?.textContent ?? '',
+          })),
+        };
+      },
+      undefined,
+      { timeout: 45_000 },
+    );
+    const led = await handle.jsonValue();
+    await page.screenshot({ path: `${EV}/e2e-nights-ledger-multiroom.png` }); // best-effort visual record
+    expect(led, 'the ledger rendered at run end').not.toBeNull();
+    expect(led!.title).toBe("The Night's Ledger");
+    expect(led!.sub).toContain('the vault stands cleared');
+
+    const goldRow = led!.rows.find((r) => r.label === 'Gold');
+    expect(goldRow, 'a 5-room run always earns gold').toBeTruthy();
+    const gold = Number(goldRow!.val.replace('+', ''));
+    // The floor: economy.ts's roomClearLoot(roomIndex, rng) = 12 + roomIndex*6 + [0..6] jitter,
+    // called once per non-boss room at its FIXED spec index (under-1=0, under-2=1, under-3=2,
+    // under-bestiary=3) regardless of rng draws — minimums 12/18/24/30, summing to 84 — plus
+    // bossLoot's own 60 + [0..40] jitter, minimum 60. 84 + 60 = 144, true for ANY seed.
+    // Crucially, bossLoot's own MAXIMUM alone is only 100 (60+40) — strictly less than 144 —
+    // so clearing this floor is only possible if the 4 rooms played BEFORE the boss genuinely
+    // carried their gold through to the final ledger. auto=boss's skip pattern (markRoomCleared
+    // with no accrueHarvest call for any pre-boss room) could never clear more than bossLoot's
+    // own ≤100 — this is the exact regression §2.10 exists to catch.
+    expect(gold, 'final Gold is the SUM across all 5 rooms, not the boss (last room) alone').toBeGreaterThanOrEqual(144);
+  } finally {
+    await page.request.put('/api/state/save.json', {
+      data: beforeSave ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
+    });
+    await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
+  }
+});
