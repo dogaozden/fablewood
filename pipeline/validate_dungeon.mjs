@@ -12,104 +12,134 @@
 //     recallTags exist on >=1 fact; shields is a positive integer
 //   - boss.moveLabels (optional, additive): keys in {seizure,injunction,summon},
 //     values non-empty strings — absent is always valid
+//   - boss.relicId (optional, additive, 2.3): a catalog id of type 'relic'
+//     (app/src/inventory/catalog.ts) — absent is always valid; mirrors the
+//     enemy.archetype precedent above. RELIC_IDS is exported so
+//     app/src/inventory/relicIdParity.test.ts can assert it never drifts from
+//     the catalog (a plain Node script can't import TypeScript, so the set here
+//     is necessarily a hand-maintained duplicate — the parity test is what
+//     keeps that duplicate honest).
 //
 // Usage: node pipeline/validate_dungeon.mjs [dungeon.json] [pack.json]
 
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const dPath = resolve(root, process.argv[2] || 'packs/vc-law/assets/preference-vaults.dungeon.json');
-const pPath = resolve(root, process.argv[3] || 'packs/vc-law/pack.json');
-
-const dun = JSON.parse(readFileSync(dPath, 'utf8'));
-const pack = JSON.parse(readFileSync(pPath, 'utf8'));
 
 const ARCHETYPES = new Set(['wisp', 'wraith', 'construct', 'warden']);
 const KINDS = new Set(['mcq', 'free_recall', 'scenario_branch', 'match', 'order']);
 // magic-combat-depth.md §9.4/§9.5 — the engine's WardenMove union (app/src/game/combat/boss.ts).
 const WARDEN_MOVES = new Set(['seizure', 'injunction', 'summon']);
+// Ch. IX Provenance — the five shipped relic ids (app/src/inventory/catalog.ts, type: 'relic').
+export const RELIC_IDS = new Set([
+  'warden-signet-of-terms', 'unbroken-clasp', 'waymark-heel', 'margin-lamp', 'second-wick',
+]);
 
-const factIds = new Set(pack.facts.map((f) => f.id));
-const factTags = new Set(pack.facts.flatMap((f) => f.tags ?? []));
-const encById = new Map(pack.encounters.map((e) => [e.id, e]));
+// ---------------------------------------------------------------------------
+// CLI entrypoint — guarded (isMain, below) so RELIC_IDS can be imported for
+// the parity test (app/src/inventory/relicIdParity.test.ts) without reading
+// files off disk or exiting the process.
+// ---------------------------------------------------------------------------
+function main(dungeonPathArg, packPathArg) {
+  const dPath = resolve(root, dungeonPathArg || 'packs/vc-law/assets/preference-vaults.dungeon.json');
+  const pPath = resolve(root, packPathArg || 'packs/vc-law/pack.json');
 
-const errors = [];
-const push = (m) => errors.push(m);
+  const dun = JSON.parse(readFileSync(dPath, 'utf8'));
+  const pack = JSON.parse(readFileSync(pPath, 'utf8'));
 
-for (const k of ['id', 'name', 'region', 'packId']) {
-  if (typeof dun[k] !== 'string' || !dun[k]) push(`dungeon.${k} must be a non-empty string`);
-}
-if (dun.packId !== pack.meta.id) push(`packId '${dun.packId}' != pack meta.id '${pack.meta.id}'`);
-if (!Array.isArray(dun.rooms) || dun.rooms.length === 0) push('dungeon.rooms must be a non-empty array');
+  const factIds = new Set(pack.facts.map((f) => f.id));
+  const factTags = new Set(pack.facts.flatMap((f) => f.tags ?? []));
+  const encById = new Map(pack.encounters.map((e) => [e.id, e]));
 
-const roomIds = new Set();
-let bossCount = 0;
+  const errors = [];
+  const push = (m) => errors.push(m);
 
-for (const r of Array.isArray(dun.rooms) ? dun.rooms : []) {
-  const at = (m) => `[${r.id ?? '?'}] ${m}`;
-  if (!r.id || roomIds.has(r.id)) push(at('room id missing or duplicate'));
-  roomIds.add(r.id);
-  if (!r.name) push(at('room.name required'));
-
-  for (const fid of r.teaching ?? []) {
-    if (!factIds.has(fid)) push(at(`teaching references unknown fact: ${fid}`));
+  for (const k of ['id', 'name', 'region', 'packId']) {
+    if (typeof dun[k] !== 'string' || !dun[k]) push(`dungeon.${k} must be a non-empty string`);
   }
-  if (!Array.isArray(r.enemies)) push(at('room.enemies must be an array'));
-  for (const e of Array.isArray(r.enemies) ? r.enemies : []) {
-    if (!ARCHETYPES.has(e.archetype)) push(at(`bad enemy archetype: ${e.archetype}`));
-    for (const k of e.kinds ?? []) if (!KINDS.has(k)) push(at(`bad enemy kind: ${k}`));
-    for (const t of e.tags ?? []) if (!factTags.has(t)) push(at(`enemy tag not on any fact: ${t}`));
-    if (e.parley !== undefined && typeof e.parley !== 'boolean') push(at('enemy.parley must be boolean'));
-  }
+  if (dun.packId !== pack.meta.id) push(`packId '${dun.packId}' != pack meta.id '${pack.meta.id}'`);
+  if (!Array.isArray(dun.rooms) || dun.rooms.length === 0) push('dungeon.rooms must be a non-empty array');
 
-  if (r.gate) {
-    const e = encById.get(r.gate.encounterId);
-    if (!e) push(at(`gate references unknown encounter: ${r.gate.encounterId}`));
-    else if (e.kind !== 'free_recall') push(at(`gate encounter ${e.id} should be free_recall, is ${e.kind}`));
-  }
+  const roomIds = new Set();
+  let bossCount = 0;
 
-  if (r.boss) {
-    bossCount++;
-    const b = r.boss;
-    if (!b.name) push(at('boss.name required'));
-    if (!Number.isInteger(b.shields) || b.shields < 1) push(at(`boss.shields must be a positive integer, got ${b.shields}`));
-    if (!Array.isArray(b.phases) || b.phases.length === 0) push(at('boss.phases must be non-empty'));
-    for (const ph of Array.isArray(b.phases) ? b.phases : []) {
-      const e = encById.get(ph.branchEncounterId);
-      if (!e) push(at(`boss phase references unknown encounter: ${ph.branchEncounterId}`));
-      else if (e.kind !== 'scenario_branch') push(at(`boss phase encounter ${e.id} must be scenario_branch, is ${e.kind}`));
-      for (const t of ph.recallTags ?? []) if (!factTags.has(t)) push(at(`boss recallTag not on any fact: ${t}`));
+  for (const r of Array.isArray(dun.rooms) ? dun.rooms : []) {
+    const at = (m) => `[${r.id ?? '?'}] ${m}`;
+    if (!r.id || roomIds.has(r.id)) push(at('room id missing or duplicate'));
+    roomIds.add(r.id);
+    if (!r.name) push(at('room.name required'));
+
+    for (const fid of r.teaching ?? []) {
+      if (!factIds.has(fid)) push(at(`teaching references unknown fact: ${fid}`));
     }
-    if (b.shields !== (b.phases ?? []).length) {
-      push(at(`boss.shields (${b.shields}) != number of phases (${(b.phases ?? []).length}) — intended?`));
+    if (!Array.isArray(r.enemies)) push(at('room.enemies must be an array'));
+    for (const e of Array.isArray(r.enemies) ? r.enemies : []) {
+      if (!ARCHETYPES.has(e.archetype)) push(at(`bad enemy archetype: ${e.archetype}`));
+      for (const k of e.kinds ?? []) if (!KINDS.has(k)) push(at(`bad enemy kind: ${k}`));
+      for (const t of e.tags ?? []) if (!factTags.has(t)) push(at(`enemy tag not on any fact: ${t}`));
+      if (e.parley !== undefined && typeof e.parley !== 'boolean') push(at('enemy.parley must be boolean'));
     }
-    // magic-combat-depth.md §9.5/§13 — boss.moveLabels is ADDITIVE and OPTIONAL: absent is
-    // always fine (every shipped dungeon predates it). When present it must be a flat map of
-    // the engine's three WardenMove keys to non-empty strings, so a typo'd key silently
-    // relabels nothing instead of failing loudly at runtime.
-    if (b.moveLabels !== undefined) {
-      if (typeof b.moveLabels !== 'object' || b.moveLabels === null || Array.isArray(b.moveLabels)) {
-        push(at('boss.moveLabels must be an object when present'));
-      } else {
-        for (const [k, v] of Object.entries(b.moveLabels)) {
-          if (!WARDEN_MOVES.has(k)) push(at(`bad boss.moveLabels key: ${k} (expected one of ${[...WARDEN_MOVES].join(', ')})`));
-          if (typeof v !== 'string' || !v.trim()) push(at(`boss.moveLabels.${k} must be a non-empty string`));
+
+    if (r.gate) {
+      const e = encById.get(r.gate.encounterId);
+      if (!e) push(at(`gate references unknown encounter: ${r.gate.encounterId}`));
+      else if (e.kind !== 'free_recall') push(at(`gate encounter ${e.id} should be free_recall, is ${e.kind}`));
+    }
+
+    if (r.boss) {
+      bossCount++;
+      const b = r.boss;
+      if (!b.name) push(at('boss.name required'));
+      if (!Number.isInteger(b.shields) || b.shields < 1) push(at(`boss.shields must be a positive integer, got ${b.shields}`));
+      if (!Array.isArray(b.phases) || b.phases.length === 0) push(at('boss.phases must be non-empty'));
+      for (const ph of Array.isArray(b.phases) ? b.phases : []) {
+        const e = encById.get(ph.branchEncounterId);
+        if (!e) push(at(`boss phase references unknown encounter: ${ph.branchEncounterId}`));
+        else if (e.kind !== 'scenario_branch') push(at(`boss phase encounter ${e.id} must be scenario_branch, is ${e.kind}`));
+        for (const t of ph.recallTags ?? []) if (!factTags.has(t)) push(at(`boss recallTag not on any fact: ${t}`));
+      }
+      if (b.shields !== (b.phases ?? []).length) {
+        push(at(`boss.shields (${b.shields}) != number of phases (${(b.phases ?? []).length}) — intended?`));
+      }
+      // magic-combat-depth.md §9.5/§13 — boss.moveLabels is ADDITIVE and OPTIONAL: absent is
+      // always fine (every shipped dungeon predates it). When present it must be a flat map of
+      // the engine's three WardenMove keys to non-empty strings, so a typo'd key silently
+      // relabels nothing instead of failing loudly at runtime.
+      if (b.moveLabels !== undefined) {
+        if (typeof b.moveLabels !== 'object' || b.moveLabels === null || Array.isArray(b.moveLabels)) {
+          push(at('boss.moveLabels must be an object when present'));
+        } else {
+          for (const [k, v] of Object.entries(b.moveLabels)) {
+            if (!WARDEN_MOVES.has(k)) push(at(`bad boss.moveLabels key: ${k} (expected one of ${[...WARDEN_MOVES].join(', ')})`));
+            if (typeof v !== 'string' || !v.trim()) push(at(`boss.moveLabels.${k} must be a non-empty string`));
+          }
         }
+      }
+      // Ch. IX Provenance (2.3) — same shape as moveLabels above: optional, checked only when
+      // present, since a room with no relicId at all falls back to the Warden's Signet
+      // (contracts.ts's BossSpec.relicId doc) — the same precedent enemy.archetype set above.
+      if (b.relicId !== undefined && !RELIC_IDS.has(b.relicId)) {
+        push(at(`bad boss.relicId: ${b.relicId}`));
       }
     }
   }
+
+  if (bossCount === 0) push('dungeon has no boss room');
+
+  console.log(`Validated ${dPath}`);
+  console.log(`  rooms: ${(dun.rooms ?? []).length} | bosses: ${bossCount} | against pack ${pack.meta.id}`);
+  if (errors.length) {
+    console.log(`\n${errors.length} problem(s):`);
+    for (const e of errors) console.log('  -', e);
+    console.log('\nDUNGEON VALIDATION FAILED');
+    process.exit(1);
+  }
+  console.log('\nAll dungeon checks passed.');
 }
 
-if (bossCount === 0) push('dungeon has no boss room');
-
-console.log(`Validated ${dPath}`);
-console.log(`  rooms: ${(dun.rooms ?? []).length} | bosses: ${bossCount} | against pack ${pack.meta.id}`);
-if (errors.length) {
-  console.log(`\n${errors.length} problem(s):`);
-  for (const e of errors) console.log('  -', e);
-  console.log('\nDUNGEON VALIDATION FAILED');
-  process.exit(1);
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main(process.argv[2], process.argv[3]);
 }
-console.log('\nAll dungeon checks passed.');
