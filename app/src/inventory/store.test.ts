@@ -233,6 +233,28 @@ describe('atomic buy/sell (crucible #6) — gold + item persist in ONE write', (
     expect(b.keys()).toHaveLength(0);
   });
 
+  // 2.8 — sell() used to check held quantity only; a non-sellable item (a consumable, tool,
+  // or relic) could be sold for gold since nothing consulted ItemDef.sellable. Guard sell()
+  // itself so the field stops being decorative even if a future caller bypasses the Shop UI's
+  // own (now-fixed) Sell-tab filter. 'wick-tallow' is a combat consumable (sellable: false);
+  // 'mossbound-locket' above is a trinket (sellable: true) and its sell still succeeds
+  // unchanged by this guard.
+  it('selling a non-sellable held item is rejected: no gold credited, no stack touched, no write', async () => {
+    const b = new FakeBridge();
+    b.seed('inventory.json', { version: 1, gold: 5, stacks: { 'wick-tallow': 3 } });
+    const s = new InventoryStore(b);
+    await s.ready();
+    const putSpy = vi.spyOn(b, 'putState');
+
+    expect(await s.sell('wick-tallow', 10)).toBe(false);
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(s.getGold()).toBe(5);
+    expect(s.countOf('wick-tallow')).toBe(3);
+    const disk = b.raw('inventory.json') as { gold: number; stacks: Record<string, number> };
+    expect(disk.gold).toBe(5);
+    expect(disk.stacks['wick-tallow']).toBe(3);
+  });
+
   it('a slow write cannot be observed as a gold-only or item-only partial state (the reload race)', async () => {
     // Simulates the crucible's exact reload scenario: gold:20, buy a 20g item, and confirm
     // there is no moment — however long the persist takes — where disk shows gold spent

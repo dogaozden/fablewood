@@ -209,11 +209,14 @@ export class InventoryStore {
   /**
    * Atomic sell (crucible finding #6): removes from stacks AND credits gold in the SAME
    * mutate() call — the sell-side mirror of buy() above. false (and no write at all) if not
-   * enough of the item are held.
+   * enough of the item are held, OR (2.8) if the catalog doesn't mark the item `sellable` —
+   * ItemDef.sellable used to be read nowhere at runtime, so this is the real guard, not just
+   * the Shop UI's own Sell-tab filter.
    */
   sell(id: string, price: number, qty = 1): Promise<boolean> {
     const n = Math.floor(qty);
     if (n <= 0) return Promise.resolve(false);
+    if (itemById(id)?.sellable !== true) return Promise.resolve(false);
     return this.mutate((cur) => {
       const held = cur.stacks[id] ?? 0;
       if (held < n) return null;

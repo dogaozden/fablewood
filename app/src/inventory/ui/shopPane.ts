@@ -15,6 +15,18 @@ import { el, openPane } from './dom';
  * combat Satchel (combatSatchelPane.ts, crucible V1-21: it used to show only `item.flavor`
  * lore prose, no heal/Glow amount anywhere).
  */
+
+/**
+ * Sell-tab stock: catalog items marked sellable that are actually held. 2.8 — this used to
+ * be inlined in render() as `i.type === 'trinket'`, re-deriving sellability instead of
+ * reading ItemDef.sellable, so the field was decorative for anything but trinkets. Extracted
+ * (rather than tested through render()'s DOM output) because this project's vitest
+ * environment is node-only (dom.ts has no jsdom) — see shopPane.test.ts.
+ */
+export function sellableStock(catalog: readonly ItemDef[], stacks: Record<string, number>): ItemDef[] {
+  return catalog.filter((i) => i.sellable && (stacks[i.id] ?? 0) > 0);
+}
+
 export function effectLabel(item: ItemDef): string {
   const e = item.effect;
   switch (e.kind) {
@@ -157,7 +169,7 @@ export function openShopPane(): Promise<void> {
       rows.push(...shopStock(dateKeyOf(new Date())).map((item) => buyRow(item, snap.gold)));
 
       rows.push(el('div', { class: 'inv-section-title', text: 'Sell' }));
-      const owned = CATALOG.filter((i) => i.type === 'trinket' && (snap.stacks[i.id] ?? 0) > 0);
+      const owned = sellableStock(CATALOG, snap.stacks);
       if (owned.length) {
         rows.push(...owned.map((item) => sellRow(item, snap.stacks[item.id] ?? 0)));
       } else {

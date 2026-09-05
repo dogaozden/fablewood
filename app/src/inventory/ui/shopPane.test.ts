@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ItemDef, ItemEffect } from '../catalog';
-import { effectLabel } from './shopPane';
+import { effectLabel, sellableStock } from './shopPane';
 
 const fakeItem = (effect: ItemEffect): ItemDef => ({
   id: 'x',
@@ -54,5 +54,29 @@ describe('effectLabel — the six Ch. IX kinds (verbatim copy)', () => {
     for (const effect of kinds) {
       expect(effectLabel(fakeItem(effect))).not.toBe('');
     }
+  });
+});
+
+// 2.8 — the Sell-tab stock used to re-derive sellability as `type === 'trinket'` instead of
+// reading ItemDef.sellable, so the field was decorative for anything but trinkets. sellableStock
+// is the extracted predicate render() actually calls (dom.ts has no jsdom in this project —
+// vitest runs node-only per this file's header — so the DOM-rendered pane itself isn't
+// unit-testable here; this is the same "extract the pure decision" idiom dom.test.ts uses for
+// isGhostReopen).
+describe('sellableStock — Sell tab reads .sellable, not type === "trinket" (2.8)', () => {
+  it('excludes a held trinket whose sellable is explicitly false', () => {
+    const catalog: ItemDef[] = [{ ...fakeItem({ kind: 'none' }), id: 'cursed-trinket', type: 'trinket', sellable: false }];
+    expect(sellableStock(catalog, { 'cursed-trinket': 1 })).toEqual([]);
+  });
+
+  it('includes a held non-trinket whose sellable is explicitly true', () => {
+    const catalog: ItemDef[] = [{ ...fakeItem({ kind: 'none' }), id: 'sellable-tool', type: 'tool', sellable: true }];
+    expect(sellableStock(catalog, { 'sellable-tool': 1 })).toEqual(catalog);
+  });
+
+  it('still excludes a sellable item that is not held (qty 0 / absent)', () => {
+    const catalog: ItemDef[] = [{ ...fakeItem({ kind: 'none' }), id: 'unheld', type: 'trinket', sellable: true }];
+    expect(sellableStock(catalog, {})).toEqual([]);
+    expect(sellableStock(catalog, { unheld: 0 })).toEqual([]);
   });
 });
