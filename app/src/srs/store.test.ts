@@ -409,17 +409,51 @@ describe('SaveStore — hp coercion (crucible V1-2)', () => {
 
   // 2.11 — SaveStore.sanitize used to coerce hp only; embers passed through untouched, so a
   // hand-edited "embers":"abc" became NaN and survived every clamp. coerceEmbers mirrors
-  // coerceHp's shape (finite -> clamp to [0, ceiling], else -> fallback) but with a DIFFERENT
-  // fallback: a corrupt/missing count coerces to 0, not the full pool (ruling: a corrupt ember
-  // count never grants embers, since they regenerate at the Hearth) — unlike hp, which falls
-  // back to the max. The ceiling is level-keyed via emberMaxForLevel (rest/embers.ts's own
-  // seam), the same way coerceHp's ceiling is keyed via maxHpForLevel.
-  it('sanitizes embers on load: clamp finite values to the level ceiling, zero out corrupt/missing ones', async () => {
+  // coerceHp's shape for a PRESENT value (finite -> floor + clamp to [0, ceiling], matching
+  // embersOf's own floor-then-clamp order; else -> 0, since a corrupt count never grants
+  // embers). The ceiling is level-keyed via emberMaxForLevel (rest/embers.ts's own seam), the
+  // same way coerceHp's ceiling is keyed via maxHpForLevel.
+  //
+  // Fix round 1 (review verdict, critical): a MISSING embers field is not corrupt — it's a
+  // documented sentinel meaning "full pool" (contracts.ts: "Undefined = full pool at the
+  // save's level"; rest/embers.ts's embersOf: `if (n === undefined) return max`; grant.ts's
+  // level-up comment: "an absent embers field reads as 'full'"). DEFAULT_SAVE has no embers
+  // key, so a brand-new game's save reaches sanitize with embers === undefined — sanitize
+  // must leave the key absent rather than writing 0, or every fresh game starts with zero
+  // Embers and Trim the Lantern is dead on arrival. Only a PRESENT-but-corrupt value coerces.
+  it('leaves a missing embers field absent on load — the documented "full pool" sentinel, not 0', async () => {
+    // Case A: a brand-new game (nothing seeded at all) reaches sanitize via {...DEFAULT_SAVE},
+    // which has no embers key — this is the exact regression path a fresh game hits.
+    const fresh = new FakeBridge();
+    const freshStore = new SaveStore(fresh);
+    await freshStore.ready();
+    expect('embers' in freshStore.get()).toBe(false);
+    expect(freshStore.get().embers).toBeUndefined();
+
+    // Case B: an old/never-touched save that predates spending any embers.
+    const b = new FakeBridge();
+    b.seed('save.json', { hp: 16, level: 2 }); // no embers key
+    const s = new SaveStore(b);
+    await s.ready();
+    expect('embers' in s.get()).toBe(false);
+    expect(s.get().embers).toBeUndefined();
+  });
+
+  it('a missing embers field round-trips as still-absent through a save() merge too, not just on load — the old bug would have written embers:0 to disk on a brand-new game\'s very first save', async () => {
+    const b = new FakeBridge();
+    const s = new SaveStore(b);
+    await s.ready(); // fresh store, cache = defaults (no embers key)
+    await s.save({ scene: 'vaults' }); // e.g. the first scene change of a new game
+    expect('embers' in s.get()).toBe(false);
+    const disk = b.raw('save.json') as Record<string, unknown>;
+    expect('embers' in disk).toBe(false); // never written to disk
+  });
+
+  it('sanitizes a PRESENT embers value on load: clamp finite values to the level ceiling, zero out corrupt ones', async () => {
     const cases: Array<[unknown, number]> = [
-      ['abc', 0], // non-numeric string -> never grants embers
+      ['abc', 0], // non-numeric string, present -> corrupt, never grants embers
       [-3, 0], // negative clamps up to 0
       [1e9, 2], // absurdly large clamps down to emberMaxForLevel(1) = 2 (no level seeded)
-      [undefined, 0], // missing -> 0, NOT a full pool
     ];
     for (const [embers, expected] of cases) {
       const b = new FakeBridge();
@@ -428,6 +462,35 @@ describe('SaveStore — hp coercion (crucible V1-2)', () => {
       await s.ready();
       expect(s.get().embers, `embers for input ${JSON.stringify(embers)}`).toBe(expected);
     }
+  });
+
+  it('coerces a PRESENT corrupt embers value on a save() merge too, not just on load, and self-heals disk', async () => {
+    const cases: Array<[unknown, number]> = [
+      ['abc', 0],
+      [-3, 0],
+      [1e9, 2],
+    ];
+    for (const [embers, expected] of cases) {
+      const b = new FakeBridge();
+      const s = new SaveStore(b);
+      await s.ready(); // fresh store, cache = defaults
+      // simulate a direct PUT (or another tab) corrupting embers on disk between our load and this save
+      b.seed('save.json', { embers, scene: 'vaults' });
+      await s.save({ streak: 3 });
+      expect(s.get().embers, `embers for input ${JSON.stringify(embers)}`).toBe(expected);
+      const disk = b.raw('save.json') as { embers: unknown };
+      expect(disk.embers, `on-disk embers for input ${JSON.stringify(embers)}`).toBe(expected); // self-heals the on-disk value too
+    }
+  });
+
+  it("floors a fractional embers value on load, matching embersOf's own floor-then-clamp order", async () => {
+    const b = new FakeBridge();
+    // emberMaxForLevel(5) = 4, so the CLAMP alone would leave 2.7 untouched (2.7 < 4) — only
+    // the floor brings it down to 2. Pins the MINOR fix (coerceEmbers used to skip Math.floor).
+    b.seed('save.json', { embers: 2.7, level: 5 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().embers).toBe(2);
   });
 
   it("an L3 save's embers clamp to that level's OWN ceiling, not the flat L1 default of 2", async () => {
