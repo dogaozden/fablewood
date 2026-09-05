@@ -13,12 +13,20 @@ import { join, relative } from 'path';
  *
  * Re-enumerated from scratch for this task: every real `services.draw.due(`/
  * `services.draw.fresh(` call site in app/src, doc comments excluded, collapses to exactly
- * five logical consumers across three files:
+ * six logical consumers across three files:
  *   - DungeonScene.ts: teachingFacts() (fresh-only) + trimDraw() (due, with a fresh fallback)
+ *                      + gateDraw() (due, with a fresh fallback)
  *   - HamletScene.ts:  doWellspring() (due, with a fresh fallback)
  *   - CombatScene.ts:  globalDraw() (due, with a fresh fallback) + ddDraw() (due, with a
  *                       fresh fallback)
- * That's 2 + 1 + 2 = 5 consumers, spending 3 + 2 + 4 = 9 raw due/fresh calls.
+ * That's 3 + 1 + 2 = 6 consumers, spending 5 + 2 + 4 = 11 raw due/fresh calls.
+ *
+ * AMENDMENT (T2, 2026-09-04): Ch. IX wrote "five consumers, forever." gateDraw() is the
+ * sixth, added deliberately and under this gate, not around it. Its warrant: «Onward» Arc 1's
+ * waystone gates are "attestation trials on GLOBAL draws" (universe design §7, ruling R19),
+ * and until now a gate drill drew nothing — runGate() passed only an encounterId, which
+ * pick() resolves inside one pack (game/encounters/engine.ts:106-113). gateDraw carries the
+ * same three-tier exhaustion ladder every other consumer carries: due -> fresh -> seeded pool.
  *
  * Fix-round-1 hardening (2026-08-18, I2): the original version of this file matched only the
  * literal `services.draw.due(`/`services.draw.fresh(` adjacency, line by line. Review showed
@@ -80,7 +88,7 @@ import { join, relative } from 'path';
 const APP_SRC = join(__dirname, '../..'); // app/src
 
 const EXPECTED_CALLS: Record<string, { calls: number; fnNames: string[] }> = {
-  'game/scenes/dungeon/DungeonScene.ts': { calls: 3, fnNames: ['teachingFacts', 'trimDraw'] },
+  'game/scenes/dungeon/DungeonScene.ts': { calls: 5, fnNames: ['teachingFacts', 'trimDraw', 'gateDraw'] },
   'game/scenes/hamlet/HamletScene.ts': { calls: 2, fnNames: ['doWellspring'] },
   'game/combat/CombatScene.ts': { calls: 4, fnNames: ['globalDraw', 'ddDraw'] },
 };
@@ -287,7 +295,7 @@ describe('findDrawOccurrences — the scanner itself, against synthetic sources 
   });
 });
 
-describe('the draw census — five consumers, three files, forever (Ch. IX)', () => {
+describe('the draw census — six consumers, three files (Ch. IX law, amended once by T2)', () => {
   it('every mention of services.draw in app/src is confined to the 3 named consumer files plus the bare-only touchpoints, and no mention anywhere is suspicious', () => {
     const allFiles = walkTsFiles(APP_SRC);
     const byFile = new Map<string, DrawOccurrence[]>();
@@ -340,7 +348,7 @@ describe('the draw census — five consumers, three files, forever (Ch. IX)', ()
       expect(calls.length, `${file}: due()/fresh() CALL count`).toBe(expected.calls);
       totalCalls += calls.length;
     }
-    expect(totalCalls, '9 raw calls = 5 logical due-then-fresh-fallback consumers (teachingFacts is fresh-only)').toBe(9);
+    expect(totalCalls, '11 raw calls = 6 logical due-then-fresh-fallback consumers (teachingFacts is fresh-only)').toBe(11);
   });
 
   it('each of the five named consumer functions is still present in its file', () => {

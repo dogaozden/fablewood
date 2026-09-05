@@ -1,0 +1,63 @@
+{
+  "id": "arc01-road",
+  "name": "[T2-PLACEHOLDER] The Road South",
+  "region": "[T2-PLACEHOLDER] The Road South",
+  "packId": "engine",
+  "rooms": [
+    {
+      "id": "ws-1",
+      "name": "[T2-PLACEHOLDER] The First Waystone",
+      "blurb": "[T2-PLACEHOLDER] A mossed stone at the road's edge, cut lines waiting under the green.",
+      "enemies": [{ "archetype": "wisp", "kinds": ["mcq"] }],
+      "gate": { "encounterId": "arc01.ws-1.attest" }
+    },
+    {
+      "id": "mid-1",
+      "name": "[T2-PLACEHOLDER] The First Middle",
+      "blurb": "[T2-PLACEHOLDER] The grey stands off the width of a spoken thing, and no further.",
+      "enemies": [
+        { "archetype": "wisp", "kinds": ["mcq"] },
+        { "archetype": "wisp", "kinds": ["mcq"] }
+      ]
+    },
+    {
+      "id": "ws-2",
+      "name": "[T2-PLACEHOLDER] The Second Waystone",
+      "blurb": "[T2-PLACEHOLDER] Rain-softened lettering, half a stretch still legible.",
+      "enemies": [{ "archetype": "wisp", "kinds": ["free_recall"] }],
+      "gate": { "encounterId": "arc01.ws-2.attest" }
+    },
+    {
+      "id": "mid-2",
+      "name": "[T2-PLACEHOLDER] The Long Deep Middle",
+      "blurb": "[T2-PLACEHOLDER] Sound goes small here. Something older than a wisp keeps pace.",
+      "enemies": [
+        { "archetype": "wisp", "kinds": ["mcq"] },
+        { "archetype": "wraith", "kinds": ["match", "mcq"] }
+      ]
+    },
+    {
+      "id": "ws-3",
+      "name": "[T2-PLACEHOLDER] The Third Waystone",
+      "blurb": "[T2-PLACEHOLDER] The last stone before the water. Beyond it, the bridge.",
+      "enemies": [{ "archetype": "wraith", "kinds": ["free_recall"] }],
+      "gate": { "encounterId": "arc01.ws-3.attest" }
+    },
+    {
+      "id": "span",
+      "name": "[T2-PLACEHOLDER] The Span",
+      "blurb": "[T2-PLACEHOLDER] A broken bridge, a waystation, and something still walking its rounds.",
+      "enemies": [{ "archetype": "warden" }],
+      "boss": {
+        "name": "[T2-PLACEHOLDER] The Toll-Warden",
+        "shields": 3,
+        "phases": [
+          { "branchEncounterId": "arc01.span.p1" },
+          { "branchEncounterId": "arc01.span.p2" },
+          { "branchEncounterId": "arc01.span.p3" }
+        ],
+        "relicId": "waymark-heel"
+      }
+    }
+  ]
+}
