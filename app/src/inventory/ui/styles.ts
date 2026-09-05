@@ -20,7 +20,7 @@ const CSS = `
 .inv-overlay {
   --inv-ink:#241A14; --inv-ink-2:#2A1D13; --inv-ink-soft:#684628;
   --inv-gold:#F7CE6B; --inv-amber:#EEA23F; --inv-ember-deep:#A65420;
-  --inv-green:#588234; --inv-berry:#C4443E;
+  --inv-green:#588234; --inv-berry:#C4443E; --inv-forest:#37602A;
 
   position: fixed; inset: 0; z-index: 9999;
   display: grid; place-items: center; padding: 24px;
@@ -72,6 +72,7 @@ const CSS = `
 .inv-name-row { display: flex; align-items: center; gap: .5em; flex-wrap: wrap; }
 .inv-name { font-weight: 700; }
 .inv-flavor { display: block; font-size: .8rem; font-style: italic; color: var(--inv-ink-soft); margin-top: .15em; }
+.inv-effect { display: block; font-size: .78rem; font-weight: 600; color: var(--inv-forest); margin-top: .15em; }
 .inv-qty { flex: none; font-size: .85rem; color: var(--inv-ink-soft); min-width: 2.4em; text-align: center; }
 .inv-price { flex: none; font-size: .88rem; color: var(--inv-ember-deep); font-weight: 700; min-width: 3.6em; text-align: right; }
 

@@ -8,6 +8,7 @@ import { services, type InventorySnapshot } from '../../game/contracts';
 import { CATALOG, RARITY_META, type ItemDef } from '../catalog';
 import { iconUrl } from '../icons';
 import { el, openPane } from './dom';
+import { effectLabel } from './shopPane';
 
 /** Opens the Satchel; resolves when the pane closes (click-outside, Escape, or the Close button). */
 export function openInventoryPane(): Promise<void> {
@@ -92,6 +93,12 @@ export function openInventoryPane(): Promise<void> {
             }),
           ]),
           el('span', { class: 'inv-flavor', text: item.flavor }),
+          // W10 2.1: relics only ever appear here (Shop/combat-Satchel exclude them by
+          // design), and holding/bearing is a passive with no "Use" button — so this is the
+          // one surface where a player can read what the relic actually DOES, next to the
+          // lore prose above it. effectLabel() is the same mechanical-text function shopPane
+          // and combatSatchelPane already call for every other item.
+          ...(item.type === 'relic' ? [el('span', { class: 'inv-effect', text: effectLabel(item) })] : []),
         ]),
         el('span', { class: 'inv-qty', text: `×${qty}` }),
         ...useCell(item),

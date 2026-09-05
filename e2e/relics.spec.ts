@@ -103,6 +103,30 @@ test('owning a relic shows Held + Bear; Bearing flips the pill, banners exactly,
   expect(afterSetDown?.bornRelicId ?? null, 'set-down cleared bornRelicId in state').toBeNull();
 });
 
+test("the Satchel shows a relic's mechanical effect text next to its flavor (W10 2.1 — a player couldn't read what a relic does anywhere)", async ({
+  page,
+}) => {
+  await page.request.put('/api/state/inventory.json', {
+    data: { version: 1, gold: 0, stacks: { [RELIC_ID]: 1 }, bornRelicId: RELIC_ID },
+  });
+
+  await page.goto('/?scene=hamlet&seed=7');
+  await openHamletSatchel(page);
+
+  const row = page.locator('.inv-row', { hasText: RELIC_NAME });
+  // Lore prose keeps rendering exactly as before (inventoryPane.ts's pre-existing .inv-flavor).
+  await expect(row.locator('.inv-flavor')).toHaveText(
+    "The Vault-Warden's own seal. Proof you argued the Terms and won.",
+  );
+  // ...and the mechanical effect text (effectLabel(), shopPane.ts) now has its own surface,
+  // next to the flavor — previously the Satchel row rendered ONLY item.flavor here
+  // (inventoryPane.ts:94), so a player could never read what a relic actually DOES from the
+  // one pane relics ever appear in.
+  await expect(row.locator('.inv-effect'), 'mechanical effect text visible in the Satchel row').toHaveText(
+    'Loot rolls are edged while borne',
+  );
+});
+
 test('the combat Satchel pane never lists relics, even one owned and borne', async ({ page }, testInfo) => {
   test.setTimeout(45_000);
 
