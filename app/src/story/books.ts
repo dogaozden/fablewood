@@ -5,7 +5,7 @@
  * mastery level") — or arc completions, whichever comes first. Milestone numbers
  * are the author-vetoable defaults (spec §5). The Clerk's lines are Fable's, verbatim.
  */
-import { T1_BEATS } from './beats';
+import { ARC1_BEATS } from './beats';
 
 export const CANTO_MILESTONES = [5, 10, 15, 20, 25];
 
@@ -28,14 +28,31 @@ export interface OnwardPage {
   clerkLine: string;
 }
 
+/** Most-advanced-first: the first row whose beat is seen wins. T2 rows carry the
+ *  placeholder prefix; the curated lines replace these strings and nothing else. */
 const NEXT_LINES: ReadonlyArray<[afterBeatId: string, line: string]> = [
+  ['onward-01.the-return', '[T2-PLACEHOLDER] Next wants doing: the next chapter. The page turns.'],
+  ['onward-01.the-span', '[T2-PLACEHOLDER] Next wants doing: the walk home.'],
+  ['onward-01.hollis-promise', '[T2-PLACEHOLDER] Next wants doing: the Span, and whatever keeps its toll.'],
+  ['onward-01.the-middles', '[T2-PLACEHOLDER] Next wants doing: the third stone.'],
+  ['onward-01.first-waystone', '[T2-PLACEHOLDER] Next wants doing: the middles, stone by stone.'],
   ['onward-01.fable-waywright', 'Next wants doing: the road past the fence. It waits.'],
   ['onward-01.barred-road', 'Next wants doing: a tale at the Acorn. Berry has it.'],
   ['onward-01.dark-answers', 'Next wants doing: the south road. Ask the gatewarden.'],
 ];
 
-export function onwardOpenPage(isSeen: (beatId: string) => boolean): OnwardPage {
-  const entries = T1_BEATS.filter((b) => isSeen(b.id)).map((b) => b.title);
+const OPEN_HEADING = 'Chapter One — The Road That Waits';
+const CLOSED_HEADING = '[T2-PLACEHOLDER] Chapter One — closed. The next page is open.';
+
+/** `arcComplete` — the arc's own completion stamp (state/story.json's completedArcs), not a
+ *  beat: the Return's card is what writes it (beats.ts BEAT_AFTER_EFFECTS), and the desk may
+ *  be opened long afterwards on a save whose beats were all seen. The empty-state law
+ *  (universe design §4) says the open page is never blank — every state above has a line. */
+export function onwardOpenPage(
+  isSeen: (beatId: string) => boolean,
+  opts?: { arcComplete?: boolean },
+): OnwardPage {
+  const entries = ARC1_BEATS.filter((b) => isSeen(b.id)).map((b) => b.title);
   let clerkLine = 'The page is ruled and waiting.';
   for (const [afterId, line] of NEXT_LINES) {
     if (isSeen(afterId)) {
@@ -43,5 +60,5 @@ export function onwardOpenPage(isSeen: (beatId: string) => boolean): OnwardPage 
       break;
     }
   }
-  return { heading: 'Chapter One — The Road That Waits', entries, clerkLine };
+  return { heading: opts?.arcComplete ? CLOSED_HEADING : OPEN_HEADING, entries, clerkLine };
 }

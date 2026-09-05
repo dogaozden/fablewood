@@ -543,6 +543,23 @@ export class HamletScene extends Phaser.Scene {
         this.busy = false;
       }
     }
+    // «Onward» — the Return. A distinct surface from 'hamlet-entry' so the provider's table
+    // stays flat: it fires only once an arc's boss beat is seen and its own return beat is
+    // not (story/beats.ts). Same guard shape as the entry beat just above, for the same
+    // reason (T2 CARRY item 2's own rationale, above) — taken only when there is a beat to
+    // show, so a hamlet entry that shows neither card, or only the entry card, never clobbers
+    // enter()'s own guard or drops a held direction key. `this.busy` is guaranteed false here
+    // whether or not the entry beat ran, so the two guards never overlap.
+    const returnBeat = services.story.nextBeatFor('return', services.save.get());
+    if (returnBeat) {
+      this.busy = true;
+      try {
+        await services.story.showBeat(returnBeat);
+      } finally {
+        this.input?.keyboard?.resetKeys();
+        this.busy = false;
+      }
+    }
   }
 
   private placePlayer(x: number, y: number): void {
