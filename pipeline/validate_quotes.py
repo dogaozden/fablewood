@@ -8,7 +8,8 @@ gate. For every fact it checks:
   * source_ref.quote appears in source_ref.file, under a normalization that
     collapses whitespace runs to single spaces and folds curly quotes/
     apostrophes to straight (applied to BOTH sides);
-  * ids are unique and well-formed (vc.econ.<topic>.<slug>);
+  * ids are unique and well-formed — root.topic.slug[.slug...], e.g.
+    vc.econ.<topic>.<slug> or secreg.<node>.<slug> (any pack's own root);
   * type is a valid enum; difficulty is an int 1–5; as_of is YYYY-MM-DD;
   * required fields are present and non-empty;
   * every prereq id refers to a fact that exists in the set;
@@ -26,7 +27,9 @@ import re
 import sys
 
 VALID_TYPES = {"rule", "concept", "advice", "do", "dont", "number", "story"}
-ID_RE = re.compile(r"^vc\.econ\.[a-z0-9]+(\.[a-z0-9-]+)+$")
+# root.topic.slug[.slug...] — generalized 2026-09-04 (Pack #2) from the vc-law-only
+# ^vc\.econ\. prefix so any pack's own id namespace (e.g. secreg.<node>.<slug>) validates.
+ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9-]+(\.[a-z0-9-]+)+$")
 AS_OF_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Curly -> straight for quotes/apostrophes (both quote and source get folded).
