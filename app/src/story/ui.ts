@@ -29,7 +29,7 @@ function ensureStyles(): void {
     justify-content:center; background:rgba(20,14,26,.62); }
   .fw-desk-panel { width:min(760px, 94vw); height:min(560px, 86vh); display:flex;
     background:#EBD9B2; color:#2a1d13; border:2px solid #8a6b3f; border-radius:10px;
-    font-family:Georgia, 'Times New Roman', serif; overflow:hidden;
+    font-family:Georgia, 'Times New Roman', serif; overflow:hidden; position:relative;
     box-shadow:0 12px 40px rgba(0,0,0,.5); }
   .fw-desk-nav { width:220px; border-right:1px solid rgba(138,107,63,.4); padding:16px 0;
     overflow-y:auto; }
@@ -40,7 +40,13 @@ function ensureStyles(): void {
   .fw-desk-item:hover { background:rgba(138,107,63,.15); }
   .fw-desk-item.fw-desk-locked { color:#6b5638; cursor:default; font-style:italic; }
   .fw-desk-body { flex:1; padding:20px 26px; overflow-y:auto; line-height:1.55;
-    white-space:pre-wrap; }
+    white-space:pre-wrap;
+    /* Scroll-fade cue (CARRY item 4): a long canto gives no other sign it continues
+       below the fold. Bottom 34px fades out; the mask is inert on short content. */
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent 100%); }
+  .fw-desk-hint { position:absolute; right:18px; bottom:12px; font-size:.72rem;
+    color:#6b5638; pointer-events:none; }
   .fw-desk-close { position:absolute; margin:10px; }
   `;
   const tag = document.createElement('style');
@@ -111,8 +117,10 @@ export interface DeskModel {
   onward: { heading: string; entries: string[]; clerkLine: string };
 }
 
-/** The Records Office reading desk: nav (two books) + reader pane. Esc/E closes. */
-export function openDeskUi(model: DeskModel): Promise<void> {
+/** The Records Office reading desk: nav (two books) + reader pane. Esc/E closes.
+ *  `auto` mirrors showBeatCard's own auto-drive (ui.ts:105) so a headless e2e/dev
+ *  driver can open the desk without hanging on a dismiss that never comes. */
+export function openDeskUi(model: DeskModel, opts?: { auto?: boolean }): Promise<void> {
   ensureStyles();
   return new Promise((resolve) => {
     const veil = el('div', 'fw-desk');
@@ -158,6 +166,7 @@ export function openDeskUi(model: DeskModel): Promise<void> {
 
     panel.appendChild(nav);
     panel.appendChild(body);
+    panel.appendChild(el('div', 'fw-desk-hint', 'Esc · close'));
     veil.appendChild(panel);
     document.body.appendChild(veil);
 
@@ -177,5 +186,6 @@ export function openDeskUi(model: DeskModel): Promise<void> {
     veil.addEventListener('click', (ev) => {
       if (ev.target === veil) done();
     });
+    if (opts?.auto) setTimeout(done, 600);
   });
 }

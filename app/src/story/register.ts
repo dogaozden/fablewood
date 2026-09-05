@@ -24,7 +24,7 @@ services.story = {
     await store.markSeen(beat.id);
     await showBeatCard(beat, opts);
   },
-  openDesk: async (): Promise<void> => {
+  openDesk: async (opts?: { auto?: boolean }): Promise<void> => {
     await Promise.all([store.ready(), services.srs.ready(), services.draw.indexReady()]);
     const welds = weldCount(services.draw.allFactIds(), (id) => services.srs.boxOf(id));
     const arcs = store.completedArcCount();
@@ -36,7 +36,7 @@ services.story = {
         unlocked: cantoUnlocked(i, welds, arcs),
       })),
       onward: onwardOpenPage((id) => store.isSeen(id)),
-    });
+    }, opts);
   },
 };
 

@@ -518,9 +518,24 @@ export class HamletScene extends Phaser.Scene {
     // «Onward» hamlet-entry beat (story provider decides; the scene only asks).
     // Covers both the live boss-victory return AND the backfill for saves that
     // beat the Warden before the story layer shipped (design §5 "hook beat").
-    await services.story.ready().catch(() => {}); // memoized; isolates story from the swallow-all Promise.all above
-    const entryBeat = services.story.nextBeatFor('hamlet-entry', services.save.get());
-    if (entryBeat) await services.story.showBeat(entryBeat);
+    //
+    // T2 CARRY item 2 — held under `busy` for the card's whole lifetime, exactly as
+    // enter() holds it for tavern/records/gate (HamletScene.ts:770-814). Without this,
+    // update()'s `locked` (:593) stayed false while the card was up, so WASD still moved
+    // the Keeper and E still opened a second location's conversation over the card. The
+    // resetKeys() in the finally is enter()'s own double-fire fix (:802-812): the E/Space
+    // that dismisses the card also sets Phaser's _justDown on our polled keys, and nothing
+    // consumes it while locked. setupInput() has already run (create(), :172), so the
+    // keyboard plugin is live here.
+    this.busy = true;
+    try {
+      await services.story.ready().catch(() => {}); // memoized; isolates story from the swallow-all Promise.all above
+      const entryBeat = services.story.nextBeatFor('hamlet-entry', services.save.get());
+      if (entryBeat) await services.story.showBeat(entryBeat);
+    } finally {
+      this.input.keyboard!.resetKeys();
+      this.busy = false;
+    }
   }
 
   private placePlayer(x: number, y: number): void {
