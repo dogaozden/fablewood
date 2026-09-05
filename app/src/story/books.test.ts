@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CANTO_MILESTONES, weldCount, cantoUnlocked, onwardOpenPage } from './books';
+import { CANTO_MILESTONES, weldCount, cantoUnlocked, onwardOpenPage, roadsFor } from './books';
 
 describe('weldCount', () => {
   it('counts facts at the shipped weld edge, box >= 4', () => {
@@ -81,5 +81,12 @@ describe('onwardOpenPage', () => {
     expect(onwardOpenPage(() => false, { arcComplete: true }).heading).toBe(
       '[T2-PLACEHOLDER] Chapter One — closed. The next page is open.',
     );
+  });
+});
+
+describe('roadsFor — the wall map gains its first road', () => {
+  it('lists a line per completed arc, and nothing before', () => {
+    expect(roadsFor(() => false)).toEqual([]);
+    expect(roadsFor((id) => id === 'onward-01')).toEqual(['[T2-PLACEHOLDER] a road south, over the Span']);
   });
 });

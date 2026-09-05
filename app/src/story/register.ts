@@ -4,14 +4,38 @@
  * DEV harness: ?story=<beatId> renders that beat's card directly on boot (the
  * ?overlay= pattern) — e2e/dev only, DEV-gated exactly like encounters/register's.
  */
-import { services, type BeatContext, type SaveData, type StoryBeat, type StorySurface } from '../game/contracts';
+import {
+  services,
+  type BeatContext,
+  type SaveData,
+  type StoryBeat,
+  type StoryDestination,
+  type StorySurface,
+} from '../game/contracts';
 import { StoryStore } from './store';
-import { nextBeatFor, ARC1_BEATS, BEAT_AFTER_EFFECTS } from './beats';
+import { nextBeatFor, ARC1_BEATS, BEAT_AFTER_EFFECTS, PLACEHOLDER, ROAD_SPEC } from './beats';
 import { showBeatCard, openDeskUi } from './ui';
 import { CANTOS } from './cantos';
-import { cantoUnlocked, onwardOpenPage, weldCount } from './books';
+import { cantoUnlocked, onwardOpenPage, roadsFor, weldCount } from './books';
 
 const store = new StoryStore();
+
+/**
+ * Engine destinations and what opens them (spec §4.3). Kept here rather than in a scene: the
+ * gate asks, the provider answers. `arc01-road` opens once the Keeper has heard the fable —
+ * beat III is the one that names the stone past Hollis's fence, so it is the earliest point
+ * at which riding south is a thing the Keeper knows to do.
+ *
+ * `id: ROAD_SPEC` (Task 4 review R1) reuses beats.ts's own copy of engineSpecs.ts's
+ * ROAD_SPEC_ID rather than retyping the id a fourth time — pinned by construction: this and
+ * beats.ts's internal eligibility checks are now the SAME imported constant, and
+ * beats.test.ts already pins that constant against ROAD_SPEC_ID behaviourally, so drift
+ * between the engine registry and this destination is structurally impossible, not just
+ * untested. desk.test.ts asserts this file holds no fresh literal of the id.
+ */
+const ENGINE_DESTINATIONS: ReadonlyArray<StoryDestination & { requiresBeat: string }> = [
+  { id: ROAD_SPEC, title: `${PLACEHOLDER} The Road South`, requiresBeat: 'onward-01.fable-waywright' },
+];
 
 services.story = {
   ready: () => store.ready(),
@@ -41,9 +65,13 @@ services.story = {
         body: c.body,
         unlocked: cantoUnlocked(i, welds, arcs),
       })),
-      onward: onwardOpenPage((id) => store.isSeen(id)),
+      onward: onwardOpenPage((id) => store.isSeen(id), { arcComplete: store.isArcComplete('onward-01') }),
+      roads: roadsFor((id) => store.isArcComplete(id)),
     }, opts);
   },
+  completedArcCount: () => store.completedArcCount(),
+  engineDestinations: (): StoryDestination[] =>
+    ENGINE_DESTINATIONS.filter((d) => store.isSeen(d.requiresBeat)).map(({ id, title }) => ({ id, title })),
 };
 
 // DEV-only direct-render harness: /?story=<beatId>

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { nextBeatFor, bossVaultOpened, GRANDFATHERED_BOSS_ROOM, BEAT_AFTER_EFFECTS } from './beats';
+import { ROAD_SPEC_ID } from '../game/scenes/dungeon/engineSpecs';
 import type { SaveData } from '../game/contracts';
 
 const seenNone = { isSeen: () => false };
@@ -59,7 +60,17 @@ describe('nextBeatFor', () => {
 });
 
 describe('«Onward» T2 — road, Span and Return surfaces', () => {
-  const ROAD = 'arc01-road';
+  // T2 Task 4 Step 0 (ruled in by the Task 3 review, M1): nothing previously asserted that
+  // beats.ts's own duplicate of the road spec id agrees with engineSpecs.ts's ROAD_SPEC_ID.
+  // `ROAD` below is now the SAME identifier as ROAD_SPEC_ID (not a fourth independent
+  // literal), so every eligibility test in this whole describe block is a live, continuous
+  // proof that beats.ts's internal ROAD_SPEC constant agrees with the engine registry's —
+  // if the two ever drifted, every road-entry/boss-victory test below would fail.
+  it('the story layer and the engine registry agree on the road spec id', () => {
+    expect(ROAD_SPEC_ID).toBe('arc01-road');
+  });
+
+  const ROAD = ROAD_SPEC_ID;
   const IV = 'onward-01.first-waystone';
   const V = 'onward-01.the-middles';
   const VI = 'onward-01.hollis-promise';

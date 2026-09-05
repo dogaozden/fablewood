@@ -105,6 +105,25 @@ describe('StoryStore', () => {
     expect(file.threadFragments['frag.name.01-span-ledger']).toBe(new Date(2000).toISOString());
   });
 
+  describe('isArcComplete', () => {
+    it('reads completedArcs without changing the state shape', async () => {
+      const s = new StoryStore(
+        fakeBridge({
+          'story.json': {
+            version: 1,
+            seenBeats: {},
+            completedArcs: { 'onward-01': '2026-09-04T00:00:00.000Z' },
+            threadFragments: {},
+          },
+        }),
+      );
+      await s.ready();
+      expect(s.isArcComplete('onward-01')).toBe(true);
+      expect(s.isArcComplete('onward-02')).toBe(false);
+      expect(s.completedArcCount()).toBe(1);
+    });
+  });
+
   it('a failed write warns once, and the write chain survives for the next markSeen', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const files = new Map<string, unknown>();

@@ -27,3 +27,17 @@ describe('the reading desk chrome (CARRY items 3 and 4)', () => {
     expect(REGISTER).toContain('}, opts);');
   });
 });
+
+describe('the engine-destination id is pinned by construction (Task 4 review R1)', () => {
+  it('register.ts holds no fresh literal of the road spec id — it imports beats.ts\'s ROAD_SPEC', () => {
+    // Before this fix, ENGINE_DESTINATIONS spelled the id itself ({ id: 'arc01-road', ... }),
+    // a fourth, test-unpinned copy whose drift would silently degrade the gate's "Road South"
+    // choice to the dev fixture (review-task4-verdict.md §1). beats.test.ts already pins
+    // beats.ts's ROAD_SPEC against engineSpecs.ts's ROAD_SPEC_ID behaviourally; importing the
+    // SAME constant here — rather than retyping it — makes drift structurally impossible
+    // instead of merely untested.
+    expect(REGISTER, 'no re-typed literal of the id').not.toMatch(/id:\s*'arc01-road'/);
+    expect(REGISTER, "imports ROAD_SPEC from beats.ts").toMatch(/import\s*\{[^}]*\bROAD_SPEC\b[^}]*\}\s*from\s*'\.\/beats'/);
+    expect(REGISTER, 'uses the imported constant as the destination id').toMatch(/id:\s*ROAD_SPEC\b/);
+  });
+});

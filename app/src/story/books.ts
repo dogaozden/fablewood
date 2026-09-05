@@ -5,7 +5,7 @@
  * mastery level") — or arc completions, whichever comes first. Milestone numbers
  * are the author-vetoable defaults (spec §5). The Clerk's lines are Fable's, verbatim.
  */
-import { ARC1_BEATS } from './beats';
+import { ARC1_BEATS, PLACEHOLDER } from './beats';
 
 export const CANTO_MILESTONES = [5, 10, 15, 20, 25];
 
@@ -61,4 +61,15 @@ export function onwardOpenPage(
     }
   }
   return { heading: opts?.arcComplete ? CLOSED_HEADING : OPEN_HEADING, entries, clerkLine };
+}
+
+/** The Records Office wall map's roads — one line per completed arc (universe design §7,
+ *  "the wall map gains its first road"). The DRAWN road is art and belongs to the creative
+ *  block (spec §9 item 8); this is the data behind it, and the caption is a placeholder. */
+export const ARC_ROADS: ReadonlyArray<[arcId: string, line: string]> = [
+  ['onward-01', `${PLACEHOLDER} a road south, over the Span`],
+];
+
+export function roadsFor(isArcComplete: (arcId: string) => boolean): string[] {
+  return ARC_ROADS.filter(([id]) => isArcComplete(id)).map(([, line]) => line);
 }

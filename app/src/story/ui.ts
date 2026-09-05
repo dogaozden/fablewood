@@ -5,6 +5,7 @@
  * Classes are prefixed fw-story-* / fw-desk-* so e2e can target them unambiguously.
  */
 import type { StoryBeat } from '../game/contracts';
+import { PLACEHOLDER } from './beats';
 
 let stylesDone = false;
 function ensureStyles(): void {
@@ -115,6 +116,9 @@ export function showBeatCard(beat: StoryBeat, opts?: { auto?: boolean }): Promis
 export interface DeskModel {
   cantos: { roman: string; title: string; body: string; unlocked: boolean }[];
   onward: { heading: string; entries: string[]; clerkLine: string };
+  /** The wall map's roads — one line per completed arc (books.ts roadsFor). Empty until
+   *  an arc closes; the drawn map itself is creative work still to come. */
+  roads: string[];
 }
 
 /** The Records Office reading desk: nav (two books) + reader pane. Esc/E closes.
@@ -153,6 +157,7 @@ export function openDeskUi(model: DeskModel, opts?: { auto?: boolean }): Promise
         '',
         ...(model.onward.entries.length ? model.onward.entries.map((t) => `· ${t}`) : []),
         '',
+        ...(model.roads.length ? [`${PLACEHOLDER} The map, on the wall:`, ...model.roads.map((r) => `  — ${r}`), ''] : []),
         model.onward.clerkLine,
       ];
       body.textContent = lines.join('\n');

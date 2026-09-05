@@ -4,6 +4,7 @@
  * builders — the scene feeds them live SRS/save numbers.
  */
 import type { Conversation } from '../../dialogue/types';
+import type { StoryDestination } from '../../contracts';
 
 const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
@@ -73,9 +74,12 @@ export const PROVINCE_DISPLAY_TITLES: Record<string, string> = {
   'vc-law': 'The Vault of Worth — Term Sheet Economics',
 };
 
-/** The South Gate — Gatewarden Alder. Province select (installed packs). */
-export function alderConv(provinces: Province[]): Conversation {
-  if (provinces.length === 0) {
+/** The South Gate — Gatewarden Alder. A true destination choice (universe design §7): the
+ *  installed packs, plus any engine destinations the story provider says are open. Engine
+ *  values are namespaced `spec:<id>` so a pack id and a spec id can never be confused by
+ *  doGate's router. Display names for packs come from ONE map (above), the T2 CARRY lift. */
+export function alderConv(provinces: Province[], engineDestinations: StoryDestination[] = []): Conversation {
+  if (provinces.length === 0 && engineDestinations.length === 0) {
     return {
       speaker: 'Gatewarden Alder',
       pages: [
@@ -93,6 +97,7 @@ export function alderConv(provinces: Province[]): Conversation {
     ],
     choices: [
       ...provinces.map((p) => ({ label: PROVINCE_DISPLAY_TITLES[p.id] ?? p.title, value: p.id })),
+      ...engineDestinations.map((d) => ({ label: d.title, value: `spec:${d.id}` })),
       { label: 'Not yet', value: '__cancel__' },
     ],
     portrait: 'portrait.alder',
