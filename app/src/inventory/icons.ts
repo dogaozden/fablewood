@@ -73,20 +73,24 @@ const wardancersRestorative = [
   '................',
 ] as const;
 
+// W10 2.4 gate (docs/art-reviews/item-icons-glow.md): the shipped v1 grid's oval body + inset
+// parchment "window" read as a small pendant/urn, not "rendered tallow" — redesigned to a
+// mound/dome (no neck, widest at the base) with the wick planted straight in the top, per the
+// flavor's "the wick drinks it greedily."
 const wickTallow = [
   '................',
-  '................',
-  '.......e........',
-  '......eEe.......',
-  '.....xEEEx......',
-  '....xTTTTTx.....',
-  '....xTKKKTx.....',
-  '....xTKccKTx....',
-  '....xTKccKTx....',
-  '....xTKKKKTx....',
-  '....xTTTTTTx....',
-  '.....xTTTTx.....',
-  '......xxxx......',
+  '........e.......',
+  '.......eE.......',
+  '......EeE.......',
+  '......KK........',
+  '......KK........',
+  '.....xxxxxx.....',
+  '....xttTTTx.....',
+  '...xtttTTTKx....',
+  '..xttttTTTKKx...',
+  '..xtttTTTTKKx...',
+  '..xttTTTTKKKx...',
+  '..xxxxxxxxxxxx..',
   '................',
   '................',
   '................',
