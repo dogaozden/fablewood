@@ -6,11 +6,13 @@
  * instead of registered as a Phaser texture.
  *
  * Gate-reviewed (all six axes ≥4, 2 iterations): docs/art-reviews/item-icons-v1.md (first 14
- * icons — draughts/tools/trinkets/relic families) and docs/art-reviews/item-icons-relics.md
+ * icons — draughts/tools/trinkets/relic families), docs/art-reviews/item-icons-relics.md
  * (Wave 9 Ch. IX: 4 new relics + 2 new wares, plus the Warden Signet re-scored on the
- * parchment pane per the in-engine value law).
- * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png and
- * docs/art-reviews/item-icons-relics/*.json + *-iter{1,2}.png (+ in-engine pane screenshots).
+ * parchment pane per the in-engine value law), and docs/art-reviews/second-wick-v2.md (W10 2.6:
+ * `secondWick` redesigned from a rounded acorn-read silhouette to a twin-flame candle-stub).
+ * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png,
+ * docs/art-reviews/item-icons-relics/*.json + *-iter{1,2}.png, and
+ * docs/art-reviews/second-wick-v2/*.json + *-iter{1,2}*.png (+ in-engine pane screenshots).
  */
 import { PAL_CHAR } from '../art/palette';
 
@@ -346,21 +348,29 @@ const marginLamp = [
   '................',
 ] as const;
 
+// W10 2.6 gate (docs/art-reviews/second-wick-v2.md): the shipped v1 grid's rounded
+// double-lobe body + pinched waist + tiny top stem/ember read as an acorn (the author's veto
+// from play). Iteration 2 fixed the acorn but its 12x9 flat-lidded body (a wide outline
+// row wider than the shaded row just inside it, at both top and bottom) read as a crate/
+// chest instead (Opus review, fix round 1). Iteration 3: body narrowed to a square-ish
+// 8x7, contour widens monotonically only (no lid/base re-entrant banding, borrowing
+// wickTallow's own widening-only silhouette), two staggered-height flames with wicks
+// moved in from the outer edges toward the centre, plus a small wax-drip cue.
 const secondWick = [
-  '................',
-  '.....xttttx.....',
-  '....xtTTTTtx....',
-  '....xtTTTTtx....',
-  '.....xxssxx.....',
-  '....xtTTTTtx....',
-  '....xtTTTTtx....',
-  '.....xttttx.....',
-  '......xTTx......',
-  '.......xx.......',
-  '........e.......',
-  '................',
-  '................',
-  '................',
+  '......e.........',
+  '.....eE.........',
+  '....EeE.e.......',
+  '........EeE.....',
+  '.....K...K......',
+  '.....K...K......',
+  '.....xxxxxx.....',
+  '.....xttTTx.....',
+  '....xttTTkx.....',
+  '....xttTTkkx....',
+  '....xttTTTkx....',
+  '....xtTTTTkx....',
+  '....xxxxxxxx....',
+  '.........tk.....',
   '................',
   '................',
 ] as const;
