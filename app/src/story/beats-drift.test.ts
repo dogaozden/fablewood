@@ -24,7 +24,10 @@ import { PLACEHOLDER, T1_BEATS } from './beats';
  * an honest limit of a lossy-excerpt guard), paraphrasing a third of a page scores
  * 0.650 (FAILS), inventing a page from scratch scores 0.000 (FAILS). This catches
  * paraphrase and invention, which is the drift that actually matters for curated text;
- * it does not catch a single-word typo. Stated, not hidden.
+ * it does not catch a single-word typo, and it cannot catch canon text landing on the
+ * WRONG beat — a passage lifted verbatim from elsewhere in the same canon doc also scores
+ * near 1.000, since coverage only asks "is this canon-derived", never "is this the right
+ * passage for this card". Stated, not hidden.
  */
 const CANON = readFileSync(
   join(__dirname, '..', '..', '..', 'docs', 'story', 'onward', 'arc-01-the-road-that-waits.md'),

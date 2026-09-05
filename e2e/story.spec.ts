@@ -149,6 +149,12 @@ test('the entry card freezes the hamlet: movement is inert and E does not also o
 
   const card = page.locator('.fw-story-card');
   await expect(card).toBeVisible({ timeout: 15_000 });
+
+  // Park the Keeper at a real door while the card is up: __fwWarp only sets position and
+  // facing (HamletScene.ts:187-192), touching neither `busy` nor the dialogue, so it is safe
+  // to call here — and it gives updatePromptAndInteract() an actual target to (wrongly) fire
+  // on if the guard leaks, which the spawn tile (facing away from every door) never could.
+  expect(await warpHamletTo(page, 'records')).toBe(true);
   const before = await hamletPlayer(page);
 
   // Hold a movement key, which must be inert while the card is up (busy-guard on `locked`).
@@ -156,7 +162,7 @@ test('the entry card freezes the hamlet: movement is inert and E does not also o
   // Enter/Space (ui.ts, pre-existing, unrelated to this guard) — that part is correct and
   // expected. What the busy-guard actually prevents is the SAME keypress *also* being read
   // by updatePromptAndInteract() as an interact press once `locked` lifts, which used to open
-  // a second, unrelated location's dialogue underneath the card in one motion.
+  // the records clerk's dialogue underneath the card in one motion.
   await holdKey(page, 'ArrowRight', 600);
   await tapKey(page, 'e');
   await page.waitForTimeout(300);
@@ -164,7 +170,7 @@ test('the entry card freezes the hamlet: movement is inert and E does not also o
   const after = await hamletPlayer(page);
   expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0)), 'the Keeper never moved while the card was up').toBeLessThan(2);
   await expect(card, 'E dismisses the card itself, same as Enter/Space').toHaveCount(0);
-  await expect(page.locator('.fw-dialogue'), 'the same E press did not also leak into a location interact').toHaveCount(0);
+  expect(after?.dialogueOpen, 'the same E press did not also leak into a location interact').toBe(false);
 });
 
 test('the desk shows how to close itself', async ({ page }) => {
