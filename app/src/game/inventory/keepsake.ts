@@ -1,7 +1,7 @@
 // keepsake.ts — Death's Door keepsake picker, Concordance Ch. I.
-// Pure: no Phaser, no services. Picks one carried trinket to survive a wipe;
-// relics/consumables/tools are never eligible (catalog law: trinkets are the
-// sellable class; relics are protected story trophies).
+// Pure: no Phaser, no services. Picks one carried trinket to be taken by the
+// Fade on a wipe; relics/consumables/tools are never eligible (catalog law:
+// trinkets are the sellable class; relics are protected story trophies).
 import { mulberry32 } from '../combat/rng';
 
 export function pickKeepsake(
