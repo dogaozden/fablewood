@@ -346,24 +346,27 @@ const marginLamp = [
 
 // W10 2.6 gate (docs/art-reviews/second-wick-v2.md): the shipped v1 grid's rounded
 // double-lobe body + pinched waist + tiny top stem/ember read as an acorn (the author's veto
-// from play). Redesigned to a flat-topped, straight-sided candle stub with two separate
-// wicks and flames side by side, so "second wick" reads literally — one candle-stub,
-// two lit wicks — instead of a nut.
+// from play). Iteration 2 fixed the acorn but its 12x9 flat-lidded body (a wide outline
+// row wider than the shaded row just inside it, at both top and bottom) read as a crate/
+// chest instead (Opus review, fix round 1). Iteration 3: body narrowed to a square-ish
+// 8x7, contour widens monotonically only (no lid/base re-entrant banding, borrowing
+// wickTallow's own widening-only silhouette), two staggered-height flames with wicks
+// moved in from the outer edges toward the centre, plus a small wax-drip cue.
 const secondWick = [
-  '....G......G....',
-  '....A......A....',
-  '...eEe....eEe...',
-  '....KK....KK....',
-  '..xxxxxxxxxxxx..',
-  '...xttTTTTkkx...',
-  '..xttTTTTTkkKx..',
-  '..xttTTTTTkkKx..',
-  '..xttTTTTTkkKx..',
-  '..xttTTTTTkkKx..',
-  '..xttTTTTTkkKx..',
-  '...xkkKKKKkkx...',
-  '..xxxxxxxxxxxx..',
-  '................',
+  '......e.........',
+  '.....eE.........',
+  '....EeE.e.......',
+  '........EeE.....',
+  '.....K...K......',
+  '.....K...K......',
+  '.....xxxxxx.....',
+  '.....xttTTx.....',
+  '....xttTTkx.....',
+  '....xttTTkkx....',
+  '....xttTTTkx....',
+  '....xtTTTTkx....',
+  '....xxxxxxxx....',
+  '.........tk.....',
   '................',
   '................',
 ] as const;
