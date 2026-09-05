@@ -57,6 +57,7 @@ import {
   heldLanternLight,
   spendLanternLight,
   WICK_CATCH_LINE,
+  ddFallbackPick,
 } from '../lantern';
 import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
@@ -4075,12 +4076,13 @@ export class CombatScene extends Phaser.Scene {
       if (!due.length) fresh = services.draw.fresh({ count: 1 + excludeIds.length, seed, now });
     } catch { /* service fault falls through to the shuffle tier, like globalDraw */ }
     const exclude = new Set(excludeIds);
-    const pick = due.find((id) => !exclude.has(id)) ?? fresh.find((id) => !exclude.has(id))
-      ?? seededShuffle(
-        this.eligibleFactIds([...this.allFactIds]).filter((id) => !exclude.has(id)),
-        mulberry32(layoutSeed('deathsdoor-fallback', seed)),
-      )[0];
-    return pick ?? null;
+    const pick = due.find((id) => !exclude.has(id)) ?? fresh.find((id) => !exclude.has(id));
+    // 2.16 — the shuffle-tier fallback (and the seed-reuse law it implements: deterministic
+    // but distinct from the round's own draw under LANTERN_REDRAW_SALT) now lives in
+    // lantern.ts's ddFallbackPick, so it's reachable from a test; behavior is byte-identical
+    // (eligibleFactIds still resolved here — it's a services.amendments-backed guarded call,
+    // not part of the pure seed math).
+    return pick ?? ddFallbackPick(seed, this.eligibleFactIds([...this.allFactIds]), excludeIds);
   }
 
   /** One round at the door: deal a fact, ask it, score it, route the machine's verdict. */
