@@ -14,7 +14,7 @@
 import type { Quality, SaveData } from '../game/contracts';
 import { getState as realGetState, putState as realPutState } from '../bridge/client';
 import { boxOf as leitnerBoxOf, record as leitnerRecord, type SrsState } from './leitner';
-import { maxHpForLevel } from '../game/progression/xp';
+import { maxHpForLevel, emberMaxForLevel } from '../game/progression/xp';
 
 /** The two bridge calls the stores depend on — injectable for tests. */
 export interface Bridge {
@@ -247,7 +247,16 @@ export class SaveStore extends ObjectStore<SaveData & Record<string, unknown>> {
   protected sanitize(
     value: SaveData & Record<string, unknown>,
   ): SaveData & Record<string, unknown> {
-    return { ...value, hp: coerceHp(value.hp, value.level) };
+    return {
+      ...value,
+      hp: coerceHp(value.hp, value.level),
+      // 2.11 fix round 1: a MISSING embers field is the documented "full pool" sentinel
+      // (contracts.ts, rest/embers.ts's embersOf, progression/grant.ts's level-up comment all
+      // rely on `undefined` meaning "full," not "corrupt") — DEFAULT_SAVE has no embers key,
+      // so every fresh game and every save that has never spent an Ember would otherwise get
+      // coerced to 0 here. Only a PRESENT value is coerced; an absent one is left untouched.
+      ...(value.embers === undefined ? {} : { embers: coerceEmbers(value.embers, value.level) }),
+    };
   }
 }
 
@@ -260,6 +269,19 @@ function coerceHp(hp: unknown, level: unknown): number {
   const max = maxHpForLevel(Number(level));
   const n = Number(hp);
   return Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : max;
+}
+
+/** 2.11 — for a PRESENT embers value only (sanitize() above leaves a genuinely missing one
+ *  untouched — that's the "full pool" sentinel, not this function's job). Mirrors coerceHp's
+ *  shape (finite -> floor + clamp to the level's OWN ceiling via emberMaxForLevel, the same
+ *  seam rest/embers.ts's embersOf reads, floored in the same order embersOf itself floors)
+ *  but with a DIFFERENT fallback: NaN or a non-numeric string coerces to 0, not the full pool
+ *  — a corrupt ember count never grants embers, since they regenerate at the Hearth (ruling),
+ *  unlike hp which falls back to max. */
+function coerceEmbers(embers: unknown, level: unknown): number {
+  const max = emberMaxForLevel(Number(level));
+  const n = Number(embers);
+  return Number.isFinite(n) ? Math.max(0, Math.min(max, Math.floor(n))) : 0;
 }
 
 export class SettingsStore extends ObjectStore<{ muted: boolean; volume: number } & Record<string, unknown>> {
