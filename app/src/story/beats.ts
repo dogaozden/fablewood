@@ -16,6 +16,11 @@ export function bossVaultOpened(save: SaveData): boolean {
   return (save.dungeon?.cleared ?? []).includes(GRANDFATHERED_BOSS_ROOM);
 }
 
+/** T2 scaffolding marker (spec ruling R20): every player-visible string this wave ships
+ *  carries this prefix, so the placeholder census can find them and the drift guard can
+ *  exempt them. Curated prose replaces the whole string, prefix included. */
+export const PLACEHOLDER = '[T2-PLACEHOLDER]';
+
 export interface Seen {
   isSeen(beatId: string): boolean;
 }

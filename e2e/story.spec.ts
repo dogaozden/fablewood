@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { waitReady, tapKey, warpHamletTo, waitHamletPlayer, readState, waitForState } from './helpers';
+import { waitReady, tapKey, warpHamletTo, waitHamletPlayer, readState, waitForState, hamletPlayer, holdKey } from './helpers';
 
 /** A save with the first vault fully cleared — the author's real post-victory situation. */
 const CLEARED_SAVE = {
@@ -136,4 +136,59 @@ test('the desk opens with zero story progress too (fresh save)', async ({ page }
   await desk.getByRole('button', { name: /Chapter One/ }).click();
   await expect(desk).toContainText('The page is ruled and waiting.');
   await page.keyboard.press('Escape');
+});
+
+test('the entry card freezes the hamlet: movement is inert and E does not also open a location underneath', async ({ page }) => {
+  await page.request.put('/api/state/save.json', { data: CLEARED_SAVE });
+  await page.request.put('/api/state/story.json', { data: { version: 1, seenBeats: {}, completedArcs: {}, threadFragments: {} } });
+
+  await page.goto('/?seed=7');
+  await waitReady(page);
+  await tapKey(page, 'Enter'); // title → hamlet
+  await waitReady(page, 'hamlet');
+
+  const card = page.locator('.fw-story-card');
+  await expect(card).toBeVisible({ timeout: 15_000 });
+
+  // Park the Keeper at a real door while the card is up: __fwWarp only sets position and
+  // facing (HamletScene.ts:187-192), touching neither `busy` nor the dialogue, so it is safe
+  // to call here — and it gives updatePromptAndInteract() an actual target to (wrongly) fire
+  // on if the guard leaks, which the spawn tile (facing away from every door) never could.
+  expect(await warpHamletTo(page, 'records')).toBe(true);
+  const before = await hamletPlayer(page);
+
+  // Hold a movement key, which must be inert while the card is up (busy-guard on `locked`).
+  // Then press E: showBeatCard's own listener dismisses the card on E exactly as it does on
+  // Enter/Space (ui.ts, pre-existing, unrelated to this guard) — that part is correct and
+  // expected. What the busy-guard actually prevents is the SAME keypress *also* being read
+  // by updatePromptAndInteract() as an interact press once `locked` lifts, which used to open
+  // the records clerk's dialogue underneath the card in one motion.
+  await holdKey(page, 'ArrowRight', 600);
+  await tapKey(page, 'e');
+  await page.waitForTimeout(300);
+
+  const after = await hamletPlayer(page);
+  expect(Math.abs((after?.x ?? 0) - (before?.x ?? 0)), 'the Keeper never moved while the card was up').toBeLessThan(2);
+  await expect(card, 'E dismisses the card itself, same as Enter/Space').toHaveCount(0);
+  expect(after?.dialogueOpen, 'the same E press did not also leak into a location interact').toBe(false);
+});
+
+test('the desk shows how to close itself', async ({ page }) => {
+  await page.request.put('/api/state/save.json', { data: CLEARED_SAVE });
+  await page.request.put('/api/state/story.json', { data: { version: 1, seenBeats: {}, completedArcs: {}, threadFragments: {} } });
+  await bootToHamlet(page);
+  const entry = page.locator('.fw-story-card');
+  if (await entry.isVisible().catch(() => false)) await tapKey(page, 'Enter');
+
+  expect(await warpHamletTo(page, 'records')).toBe(true);
+  await tapKey(page, 'e');
+  // Loop bound: see the sibling desk test above — 6 taps needed, deterministically.
+  for (let i = 0; i < 10; i++) {
+    await tapKey(page, 'e');
+    await page.waitForTimeout(250);
+    if (await page.locator('.fw-desk').isVisible().catch(() => false)) break;
+  }
+  await expect(page.locator('.fw-desk .fw-desk-hint')).toHaveText('Esc · close');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.fw-desk')).toHaveCount(0);
 });

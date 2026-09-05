@@ -66,8 +66,10 @@ export function clerkConv(due: number, lastPlayed: string): Conversation {
 
 /** C7 grandfather clause (Fable_SPEC, the Unsealing §4): pre-«Onward» pack data is
  *  immutable, so vc-law's meta.title still reads "The Venture Coast — …". Presentation
- *  surfaces show the «Onward» name; the map is display-only and never touches the pack. */
-const PROVINCE_DISPLAY_TITLES: Record<string, string> = {
+ *  surfaces show the «Onward» name; the map is display-only and never touches the pack.
+ *  EXPORTED (T2 CARRY item 6): the south gate's destination list is now built from packs
+ *  AND engine destinations, and both consumers read display names from this one map. */
+export const PROVINCE_DISPLAY_TITLES: Record<string, string> = {
   'vc-law': 'The Vault of Worth — Term Sheet Economics',
 };
 
