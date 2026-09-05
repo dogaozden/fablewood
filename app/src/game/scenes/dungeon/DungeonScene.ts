@@ -13,11 +13,13 @@ import Phaser from 'phaser';
 import { markReady } from '../../ready';
 import {
   services,
+  type BeatContext,
   type CombatLaunch,
   type CombatOutcome,
   type DungeonSpec,
   type DungeonRoom,
   type FactLite,
+  type StorySurface,
 } from '../../contracts';
 import { embersOf, TRIM_HEAL_CORRECT, TRIM_HEAL_MISS } from '../../rest/embers';
 import { heldLanternLight, spendLanternLight, WICK_CATCH_LINE } from '../../lantern';
@@ -472,6 +474,20 @@ export class DungeonScene extends Phaser.Scene {
 
   // ---- room sequence --------------------------------------------------------
 
+  /** Ask the story provider whether anything fires here, and show it if so. The scene holds
+   *  no story logic (design §9): it reports WHERE it is and the provider decides. Never
+   *  allowed to block a transition — a story fault is swallowed (spec §6). `auto` rides the
+   *  scene's own ?auto= driver so a headless capture is never left waiting on a dismiss. */
+  private async fireStoryBeat(surface: StorySurface, ctx: BeatContext): Promise<void> {
+    try {
+      await services.story.ready();
+      const beat = services.story.nextBeatFor(surface, services.save.get(), ctx);
+      if (beat) await services.story.showBeat(beat, { auto: !!this.auto });
+    } catch {
+      /* story is optional; never let it block the crawl */
+    }
+  }
+
   private async enterRoom(index: number, opts: { mode?: 'card' | 'drive' } = {}): Promise<void> {
     if (this.busy) return;
 
@@ -494,6 +510,12 @@ export class DungeonScene extends Phaser.Scene {
 
     this.busy = true;
     const room = this.spec.rooms[index];
+    // «Onward» — a room of an engine arc spec entered. Fires for EVERY room, including a
+    // dev-card capture and a gate-pending resume: eligibility (story/beats.ts) is what
+    // decides which stone gets which card, not this call site.
+    if (this.engineSpecId) {
+      await this.fireStoryBeat('road-entry', { specId: this.engineSpecId, roomId: room.id });
+    }
     const facts = this.teachingFacts(room, index);
 
     // 'card' (dev screenshot): show my entry card and stop — never opens the
@@ -653,7 +675,7 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     if (room.boss) {
-      await this.bossVictory(outcome, pending, bossRelicId(room));
+      await this.bossVictory(outcome, pending, bossRelicId(room), room.id);
       return { transitioned: true };
     }
 
@@ -896,7 +918,12 @@ export class DungeonScene extends Phaser.Scene {
    *  `relicId` — Ch. IX Provenance: the boss room's own relicId (specResolve.bossRelicId,
    *  resolveCombat's own call site), or undefined when the spec names none — bossLoot's own
    *  fallback supplies the Signet for that case, so this is a straight passthrough. */
-  private async bossVictory(outcome: CombatOutcome, pending: number[] = [], relicId?: string): Promise<void> {
+  private async bossVictory(
+    outcome: CombatOutcome,
+    pending: number[] = [],
+    relicId?: string,
+    roomId?: string,
+  ): Promise<void> {
     // already marked + persisted by resolveCombat right after combat victory (crucible V1-12)
     const streak = services.save.get().streak + 1;
     const quest = this.pack ? bossQuest(this.pack) : undefined;
@@ -951,6 +978,15 @@ export class DungeonScene extends Phaser.Scene {
     await this.view.vaultOpensBeat(reward + lootLine, streak);
     await this.runNightLedger('victory', streak);
     await this.presentPendingLevelUp(pending);
+    // «Onward» — the generic boss-victory trigger (T2 CARRY item 1), replacing the
+    // grandfathered room.warden string match for everything after Arc 1's hook. Placed after
+    // the Night's Ledger has closed and before the walk home, so the ceremony order is
+    // finale -> ledger -> level-up -> beat -> hamlet. The grandfathered backfill in
+    // story/beats.ts stays exactly as it is, for saves that predate the story layer.
+    await this.fireStoryBeat('boss-victory', {
+      specId: this.engineSpecId ?? this.packId ?? undefined,
+      roomId,
+    });
     this.scene.start('hamlet', { seed: this.seed });
   }
 

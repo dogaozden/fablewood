@@ -412,9 +412,28 @@ export interface StoryBeat {
   margin?: string;
 }
 
-/** The T1 trigger surfaces. An arc's beats fire at existing seams — scenes ask, the
- *  story provider decides; scenes never hold story logic (design §9 "triggers"). */
-export type StorySurface = 'hamlet-entry' | 'south-gate' | 'tavern';
+/** The trigger surfaces. An arc's beats fire at existing seams — scenes ask, the story
+ *  provider decides; scenes never hold story logic (design §9 "triggers"). T2 adds three
+ *  (spec ruling R18): 'road-entry' (a room of an engine arc spec entered), 'boss-victory'
+ *  (any boss room won — the generic trigger that replaces the grandfathered room.warden
+ *  string match for everything after Arc 1's hook), and 'return' (hamlet entry after an
+ *  arc's boss victory; kept distinct from 'hamlet-entry' so eligibility stays a pure table
+ *  rather than a branch inside one row). */
+export type StorySurface =
+  | 'hamlet-entry'
+  | 'south-gate'
+  | 'tavern'
+  | 'road-entry'
+  | 'boss-victory'
+  | 'return';
+
+/** Where a surface fired, when the surface alone doesn't say. `specId` is an arc's engine
+ *  spec id (or a pack id) and `roomId` that spec's room id — both absent for the hamlet
+ *  surfaces. Optional and additive: every T1 call site passes nothing and is unaffected. */
+export interface BeatContext {
+  specId?: string;
+  roomId?: string;
+}
 
 /** The «Onward» story spine: beat delivery + the Records Office reading desk.
  *  Sync reads after ready(), like SrsApi. state/story.json is additive-only. */
@@ -425,7 +444,7 @@ export interface StoryApi {
   /** The one beat (if any) that fires at this surface right now, canon order, seen
    *  beats excluded. Pure given (store, save) — the eligibility table lives in
    *  story/beats.ts. */
-  nextBeatFor(surface: StorySurface, save: SaveData): StoryBeat | null;
+  nextBeatFor(surface: StorySurface, save: SaveData, ctx?: BeatContext): StoryBeat | null;
   /** Show one beat's parchment card; marks it seen BEFORE resolving (a crash after
    *  dismiss never refires it). `auto` mirrors showNightLedger's auto-drive. */
   showBeat(beat: StoryBeat, opts?: { auto?: boolean }): Promise<void>;

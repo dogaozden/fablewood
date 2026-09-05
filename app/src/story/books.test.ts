@@ -47,4 +47,39 @@ describe('onwardOpenPage', () => {
       'Next wants doing: the road past the fence. It waits.',
     );
   });
+
+  it('points at what wants doing next through beats IV-VIII', () => {
+    const seen = new Set([
+      'onward-01.dark-answers',
+      'onward-01.barred-road',
+      'onward-01.fable-waywright',
+    ]);
+    const line = () => onwardOpenPage((id) => seen.has(id)).clerkLine;
+    expect(line()).toBe('Next wants doing: the road past the fence. It waits.');
+    seen.add('onward-01.first-waystone');
+    expect(line()).toBe('[T2-PLACEHOLDER] Next wants doing: the middles, stone by stone.');
+    seen.add('onward-01.the-middles');
+    expect(line()).toBe('[T2-PLACEHOLDER] Next wants doing: the third stone.');
+    seen.add('onward-01.hollis-promise');
+    expect(line()).toBe('[T2-PLACEHOLDER] Next wants doing: the Span, and whatever keeps its toll.');
+    seen.add('onward-01.the-span');
+    expect(line()).toBe('[T2-PLACEHOLDER] Next wants doing: the walk home.');
+    seen.add('onward-01.the-return');
+    expect(line()).toBe('[T2-PLACEHOLDER] Next wants doing: the next chapter. The page turns.');
+  });
+
+  it('lists every seen beat of the whole arc, not just the first three', () => {
+    const seen = new Set(['onward-01.dark-answers', 'onward-01.the-span']);
+    expect(onwardOpenPage((id) => seen.has(id)).entries).toEqual([
+      'The Dark Answers',
+      '[T2-PLACEHOLDER] The Span and the Toll-Warden',
+    ]);
+  });
+
+  it('a completed arc closes the chapter heading', () => {
+    expect(onwardOpenPage(() => false).heading).toBe('Chapter One — The Road That Waits');
+    expect(onwardOpenPage(() => false, { arcComplete: true }).heading).toBe(
+      '[T2-PLACEHOLDER] Chapter One — closed. The next page is open.',
+    );
+  });
 });
