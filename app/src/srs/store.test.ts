@@ -406,6 +406,37 @@ describe('SaveStore — hp coercion (crucible V1-2)', () => {
     await s.ready();
     expect(s.get().hp).toBe(20); // maxHpForLevel(3), not the old flat 16
   });
+
+  // 2.11 — SaveStore.sanitize used to coerce hp only; embers passed through untouched, so a
+  // hand-edited "embers":"abc" became NaN and survived every clamp. coerceEmbers mirrors
+  // coerceHp's shape (finite -> clamp to [0, ceiling], else -> fallback) but with a DIFFERENT
+  // fallback: a corrupt/missing count coerces to 0, not the full pool (ruling: a corrupt ember
+  // count never grants embers, since they regenerate at the Hearth) — unlike hp, which falls
+  // back to the max. The ceiling is level-keyed via emberMaxForLevel (rest/embers.ts's own
+  // seam), the same way coerceHp's ceiling is keyed via maxHpForLevel.
+  it('sanitizes embers on load: clamp finite values to the level ceiling, zero out corrupt/missing ones', async () => {
+    const cases: Array<[unknown, number]> = [
+      ['abc', 0], // non-numeric string -> never grants embers
+      [-3, 0], // negative clamps up to 0
+      [1e9, 2], // absurdly large clamps down to emberMaxForLevel(1) = 2 (no level seeded)
+      [undefined, 0], // missing -> 0, NOT a full pool
+    ];
+    for (const [embers, expected] of cases) {
+      const b = new FakeBridge();
+      b.seed('save.json', { embers });
+      const s = new SaveStore(b);
+      await s.ready();
+      expect(s.get().embers, `embers for input ${JSON.stringify(embers)}`).toBe(expected);
+    }
+  });
+
+  it("an L3 save's embers clamp to that level's OWN ceiling, not the flat L1 default of 2", async () => {
+    const b = new FakeBridge();
+    b.seed('save.json', { embers: 999, level: 3 });
+    const s = new SaveStore(b);
+    await s.ready();
+    expect(s.get().embers).toBe(3); // emberMaxForLevel(3), not emberMaxForLevel(1)'s 2
+  });
 });
 
 describe('SettingsStore', () => {
