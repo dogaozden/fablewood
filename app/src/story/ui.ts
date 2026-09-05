@@ -5,6 +5,7 @@
  * Classes are prefixed fw-story-* / fw-desk-* so e2e can target them unambiguously.
  */
 import type { StoryBeat } from '../game/contracts';
+import { PLACEHOLDER } from './beats';
 
 let stylesDone = false;
 function ensureStyles(): void {
@@ -156,7 +157,7 @@ export function openDeskUi(model: DeskModel, opts?: { auto?: boolean }): Promise
         '',
         ...(model.onward.entries.length ? model.onward.entries.map((t) => `· ${t}`) : []),
         '',
-        ...(model.roads.length ? ['The map, on the wall:', ...model.roads.map((r) => `  — ${r}`), ''] : []),
+        ...(model.roads.length ? [`${PLACEHOLDER} The map, on the wall:`, ...model.roads.map((r) => `  — ${r}`), ''] : []),
         model.onward.clerkLine,
       ];
       body.textContent = lines.join('\n');
