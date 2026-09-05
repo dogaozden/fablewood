@@ -6,11 +6,13 @@
  * instead of registered as a Phaser texture.
  *
  * Gate-reviewed (all six axes ≥4, 2 iterations): docs/art-reviews/item-icons-v1.md (first 14
- * icons — draughts/tools/trinkets/relic families) and docs/art-reviews/item-icons-relics.md
+ * icons — draughts/tools/trinkets/relic families), docs/art-reviews/item-icons-relics.md
  * (Wave 9 Ch. IX: 4 new relics + 2 new wares, plus the Warden Signet re-scored on the
- * parchment pane per the in-engine value law).
- * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png and
- * docs/art-reviews/item-icons-relics/*.json + *-iter{1,2}.png (+ in-engine pane screenshots).
+ * parchment pane per the in-engine value law), and docs/art-reviews/second-wick-v2.md (W10 2.6:
+ * `secondWick` redesigned from a rounded acorn-read silhouette to a twin-flame candle-stub).
+ * Grid sources + contact sheets: docs/art-reviews/item-icons-v1/*.json + *-iter{1,2}.png,
+ * docs/art-reviews/item-icons-relics/*.json + *-iter{1,2}.png, and
+ * docs/art-reviews/second-wick-v2/*.json + *-iter{1,2}*.png (+ in-engine pane screenshots).
  */
 import { PAL_CHAR } from '../art/palette';
 
@@ -342,20 +344,25 @@ const marginLamp = [
   '................',
 ] as const;
 
+// W10 2.6 gate (docs/art-reviews/second-wick-v2.md): the shipped v1 grid's rounded
+// double-lobe body + pinched waist + tiny top stem/ember read as an acorn (the author's veto
+// from play). Redesigned to a flat-topped, straight-sided candle stub with two separate
+// wicks and flames side by side, so "second wick" reads literally — one candle-stub,
+// two lit wicks — instead of a nut.
 const secondWick = [
-  '................',
-  '.....xttttx.....',
-  '....xtTTTTtx....',
-  '....xtTTTTtx....',
-  '.....xxssxx.....',
-  '....xtTTTTtx....',
-  '....xtTTTTtx....',
-  '.....xttttx.....',
-  '......xTTx......',
-  '.......xx.......',
-  '........e.......',
-  '................',
-  '................',
+  '....G......G....',
+  '....A......A....',
+  '...eEe....eEe...',
+  '....KK....KK....',
+  '..xxxxxxxxxxxx..',
+  '...xttTTTTkkx...',
+  '..xttTTTTTkkKx..',
+  '..xttTTTTTkkKx..',
+  '..xttTTTTTkkKx..',
+  '..xttTTTTTkkKx..',
+  '..xttTTTTTkkKx..',
+  '...xkkKKKKkkx...',
+  '..xxxxxxxxxxxx..',
   '................',
   '................',
   '................',
