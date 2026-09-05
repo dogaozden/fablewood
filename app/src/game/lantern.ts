@@ -7,6 +7,8 @@
  * LANTERN_REDRAW_SALT and an exclusion list.
  */
 import { services } from './contracts';
+import { mulberry32, layoutSeed } from './combat/rng';
+import { seededShuffle } from './recency';
 
 /** The guarded read shared verbatim by all five spend sites (DungeonScene's loot offer,
  *  HamletScene's Wellspring round, CombatScene's two cast sites + Death's Door): a
@@ -32,6 +34,30 @@ export function planRedraw(shownFactIds: string[], drawnPool: string[]): RedrawP
 /** Death's-Door replacement-draw salt — added to the round seed so the re-pick is
  *  deterministic but distinct from the round's own draw. */
 export const LANTERN_REDRAW_SALT = 7351;
+
+/**
+ * 2.16 — Death's Door's LAST-resort tier (CombatScene.ddDraw), reached only when the SRS
+ * due/fresh services yield nothing usable: a seeded shuffle over the caller's (already
+ * eligibility-filtered) candidate pool, minus excludeIds. This is the seam that makes this
+ * file's own header law ("deterministic but distinct from the round's original draw")
+ * checkable at all: `ddFallbackPick(roundSeed, ids)` is the round's own draw,
+ * `ddFallbackPick(roundSeed + LANTERN_REDRAW_SALT, ids, [shownId])` is the redraw, and the two
+ * must (a) differ over a multi-fact pool, (b) never return an excluded id, and (c) reproduce
+ * identically given the same seed twice.
+ *
+ * Pulled out of ddDraw (a private, async, Phaser-Scene-bound CombatScene method) rather than
+ * tested in place: CombatScene.ts imports Phaser at module scope, which throws
+ * `window is not defined` under vitest's node environment the instant the file is imported —
+ * nothing in that class, pure or not, is reachable from a test. `eligibleFactIds` (the
+ * services.amendments-backed eligibility filter ddDraw applies before this tier) stays a
+ * CombatScene method and is passed in already-resolved, since it's a guarded service call, not
+ * part of the seed-reuse law itself.
+ */
+export function ddFallbackPick(seed: number, eligibleIds: readonly string[], excludeIds: readonly string[] = []): string | null {
+  const exclude = new Set(excludeIds);
+  const pool = eligibleIds.filter((id) => !exclude.has(id));
+  return seededShuffle(pool, mulberry32(layoutSeed('deathsdoor-fallback', seed)))[0] ?? null;
+}
 
 /** Shown (via EncounterRequest.notice) when a re-draw finds no alternative memory. */
 export const FATE_HOLDS_LINE = 'The lantern flickers — fate holds this memory fast. Your light is not spent.';

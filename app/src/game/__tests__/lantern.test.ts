@@ -6,6 +6,7 @@ import {
   heldLanternLight,
   spendLanternLight,
   WICK_CATCH_LINE,
+  ddFallbackPick,
 } from '../lantern';
 import { services, type SaveData } from '../contracts';
 
@@ -51,6 +52,54 @@ describe('planRedraw (Ch. IV re-draw spend)', () => {
   it('salt and copy are stable exports', () => {
     expect(LANTERN_REDRAW_SALT).toBe(7351);
     expect(FATE_HOLDS_LINE).toContain('fate holds');
+  });
+});
+
+// 2.16 — the seed-reuse law itself (app/src/game/lantern.ts:6-7's file header): Death's Door's
+// redraw must be deterministic but DISTINCT from the round's own draw. Until now only the salt
+// VALUE was pinned (the test above) — nothing asserted that reusing the bare roundSeed for both
+// calls would actually be caught. ddFallbackPick is CombatScene.ddDraw's own last-resort tier,
+// extracted so this is checkable at all (see lantern.ts's doc comment on why).
+describe('ddFallbackPick (Ch. IV Death\'s Door — the seed-reuse law, 2.16)', () => {
+  const POOL = Array.from({ length: 20 }, (_, i) => `fact.${i}`);
+
+  it('is a pure function of (seed, ids, exclude): the same seed twice gives the same pick', () => {
+    for (const seed of [0, 1, 7, 42, 1000]) {
+      const a = ddFallbackPick(seed, POOL);
+      const b = ddFallbackPick(seed, POOL);
+      expect(b).toBe(a);
+    }
+    // the salted seed is just another seed — reproducible the same way
+    const salted = LANTERN_REDRAW_SALT + 42;
+    expect(ddFallbackPick(salted, POOL)).toBe(ddFallbackPick(salted, POOL));
+  });
+
+  it('over a multi-fact pool, roundSeed and roundSeed+LANTERN_REDRAW_SALT differ on (at least) a strong majority of seeds — proof the salt actually moves the pick, not a same-seed accident', () => {
+    const seeds = Array.from({ length: 40 }, (_, i) => i * 97 + 3);
+    const differing = seeds.filter((seed) => ddFallbackPick(seed, POOL) !== ddFallbackPick(seed + LANTERN_REDRAW_SALT, POOL));
+    // With a 20-id pool, two independent seeded picks collide by chance ~5% of the time; a
+    // regression that reused the bare seed for the redraw (this ticket's own named failure
+    // mode) would make EVERY pair collide (0 differing), so this threshold has a wide margin
+    // on both sides without hard-coding today's exact PRNG output for one arbitrary seed.
+    expect(differing.length).toBeGreaterThanOrEqual(Math.floor(seeds.length * 0.8));
+  });
+
+  it('never returns an excluded id, across both the bare draw and the salted redraw', () => {
+    const excludeIds = ['fact.3', 'fact.11'];
+    for (const seed of [0, 1, 7, 42, 1000]) {
+      expect(excludeIds).not.toContain(ddFallbackPick(seed, POOL, excludeIds));
+      expect(excludeIds).not.toContain(ddFallbackPick(seed + LANTERN_REDRAW_SALT, POOL, excludeIds));
+    }
+  });
+
+  it('an empty pool (everything excluded) returns null, never throws', () => {
+    expect(ddFallbackPick(42, ['fact.0', 'fact.1'], ['fact.0', 'fact.1'])).toBeNull();
+    expect(ddFallbackPick(42, [])).toBeNull();
+  });
+
+  it('a single-fact pool always returns that fact (Death\'s Door\'s own doc: "whose pool is a single fact") when not excluded, null when it is', () => {
+    expect(ddFallbackPick(42, ['fact.only'])).toBe('fact.only');
+    expect(ddFallbackPick(42, ['fact.only'], ['fact.only'])).toBeNull();
   });
 });
 
