@@ -23,5 +23,9 @@ playwright/.cache/
 # NOTE: screenshots/ is intentionally NOT ignored — it is committed evidence.
 node_modules
 
+# secreg lecture-ingestion LLM batch-response cache (resumability only, not
+# canon) — see secreg/pipelines/ingest_lectures.py
+staging/lecture-map/
+
 # harness agent worktrees (session workspaces — never commit their contents to master)
 .claude/worktrees/
