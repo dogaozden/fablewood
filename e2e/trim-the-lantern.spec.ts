@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, canvasClick, readState, waitForState } from './helpers';
+import { TRIM_HEAL_CORRECT } from '../app/src/game/rest/embers';
 
 const EV = 'screenshots';
 
@@ -24,6 +25,26 @@ type Save = {
 
 type TrimDebug = { lastQuality: number | null; embersSpent: number };
 type Rect = { top: number; bottom: number; left: number; right: number };
+type SrsEntry = { box: number; next_due: number; history: unknown[] };
+
+// A known-good, verified-correct free_recall fact — nights-ledger.spec.ts's own STABILIZE_FACTS
+// idiom (the answer scores overlap 1.0 / pass against packs/vc-law/pack.json's real rubric,
+// replicating judge/stub.ts's scoring algorithm; also confirmed free_recall-ONLY there, so
+// trimDraw's own `kinds: ['free_recall']` filter can only ever land on this renderer for it).
+const CORRECT_FACT_ID = 'vc.econ.liqpref.preference-plus-participation';
+const CORRECT_ANSWER = 'Preference and participation.';
+
+/** Seed exactly one known, overdue, free_recall-only fact so trimDraw's due() (the only
+ *  "has a record" candidate in srs.json) deterministically hands it to the drill, regardless
+ *  of the scene's own seed — same PUT-wholesale idiom as nights-ledger.spec.ts's
+ *  seedStabilizeFacts / lantern-light.spec.ts's seedDoorFacts. */
+async function seedCorrectFact(page: Page): Promise<void> {
+  const facts: Record<string, SrsEntry> = {
+    [CORRECT_FACT_ID]: { box: 1, next_due: Date.now() - 500_000, history: [] },
+  };
+  const res = await page.request.put('/api/state/srs.json', { data: { version: 1, facts } });
+  expect(res.ok(), 'seeded the one known-correct fact').toBe(true);
+}
 
 async function restoreSave(page: Page, save: Save | null): Promise<void> {
   const data: Save = save ?? { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' };
@@ -191,6 +212,50 @@ test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
       await page.screenshot({ path: `${EV}/e2e-trim-lantern-miss.png` });
     } finally {
       await restoreSave(page, beforeSave);
+    }
+  });
+
+  test('a real drill spends the Ember and heals +4 on a CORRECT answer (TRIM_HEAL_CORRECT)', async ({ page }) => {
+    test.setTimeout(60_000);
+    const beforeSave = await readState<Save>(page, 'save.json');
+    const beforeSrs = await readState<{ version: number; facts: Record<string, SrsEntry> }>(page, 'srs.json');
+
+    try {
+      await page.request.put('/api/state/save.json', {
+        data: { scene: 'vaults', hp: 10, embers: 2, streak: 0, lastPlayed: '' },
+      });
+      await seedCorrectFact(page);
+
+      // Real pack (no dev=1) — chain.spec.ts's own vaults precedent confirms this e2e server
+      // has real packs installed, so services.draw's due()/fresh() ladder has real content.
+      await page.goto('/?scene=vaults&seed=7');
+      await waitReady(page, 'vaults');
+
+      await clickTrimButton(page);
+
+      await page.locator('.fw-overlay').waitFor({ state: 'visible', timeout: 15_000 });
+      await page.waitForTimeout(450); // past overlay.ts's 400ms answer guard (shared idiom)
+      await page.locator('.fw-overlay .fw-textarea').fill(CORRECT_ANSWER);
+      await page.getByRole('button', { name: 'Cast' }).click();
+
+      const onward = page.getByRole('button', { name: 'Onward ▸' });
+      await onward.waitFor({ state: 'visible', timeout: 15_000 });
+      await onward.click();
+
+      await expect
+        .poll(async () => (await trimDebugRead(page))?.lastQuality, { timeout: 10_000 })
+        .toBe(1);
+
+      // Wait for the heal to round-trip to disk before reading the full shape (task-8-red-
+      // rootcause.md idiom, mirrored from the MISS test above: a bare read here can race the
+      // save's GET+PUT and catch a pre-heal hp).
+      const after = await waitForState<Save>(page, 'save.json', (s) => s?.hp === 10 + TRIM_HEAL_CORRECT);
+      expect(after?.embers, 'the Ember stays spent — a correct answer is not a refund').toBe(1);
+      expect(after?.hp, 'a correct answer heals by exactly TRIM_HEAL_CORRECT (+4)').toBe(10 + TRIM_HEAL_CORRECT);
+      expect(await trimDebugRead(page)).toEqual({ lastQuality: 1, embersSpent: 1 });
+    } finally {
+      await restoreSave(page, beforeSave);
+      await page.request.put('/api/state/srs.json', { data: beforeSrs ?? { version: 1, facts: {} } });
     }
   });
 });
