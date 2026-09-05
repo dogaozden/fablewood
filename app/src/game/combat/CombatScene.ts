@@ -28,6 +28,7 @@ import {
 } from './grid';
 import { buildInitiative, nextInOrder } from './initiative';
 import { resolveAction, isFlanked, applyAmendedMercy, stripPartyHarmOps, AMENDED_MERCY_LINE } from './damage';
+import { resolveSpellGeometry } from './targeting';
 import {
   applyBranch, reduceShields, bossDefeated, wardenAbsorbs, wardenObjects, wardenMove, wardenMoveLabel,
   shieldStripDelta, OBJECTION_BANNER, OBJECTION_RIPOSTE, type WardenMove,
@@ -61,7 +62,7 @@ import { pickKeepsake } from '../inventory/keepsake';
 import { itemById } from '../../inventory/catalog';
 import { openCombatSatchelPane } from '../../inventory/ui/combatSatchelPane';
 import {
-  SPELLBOOK, resolveSpell, spellsForArt, qualitySlot, type SpellDef, type SpellId, type BoardOp, type ResolveSpellOpts,
+  SPELLBOOK, resolveSpell, spellsForArt, type SpellDef, type SpellId, type BoardOp, type ResolveSpellOpts,
 } from './spells';
 import {
   ARTS, computeRank, GLOW_CAP, glowGain, glowSpend, canOverglow, dueRenewalSurge, seenDueIds, weldBonus, riderBonus,
@@ -2462,59 +2463,15 @@ export class CombatScene extends Phaser.Scene {
   /** Resolves a spell's board geometry (primary/aoe target ids + push direction) from its
    *  OWN shape/range (which may differ from its Art's T1 anchor action, e.g. Snare-Knot is
    *  range-3 single where Weave is range-2 cross) — the "caller resolves ids, board-aware"
-   *  half of resolveSpell's contract (spells.ts's ResolveSpellOpts doc). */
+   *  half of resolveSpell's contract (spells.ts's ResolveSpellOpts doc). The logic itself now
+   *  lives in targeting.ts's resolveSpellGeometry (2.2 — pulled out so it's unit-testable:
+   *  this file imports Phaser at module scope, which throws under vitest's node environment,
+   *  so nothing in this class was ever reachable from a test); this stays a thin delegate so
+   *  every existing call site keeps working unchanged. */
   private spellGeometry(
     unit: UnitState, spell: SpellDef, tile: Coord, quality: Quality,
   ): { primaryId?: string; aoeIds: string[]; dir?: Dir } {
-    switch (spell.shape) {
-      case 'single': {
-        const t = this.enemyAt(tile);
-        return { primaryId: t?.id, aoeIds: [] };
-      }
-      case 'ally': {
-        const t = this.unitAt(tile);
-        return { primaryId: t && t.team === 'party' ? t.id : undefined, aoeIds: [] };
-      }
-      case 'cross': {
-        const primary = this.enemyAt(tile);
-        const aoeIds: string[] = [];
-        for (const co of crossTiles(tile)) {
-          if (co.c === tile.c && co.r === tile.r) continue;
-          const e = this.enemyAt(co);
-          if (e) aoeIds.push(e.id);
-        }
-        return { primaryId: primary?.id, aoeIds };
-      }
-      case 'line': {
-        const dir = this.dirTo(unit, tile) ?? undefined;
-        if (!dir) return { aoeIds: [] };
-        const depth = spell.effects[qualitySlot(quality)].lineDepth;
-        let primaryId: string | undefined;
-        const aoeIds: string[] = [];
-        for (const [i, co] of lineTiles(unit, dir, depth).entries()) {
-          const e = this.enemyAt(co);
-          if (e) { if (i === 0) primaryId = e.id; else aoeIds.push(e.id); }
-          // §4.4 — mist (and walls) block Ritecraft lines, same as sequence's own handling.
-          if (blocksSight(this.tileTypeOf(co))) break;
-        }
-        return { primaryId, aoeIds, dir };
-      }
-      case 'burst1': {
-        const aoeIds: string[] = [];
-        for (const co of crossTiles(unit)) {
-          if (co.c === unit.c && co.r === unit.r) continue;
-          const e = this.enemyAt(co);
-          if (e) aoeIds.push(e.id);
-        }
-        return { aoeIds };
-      }
-      case 'self':
-        return { aoeIds: [] };
-      default: {
-        const exhaustive: never = spell.shape;
-        return exhaustive;
-      }
-    }
+    return resolveSpellGeometry(unit, spell, tile, quality, this.units, this.layout.tiles);
   }
 
   /**
