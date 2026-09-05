@@ -25,3 +25,10 @@ node_modules
 
 # harness agent worktrees (session workspaces — never commit their contents to master)
 .claude/worktrees/
+
+# secreg_from_atlas.py run scratch — raw LLM caches and intermediate stages,
+# never the deliverable (report.md/facts.staging.json/judged.json are; see
+# task-1a review fix round 1, 2026-09-05).
+staging/secreg/*/llm-cache/
+staging/secreg/*/candidates.json
+staging/secreg/*/verified.json
