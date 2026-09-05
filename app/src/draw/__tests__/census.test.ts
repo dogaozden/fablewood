@@ -102,14 +102,54 @@ const SAFE_METHODS = ['ready', 'indexReady', 'allFactIds', 'sourceOf', 'factOf',
  *  containing a literal `//` (e.g. `/\/\//`) would still be mis-read as starting a line
  *  comment — checked by hand that nothing in this scan's real universe does that near a
  *  services.draw mention. A whole-tree text scan trades that theoretical edge case for not
- *  needing a real TS parser; documented rather than hidden. */
+ *  needing a real TS parser; documented rather than hidden.
+ *
+ *  Fix-round-2 (2.5): a single left-to-right scan tracking one lexical mode at a time (line
+ *  comment / block comment / template / double / single), rather than five independent global
+ *  regex passes. Two independent order-dependent false negatives are why: (a) strings-scanned-
+ *  after-comments let a `//` inside a same-line string (e.g. a URL) start a fake line comment
+ *  that deletes a real call following it on that line; (b) the naive fix of just scanning
+ *  strings first instead breaks the moment any comment anywhere earlier in the file has an ODD
+ *  number of unescaped quote characters (a block comment with three apostrophes in its prose,
+ *  e.g. "provider's ... beat's ... register's", is enough) — the parity shift cascades through
+ *  every later legitimate quoted string and can swallow real code many lines on, which is
+ *  exactly what happened to story/register.ts's two services.draw calls when this was first
+ *  tried as a plain reorder. A real scanner can't cross-contaminate: while inside a comment's
+ *  body we are never looking for a quote, and while inside a string we are never looking for
+ *  `//`/`/*`, so neither span can be mis-parsed as the other. */
 function stripCode(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '')
-    .replace(/`(?:\\.|[^`\\])*`/g, '``')
-    .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\])*'/g, "''");
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    const c2 = src[i + 1];
+    if (c === '/' && c2 === '/') {
+      i += 2;
+      while (i < n && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && c2 === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+      i += 2; // consumes the closing */ (or runs off the end if unterminated)
+      continue;
+    }
+    if (c === '`' || c === '"' || c === "'") {
+      const quote = c;
+      i++;
+      while (i < n && src[i] !== quote) {
+        if (src[i] === '\\') i++; // skip the escaped character too
+        i++;
+      }
+      i++; // consumes the closing quote (or runs off the end if unterminated)
+      out += quote + quote;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 export type DrawOccurrenceKind = 'call' | 'safe' | 'suspicious';
@@ -236,6 +276,14 @@ describe('findDrawOccurrences — the scanner itself, against synthetic sources 
   it('classifies the register.ts-style definition (services.draw = {...}) as suspicious (bare, no method), never a call', () => {
     const occ = findDrawOccurrences('services.draw = {\n  due(opts) { return drawDue(index, deps, opts); },\n};');
     expect(occ).toEqual([{ kind: 'suspicious', method: null }]);
+  });
+
+  it('a string containing "//" earlier on the line does not eat a real call that follows it', () => {
+    const occ = findDrawOccurrences(`const x = "http://y"; services.draw.due();`);
+    expect(
+      occ,
+      'the "//" inside the string literal must not be read as a line-comment start that deletes the real call after it',
+    ).toEqual([{ kind: 'call', method: 'due' }]);
   });
 });
 
