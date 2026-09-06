@@ -17,7 +17,7 @@ The battery every wave runs before its final review and merge. Distilled from Wa
 - **Greens auto-chain; any red STOPS the battery** — no further legs, full stop-state report.
 - **Three-prong flake policy** — a red may be called flake ONLY with all three: (1) 3/3 green in isolation reruns, (2) a traced non-wave mechanism, (3) documented pre-wave history. Same-test-red-in-both-legs is NEVER flake. A deterministic red gets root-caused (W2 precedent: an Opus debug dispatch with reproduce-capture + a control-arm run on master), never a timeout bump on vibes.
 - **Snapshot `test-results/` before isolation reruns** (the reruns overwrite the evidence of the original failure).
-- **`git checkout -- screenshots/` after every e2e leg** (committed reference screenshots are curated deliberately, at pin-creation or certification — not battery churn).
+- **`git checkout -- screenshots/ docs/overnight/shots/` after every e2e leg** (`e2e/onward-arc1.spec.ts` writes its reference shots under `docs/overnight/shots/`) (committed reference screenshots are curated deliberately, at pin-creation or certification — not battery churn).
 - **Serialized batteries across concurrent waves** — one battery anywhere at a time (ports, state dirs, machine load).
 - **No silent caps:** every leg's exact counts and timings go in the report; anything skipped is listed as skipped.
 
