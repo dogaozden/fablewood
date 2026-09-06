@@ -6,6 +6,13 @@ import { defineConfig, devices } from '@playwright/test';
 // a live save's scene pointer). STATE_DIR is redirected to a gitignored dir and JUDGE_MODE=stub
 // makes the Clerk deterministic. Serial (workers:1) so specs that write shared state *.json
 // don't race, and retries:0 so the flake gate is honest.
+//
+// PACKS_DIR (R31): the main specs assume exactly one installed pack, vc-law — a real second
+// pack in packs/ (e.g. secreg) makes them see two and fail (chain's packId, dashboard's
+// domain-count locator, etc). e2e/fixtures/packs-vc-law/vc-law is a committed symlink to
+// packs/vc-law (no duplicated content), so certifying the vc-law experience here is
+// independent of whatever else the author has installed. Multi-pack behaviour is certified
+// separately by the interleave rig and playwright.real-packs.config.ts.
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
@@ -18,7 +25,7 @@ export default defineConfig({
     url: 'http://localhost:5175',
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { STATE_DIR: '.state-e2e', JUDGE_MODE: 'stub' },
+    env: { PACKS_DIR: 'e2e/fixtures/packs-vc-law', STATE_DIR: '.state-e2e', JUDGE_MODE: 'stub' },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });

@@ -45,8 +45,18 @@ export function listPacks(dir: string): PackEntry[] {
   }
   const packs: PackEntry[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
     const packRoot = path.join(dir, entry.name);
+    if (!entry.isDirectory()) {
+      // A symlinked pack dir (e2e/fixtures/packs-vc-law/vc-law -> packs/vc-law, R31) reports
+      // isDirectory() false — that's the raw entry type, not the resolved target. Follow it;
+      // a dangling symlink's stat throws, so skip it rather than propagating.
+      if (!entry.isSymbolicLink()) continue;
+      try {
+        if (!fs.statSync(packRoot).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+    }
     const file = path.join(packRoot, 'pack.json');
     try {
       const pack = JSON.parse(fs.readFileSync(file, 'utf8'));
