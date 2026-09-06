@@ -15,6 +15,7 @@ state/
 .state-e2e-amendments/
 .state-e2e-dragdrop/
 .state-e2e-interleave/
+.state-e2e-real-packs/
 test-results/
 playwright-report/
 playwright/.cache/
@@ -36,3 +37,4 @@ staging/lecture-map/
 staging/secreg/*/llm-cache/
 staging/secreg/*/candidates.json
 staging/secreg/*/verified.json
+staging/secreg/*/cluster-cache/
