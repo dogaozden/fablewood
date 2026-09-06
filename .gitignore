@@ -38,3 +38,6 @@ staging/secreg/*/llm-cache/
 staging/secreg/*/candidates.json
 staging/secreg/*/verified.json
 staging/secreg/*/cluster-cache/
+
+# SDD workspaces (ledgers are rescued into docs/superpowers/ledgers/ at close-out)
+.superpowers/
