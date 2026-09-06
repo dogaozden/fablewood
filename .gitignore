@@ -33,3 +33,4 @@ node_modules
 staging/secreg/*/llm-cache/
 staging/secreg/*/candidates.json
 staging/secreg/*/verified.json
+staging/secreg/*/cluster-cache/
