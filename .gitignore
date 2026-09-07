@@ -41,3 +41,7 @@ staging/secreg/*/cluster-cache/
 
 # SDD workspaces (ledgers are rescued into docs/superpowers/ledgers/ at close-out)
 .superpowers/
+
+# Local Workshop working ledgers; portable publications are tracked separately.
+.workshop/
+.workshop-*/
