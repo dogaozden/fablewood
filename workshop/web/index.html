@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f3eee4" />
+    <title>Knowledge Workshop · Fablewood</title>
+    <link rel="stylesheet" href="/workshop/workshop.css" />
+    <script src="/workshop/workshop.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#knowledge-list">Skip to knowledge review</a>
+
+    <header class="masthead">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">FW</span>
+        <div>
+          <p class="eyebrow">The Ledger Realms</p>
+          <h1>Knowledge Workshop</h1>
+        </div>
+      </div>
+      <div class="masthead-actions">
+        <span class="connection-state" id="connection-state"><span class="status-dot" aria-hidden="true"></span>Connecting</span>
+        <a class="quiet-link" href="/app/">Open Living Outline <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="welcome-row" aria-labelledby="workshop-heading">
+        <div>
+          <p class="eyebrow">Publication desk</p>
+          <h2 id="workshop-heading">Shape source material into durable knowledge.</h2>
+          <p class="lede">Import, inspect, and review every claim before it reaches the outline or the game.</p>
+        </div>
+        <button class="button button-secondary" id="refresh-button" type="button">
+          <span aria-hidden="true">↻</span> Refresh workshop
+        </button>
+      </section>
+
+      <section class="status-ribbon" aria-label="Workshop status">
+        <article class="status-card status-review">
+          <span class="status-icon" aria-hidden="true">◐</span>
+          <div><strong id="count-review">0</strong><span>Needs review</span></div>
+        </article>
+        <article class="status-card status-failure">
+          <span class="status-icon" aria-hidden="true">!</span>
+          <div><strong id="count-failure">0</strong><span>Needs attention</span></div>
+        </article>
+        <article class="status-card status-ready">
+          <span class="status-icon" aria-hidden="true">✓</span>
+          <div><strong id="count-ready">0</strong><span>Ready to publish</span></div>
+        </article>
+        <article class="status-card status-published">
+          <span class="status-icon" aria-hidden="true">✦</span>
+          <div><strong id="count-published">0</strong><span>Published</span></div>
+        </article>
+      </section>
+
+      <div class="workbench">
+        <aside class="intake-column" aria-label="Intake and workshop activity">
+          <section class="panel import-panel" aria-labelledby="import-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Intake</p>
+                <h3 id="import-heading">Bring in a source</h3>
+              </div>
+              <span class="step-token">01</span>
+            </div>
+
+            <form id="import-form" class="stack-form">
+              <label for="catalog-source">Workshop catalog</label>
+              <select id="catalog-source" name="catalog_key">
+                <option value="">Choose a registered source…</option>
+              </select>
+              <p class="field-divider"><span>or select a local file</span></p>
+              <label for="source-path">Local path</label>
+              <input id="source-path" name="path" type="text" autocomplete="off" placeholder="/path/to/source" />
+
+              <details class="optional-fields">
+                <summary>Source details <span>Optional</span></summary>
+                <div class="optional-fields-body">
+                  <label for="source-title">Display title</label>
+                  <input id="source-title" name="title" type="text" autocomplete="off" />
+                  <label for="source-kind">Source kind</label>
+                  <select id="source-kind" name="kind">
+                    <option value="">Use catalog or file kind</option>
+                    <option value="statute">Statute</option>
+                    <option value="case">Case</option>
+                    <option value="lecture">Lecture</option>
+                    <option value="book">Book</option>
+                    <option value="outline">Outline</option>
+                    <option value="observation">Observation</option>
+                    <option value="document">Document</option>
+                  </select>
+                  <label for="source-node">Outline destination</label>
+                  <select id="source-node" name="node_id">
+                    <option value="">Assign during review</option>
+                  </select>
+                </div>
+              </details>
+
+              <p class="form-error" id="import-error" role="alert" hidden></p>
+              <button class="button button-primary button-wide" type="submit">Import and prepare</button>
+            </form>
+          </section>
+
+          <section class="panel activity-panel" aria-labelledby="activity-heading">
+            <div class="section-heading-row">
+              <div>
+                <p class="eyebrow">Workbench</p>
+                <h3 id="activity-heading">Sources &amp; activity</h3>
+              </div>
+              <span class="count-token" id="source-total">0</span>
+            </div>
+            <div id="job-list" class="job-list" aria-live="polite"></div>
+            <div id="source-list" class="source-list"></div>
+          </section>
+
+          <section class="panel note-panel" aria-labelledby="note-heading">
+            <div class="panel-heading compact-heading">
+              <div>
+                <p class="eyebrow">Personal layer</p>
+                <h3 id="note-heading">Add an observation</h3>
+              </div>
+              <span class="step-token">✎</span>
+            </div>
+            <p class="panel-intro">Keep your own thinking beside the sources, clearly attributed and separate from external authority.</p>
+            <form id="note-form" class="stack-form">
+              <label for="note-text">Observation</label>
+              <textarea id="note-text" name="text" rows="4" placeholder="Record a connection, question, or interpretation…" required></textarea>
+              <div class="split-fields">
+                <div>
+                  <label for="note-author">Author</label>
+                  <input id="note-author" name="creator" value="Local editor" required />
+                </div>
+                <div>
+                  <label for="note-layer">Layer</label>
+                  <input id="note-layer" name="layer_id" value="personal" required />
+                </div>
+              </div>
+              <label for="note-node">Outline destination</label>
+              <select id="note-node" name="node_id" required>
+                <option value="">Choose a destination…</option>
+              </select>
+              <p class="form-error" id="note-error" role="alert" hidden></p>
+              <button class="button button-secondary button-wide" type="submit">Save personal draft</button>
+            </form>
+            <div id="note-list" class="note-list"></div>
+          </section>
+        </aside>
+
+        <section class="review-column panel" aria-labelledby="knowledge-heading">
+          <div class="review-header">
+            <div>
+              <p class="eyebrow">Editorial review</p>
+              <h3 id="knowledge-heading">Extracted knowledge</h3>
+            </div>
+            <span class="step-token">02</span>
+          </div>
+
+          <div class="review-controls">
+            <div class="filter-tabs" role="group" aria-label="Filter extracted knowledge">
+              <button class="filter-tab is-active" type="button" data-filter="all">All <span id="filter-all-count">0</span></button>
+              <button class="filter-tab" type="button" data-filter="pending">Review <span id="filter-pending-count">0</span></button>
+              <button class="filter-tab" type="button" data-filter="approved">Approved <span id="filter-approved-count">0</span></button>
+              <button class="filter-tab" type="button" data-filter="flagged">Flagged <span id="filter-flagged-count">0</span></button>
+            </div>
+            <label class="search-box" for="knowledge-search">
+              <span class="visually-hidden">Search extracted knowledge</span>
+              <span aria-hidden="true">⌕</span>
+              <input id="knowledge-search" type="search" placeholder="Search statements" />
+            </label>
+          </div>
+
+          <div id="knowledge-list" class="knowledge-list" tabindex="-1" aria-live="polite"></div>
+        </section>
+
+        <aside class="inspector-column" id="inspector" aria-label="Evidence inspector">
+          <div class="panel inspector-panel">
+            <div class="inspector-topline">
+              <div>
+                <p class="eyebrow">Inspection desk</p>
+                <h3 id="inspector-title" tabindex="-1">Select a statement</h3>
+              </div>
+              <button class="icon-button inspector-close" id="inspector-close" type="button" aria-label="Close inspector">×</button>
+            </div>
+            <div id="inspector-content" class="inspector-content">
+              <div class="empty-state inspector-empty">
+                <span class="empty-glyph" aria-hidden="true">⌘</span>
+                <h4>Evidence stays attached</h4>
+                <p>Choose a statement to inspect its source, exact quote, review history, and relationships.</p>
+              </div>
+            </div>
+          </div>
+
+          <section class="panel publication-panel" aria-labelledby="publication-heading">
+            <div class="panel-heading compact-heading">
+              <div>
+                <p class="eyebrow">Release shelf</p>
+                <h3 id="publication-heading">Publication preview</h3>
+              </div>
+              <span class="step-token">03</span>
+            </div>
+            <p id="publication-summary" class="publication-summary">Nothing is ready to publish yet.</p>
+            <p class="form-error" id="preview-error" role="alert" hidden></p>
+            <dl class="publication-counts">
+              <div><dt>Outline statements</dt><dd id="publish-proposition-count">0</dd></div>
+              <div><dt>Personal notes</dt><dd id="publish-note-count">0</dd></div>
+              <div><dt>Eligible game additions</dt><dd id="publish-game-count">0</dd></div>
+              <div><dt>Excluded from game</dt><dd id="publish-excluded-count">0</dd></div>
+            </dl>
+            <label for="publisher-name">Published by</label>
+            <input id="publisher-name" value="Local editor" />
+            <p class="form-error" id="publish-error" role="alert" hidden></p>
+            <button class="button button-primary button-wide" id="publish-button" type="button">Publish approved work</button>
+            <div id="publication-result" class="publication-result" aria-live="polite"></div>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>
