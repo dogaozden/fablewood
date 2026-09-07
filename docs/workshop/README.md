@@ -4,6 +4,9 @@ The Workshop imports local source material, keeps exact evidence beside proposed
 knowledge, and publishes reviewed content into the Living Outline and an existing
 Fablewood pack. Its working data is separate from game saves.
 
+The verified main session is available at [Workshop](http://127.0.0.1:5416/workshop/)
+and [Living Outline](http://127.0.0.1:5416/app/).
+
 ## Start the integrated app
 
 From the repository root, with the Goal 2 Living Outline changes installed:
