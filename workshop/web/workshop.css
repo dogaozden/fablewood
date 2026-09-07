@@ -265,8 +265,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--teal); box-shado
 .search-box input { min-height: 31px; padding: 5px 7px 5px 0; border: 0; background: transparent; box-shadow: none; font-size: 11px; }
 .search-box input:focus { box-shadow: none; }
 
-.knowledge-list { display: grid; }
-.knowledge-card { position: relative; padding: 17px 20px; border-bottom: 1px solid var(--line-soft); background: rgba(255,253,248,0.55); transition: background 140ms; }
+.knowledge-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.knowledge-card { min-width: 0; position: relative; padding: 17px 20px; border-bottom: 1px solid var(--line-soft); background: rgba(255,253,248,0.55); transition: background 140ms; }
 .knowledge-card:last-child { border-bottom: 0; }
 .knowledge-card:hover, .knowledge-card.is-selected { background: #fffefa; }
 .knowledge-card.is-selected::before { content: ""; position: absolute; top: 12px; bottom: 12px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--teal); }

@@ -242,6 +242,8 @@ try {
   await page.waitForTimeout(50);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, `mobile layout overflowed by ${overflow}px`);
+  const clippedCards = await page.locator(".knowledge-card").evaluateAll(cards => cards.filter(card => card.getBoundingClientRect().right > innerWidth).length);
+  assert.equal(clippedCards, 0, "mobile cards and their inspect controls stay inside the visible panel");
 
   console.log("Workshop browser contract passed: nested assessment receipts, correction proposal/error retention, counterpart navigation, attributed review methods, job start, and 390px layout.");
 } finally {

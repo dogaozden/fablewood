@@ -59,8 +59,11 @@ groups against the actual final publication with zero browser errors. Exact sour
 versions, quotes, cases, corrections, note attribution and search were exercised.
 
 The final direct Workshop screenshots, retry proof and suite results are recorded
-in `workshop-evidence/verification/final-checks.json` and accompanying logs once
-final acceptance is frozen. See `final-review.md` for findings and repairs.
+in `workshop-evidence/verification/final-checks.json` and accompanying logs.
+The orchestrator independently passed54Python tests in24.336s and3consumer tests.
+Actual screenshot inspection caught a mobile card wider than its clipped panel;
+the grid now uses a zero-minimum column and browser assertions check card bounds.
+The corrected desktop/mobile images were personally inspected. See `final-review.md` for findings and repairs.
 
 ## Repository regression baseline
 
