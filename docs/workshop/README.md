@@ -48,6 +48,9 @@ navigation requires the integrated server above. Scratch servers use ports 5400+
    advisory assessments, and review history. Approve or reject with attribution;
    use a proposed correction to preserve the original while refining a claim.
    Relationship suggestions remain tentative until reviewed.
+   **Existing game knowledge** compares likely base-pack matches. Confirm only when
+   the claim and existing fact have the same conditions and scope, or dismiss the
+   suggestion with a reason. The reviewer and method are recorded explicitly.
 4. Capture an observation in the personal-note form. It stays an attributed personal
    layer and never becomes legal authority or a game fact. In the reader, enable a
    newly introduced personal layer from **Layers**; new layers start off so existing
@@ -73,6 +76,16 @@ bytes produce a new source version. Identical propositions gain supporting evide
 without losing IDs or prior reviews. A changed statement receives its own ID and an
 explicit proposed relationship. Unsupported quotes cannot be approved as supported
 knowledge. Contradictory sources remain inspectable together.
+
+Confirmed game matches publish the new source evidence to the outline while reusing
+the existing game fact and schedule. A duplicate already published by the Workshop
+keeps its fact/encounter IDs and history but leaves practice. A changed claim or
+canonical fact requires renewed review. Matching is advisory and can miss paraphrases.
+
+Each new release records its predecessor and artifact checksums. Returning to an
+earlier selection creates a new immutable release; immediate retries reuse the
+current one. A release installed just before an interrupted ledger write can be
+recovered on retry. Historical releases and their source snapshots are never overwritten.
 
 Confirmed supersessions use the game's existing amendment mechanism. The old fact
 and encounter remain addressable, but old practice is retired. The successor becomes

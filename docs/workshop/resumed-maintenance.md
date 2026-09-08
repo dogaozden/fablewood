@@ -78,9 +78,30 @@ deterministic maintenance change. Original CLI failures and review corrections r
 preserved. New manifested releases must not be relocated with the legacy one-time seed
 script: publish in the target storage or make an explicitly derived portable export.
 
-## Remaining integration at this checkpoint
+## Completed main integration
 
-Goal1 main integration and 3D consumer check; Goal2 read-only inspection of the new
-release; final main Workshop code/ledger publication and portable export. Main `.workshop`
-is still untouched at this checkpoint. Engine schema and core behavior have passed;
-this document does not claim the 3D/native consumer or main publication has been updated.
+Engine20dfcdb and publisher18caf79 are integrated as main12025e3/3c33880.
+Goal1 added three actual registered-service 3D consumer checks (9ab35a2); all passed.
+Combined main build+zero-packs passed80 files/1155 tests. Main Workshop63/63 and
+actual portable-pack consumer3/3 passed again after publication.
+
+The two reviewed links were applied through main code, without replacing the ledger.
+Current main publication: `publication.7529d876eb8820b7b84e4899`.
+It preserves all290 fact IDs/309 encounter records, with17 Workshop practice propositions,
+two canonical reuses,20 outline propositions and one attributed note. The portable
+export under `secreg/workshop/published/` passes the real validator.
+
+Main source/jobs/relations/evidence/proposition-review/note records are unchanged except
+publication annotations and the two explicit link decisions. Historical release bytes
+and canonical fact records are unchanged. Adjacent retry leaves the ledger identical.
+The main reader and Workshop were exercised read-only, including source inspectors,
+correction history and mobile layout; no page errors or mutation requests. Main ledger
+SHA-256 before/after browser checks: `a57bee3a94f148a6a22e63d2a3f87c258e3af20dc0bfa2d3ef4e9c4525b0d191`.
+All16 protected original/spec/staging/live/native file hashes remain unchanged.
+
+Final receipts: `workshop-evidence/maintenance/main-publication.json`,
+`main-interface.json`, `main-reader/receipt.json`, and `protected-main-final.json`.
+The complete original-goal audit is `docs/workshop/requirement-audit.md`.
+Main server remains http://127.0.0.1:5416/workshop/ and /app/, owned by Goal1.
+No game-pack installation, live-state write, push, or native-app replacement occurred.
+Goal1's wider visual/native work remains its separate active mission.

@@ -1,41 +1,27 @@
-# Knowledge Workshop — completed mission
+# Knowledge Workshop — accepted mission
 
-Completed 2026-09-07 under PHASEONE[huge] and bandmate, with minimal founder
-involvement. The Workshop and Living Outline are integrated in the main checkout.
-Implementation 8b39222 became main 9f529f6; Goal 2 reader/server became 2f7806c;
-mobile repair and evidence 0ca9898 became f1e26e6. No push was performed.
+The complete original source-to-maintained-knowledge workflow is integrated on main,
+including the resumed duplicate-maintenance and release-history repairs. Current
+publication: `publication.7529d876eb8820b7b84e4899`. The durable main `.workshop`
+contains seven sources, seven completed jobs,41 propositions (20 approved/21 rejected),
+six confirmed corrections, one attributed note, two confirmed game matches and four
+immutable releases. Real subscription-CLI extraction receipts and local canon clip
+verification remain preserved; no additional model call was needed for maintenance.
 
-Main server: http://127.0.0.1:5416/workshop/ and /app/. The populated local
-`.workshop` holds seven sources, seven completed jobs, 41 propositions (20 approved
-and 21 rejected), six confirmed corrections, one attributed note, and three releases.
-Current publication fdd97cd96fc9ec450e6fad3e has 20 outline propositions and one
-note, plus 19 game additions: 290 facts and 309 encounters. Original pack records,
-source evidence, raw receipts, and review history are preserved.
+The main Workshop and Living Outline are available at http://127.0.0.1:5416/workshop/
+and /app/. The publication holds20 outline propositions/one note; its game artifact
+retains290 facts/309 encounters, with17 practice propositions and two canonical reuses.
+Both original and duplicate learning records keep their IDs and independent histories.
 
-Real public subscription extraction and independent assessment, local canon clip
-verification, duplicate imports, process interruption/resume, uncertain/conflicting
-evidence, inspectable corrections, publication, and actual reader consumption were
-exercised. The final main read-only browser check passed with zero errors and zero
-mutation requests. Its ledger hash stayed identical. Desktop and 390px mobile
-screenshots were personally inspected after fixing internal card clipping.
+Main acceptance: Workshop63/63, actual/supersession consumers3/3, combined engine
+build+zero-packs1155/1155, and actual read-only UI/source/mobile checks. This pass also
+ran pipeline153, vc-law validation, classic scheduling2/2 and amendments6/6. Goal2
+independently verified the new release's20 exact quotes, seven frozen source checksums,
+attribution and reader compatibility; Goal1 added three real-service 3D alias cases.
+All16 protected baseline hashes remain unchanged. Historical failures remain archived.
 
-Verification: 54 Workshop Python tests, three actual-pack/supersession consumers,
-mock and actual interface checks, eight independent reader check groups, and real
-lecture playback. Root 1075 tests, build, zero-packs, Node pipeline 152 tests, Python
-pipeline 90 tests, and actual pack validation passed. All 16 recorded protected
-original/spec/staging/live-state hashes remained unchanged.
-
-Legacy browser run: 199 passed and four failed; focused retry passed two and
-reproduced two. Goal 1 owns boss-reforged start-time errors and trim-the-lantern
-missing spend/refund writes. Exact evidence is archived; the suite is not claimed
-all-green. 3D rendering and native game persistence remain Goal 1's work and are
-not implied by this Workshop's real engine consumer proof.
-
-The safe main copy is recorded in workshop-evidence/integration/main-workspace-copy.json;
-final main proof is main-acceptance.json in the same directory. Never overwrite the
-populated main workspace with the obsolete .workshop-demo checkpoint.
-
-See README.md, handoff.md, reliability-verification.md, consumer-verification.md,
-final-review.md, and docs/design/knowledge-publication-contract.md for the durable
-handoff. Goal 3 remains the contract editor. Goal 1 owns main integration and its
-running server; Goal 2 was released to stop its acceptance server after main passed.
+`requirement-audit.md` covers every original requirement. `resumed-maintenance.md`,
+`handoff.md`, `README.md`, and `docs/design/knowledge-publication-contract.md` describe
+operation and boundaries. All reviews are agent-attributed, never founder approval.
+No push, live game-pack installation, live-state migration, or native-app replacement
+was performed. Goal1 retains its separate 3D visual/native mission and server ownership.
