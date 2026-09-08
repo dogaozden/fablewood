@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect } from '@playwright/test';
 import { waitReady, waitForState } from './helpers';
 
@@ -57,7 +58,7 @@ test.describe('Dashboard + Settings', () => {
       data: { scene: 'hamlet', hp: 16, streak: 5, lastPlayed: iso(10 * 60 * 1000) },
     });
 
-    await page.goto('/');
+    await page.goto('/?renderer=classic');
     await waitReady(page);
     await page.getByRole('button', { name: 'The Ledger' }).click();
     await page.locator('.dash').waitFor({ state: 'visible' });
@@ -101,7 +102,7 @@ test.describe('Dashboard + Settings', () => {
       data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
     });
 
-    await page.goto('/');
+    await page.goto('/?renderer=classic');
     await waitReady(page);
     await page.getByRole('button', { name: 'The Ledger' }).click();
     await page.locator('.dash').waitFor({ state: 'visible' });
@@ -119,7 +120,7 @@ test.describe('Dashboard + Settings', () => {
     // this must not assume muted:false the way an untouched fresh run would have.
     await page.request.put('/api/state/settings.json', { data: { muted: false, volume: 100 } });
 
-    await page.goto('/');
+    await page.goto('/?renderer=classic');
     await waitReady(page);
     await page.getByRole('button', { name: /The Study/ }).click();
     await page.locator('.settings').waitFor({ state: 'visible' });
@@ -152,7 +153,7 @@ test.describe('Dashboard + Settings', () => {
     await page.screenshot({ path: `${EV}/e2e-settings.png` });
 
     // Reload: the persisted volume must survive independent of React state.
-    await page.goto('/');
+    await page.goto('/?renderer=classic');
     await waitReady(page);
     await page.getByRole('button', { name: /The Study/ }).click();
     await page.locator('.settings').waitFor({ state: 'visible' });

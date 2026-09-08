@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import {
   waitReady,
@@ -75,7 +76,7 @@ async function seed(page: Page, story: unknown = SEEN_T1, save: unknown = READY_
 }
 
 async function bootToHamlet(page: Page): Promise<void> {
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page);
   await tapKey(page, 'Enter');
   await waitReady(page, 'hamlet');

@@ -163,9 +163,12 @@ async function driveParley(page: Page, phaseNum: number, pick: 'correct' | 'wron
   await cont.click();
 
   if (pick === 'correct') {
-    await expect
-      .poll(() => bannerText(page), { message: `phase ${phaseNum}'s correct branch shatters a shield`, timeout: 20_000 })
-      .toContain('shield shatters');
+    await expectBannerSeen(
+      page,
+      'shield shatters',
+      `phase ${phaseNum}'s correct branch shatters a shield`,
+      20_000,
+    );
   }
   // The post-branch effect lands inside a delayedCall(900); wait for the board to actually be
   // playable (or the fight to be over) rather than sleeping through it.

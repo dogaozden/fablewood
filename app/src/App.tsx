@@ -16,6 +16,10 @@ const PhaserGame = lazy(() =>
   import('./game/PhaserGame').then((m) => ({ default: m.PhaserGame })),
 );
 
+const RealmGame = lazy(() => import('./game3d/RealmGame').then(m => ({ default: m.RealmGame })));
+const gameQuery = new URLSearchParams(location.search);
+const classic = gameQuery.get('renderer') === 'classic' || ['scene', 'overlay', 'sim', 'spec'].some(key => gameQuery.has(key));
+
 // Tone.js lives behind the same lazy boundary — imported dynamically here too (not
 // at module top level) so the shell chunk never carries it. Cached after the first
 // call; every caller below awaits the same resolved module.
@@ -69,7 +73,7 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${!classic && tab === 'game' ? 'realm-shell' : ''}`}>
       <nav className="tabbar">
         <span className="brand">Fablewood</span>
         <div className="tabs">
@@ -95,7 +99,7 @@ export function App() {
       <main className="pane">
         {tab === 'game' && (
           <Suspense fallback={<div className="phaser-root" />}>
-            <PhaserGame />
+            {classic ? <PhaserGame /> : <RealmGame onNavigate={setTab} muted={muted} onToggleMute={toggleMute} />}
           </Suspense>
         )}
         {tab === 'dashboard' && <Dashboard onSetOut={() => setTab('game')} />}

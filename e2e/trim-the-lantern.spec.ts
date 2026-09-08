@@ -157,19 +157,30 @@ test.describe('Trim the Lantern (W3 T5, fix round 1)', () => {
       });
 
       await clickTrimButton(page);
-      await page.waitForTimeout(300);
 
-      // pip transition, half 2: spent then refunded — net unchanged, never left one short.
-      const after = await readState<Save>(page, 'save.json');
-      expect(after?.embers, 'spent then refunded — net unchanged').toBe(2);
-      expect(after?.hp, 'no fact anywhere to ask — no encounter, no heal').toBe(10);
-      expect(await trimDebugRead(page)).toEqual({ lastQuality: null, embersSpent: 0 });
+      // Playwright delivers passive request events asynchronously. Await the observable write
+      // sequence itself instead of assuming 300ms is enough for two serialized GET+PUT saves
+      // and the test-runner event channel under machine load.
+      await expect
+        .poll(() => saveWrites.length, {
+          message: 'exactly two save writes arrive: the spend, then the refund',
+          timeout: 10_000,
+        })
+        .toBe(2);
 
-      // disambiguation: two real writes happened, spend then refund — not zero (inert click).
-      expect(saveWrites, 'exactly two save writes: the spend, then the refund').toHaveLength(2);
       const [spendBody, refundBody] = saveWrites.map((b) => JSON.parse(b ?? '{}') as Save);
       expect(spendBody.embers, 'write 1 is the spend, embers 2→1').toBe(1);
       expect(refundBody.embers, 'write 2 is the refund, embers 1→2').toBe(2);
+
+      // pip transition, half 2: spent then refunded — net unchanged, never left one short.
+      const after = await waitForState<Save>(
+        page,
+        'save.json',
+        (s) => s?.embers === 2 && s?.hp === 10,
+      );
+      expect(after?.embers, 'spent then refunded — net unchanged').toBe(2);
+      expect(after?.hp, 'no fact anywhere to ask — no encounter, no heal').toBe(10);
+      expect(await trimDebugRead(page)).toEqual({ lastQuality: null, embersSpent: 0 });
     } finally {
       await restoreSave(page, beforeSave);
     }

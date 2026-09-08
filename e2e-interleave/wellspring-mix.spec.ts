@@ -83,7 +83,7 @@ test('two installed packs: a Wellspring drill surfaces facts from BOTH installed
     data: { scene: 'hamlet', hp: 16, streak: 0, lastPlayed: '' },
   });
 
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');

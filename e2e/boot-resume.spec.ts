@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState, waitForState } from './helpers';
 
@@ -56,7 +57,7 @@ test('hard reload resumes the saved scene pointer (vaults), not a hard-coded ham
 
     // The true hard-reload path: bare '/', no ?scene= override — BootScene must read
     // save.scene once ready() resolves and route enter() there instead of the hamlet.
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await page.keyboard.press('Enter');
     await waitReady(page, 'vaults');
@@ -80,7 +81,7 @@ test('hard reload with no saved scene pointer still defaults to the hamlet', asy
       data: { scene: 'nonsense', hp: 16, streak: 0, lastPlayed: '' },
     });
 
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await page.keyboard.press('Enter');
     await waitReady(page, 'hamlet');

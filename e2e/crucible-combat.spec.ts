@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState } from './helpers';
 
@@ -380,7 +381,7 @@ test('crucible #5: a reload right after Victory must not keep the streak while l
     // Step 0 (T2 re-review): same vacuous-poll hardening as crucible #3 above — pollUntil
     // returns its last value on timeout instead of throwing, so assert it actually got there.
     expect(resolved?.state, 'the poll actually resolved to over before the reload').toBe('over');
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page);
 
     const save = await readState<Save>(page, 'save.json');

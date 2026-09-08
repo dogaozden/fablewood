@@ -17,6 +17,11 @@ interface TauriInternals {
   invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
 }
 
+export type StrictStateReadResult<T> =
+  | { status: 'found'; value: T }
+  | { status: 'absent' }
+  | { status: 'error'; kind: 'transport' | 'http' | 'invalid-json' | 'native'; message: string; httpStatus?: number }
+
 function internals(): TauriInternals | null {
   if (typeof window === 'undefined') return null;
   const w = window as unknown as { __TAURI_INTERNALS__?: TauriInternals };
@@ -90,6 +95,31 @@ export async function nativeGetState<T = unknown>(name: string): Promise<T | nul
     return await invokeNative<T | null>('state_read', { name });
   } catch {
     return null;
+  }
+}
+
+/**
+ * Strict state read for callers that must never confuse missing data with a
+ * failed read. The dedicated Rust command preserves legacy state_read while
+ * distinguishing OS NotFound from malformed JSON and other I/O failures.
+ */
+export async function nativeGetStateStrict<T = unknown>(name: string): Promise<StrictStateReadResult<T>> {
+  try {
+    const envelope = await invokeNative<unknown>('state_read_strict', { name });
+    if (!envelope || typeof envelope !== 'object' || typeof (envelope as { found?: unknown }).found !== 'boolean') {
+      return { status: 'error', kind: 'native', message: 'Native state read returned an invalid response.' };
+    }
+    if (!(envelope as { found: boolean }).found) return { status: 'absent' };
+    if (!Object.prototype.hasOwnProperty.call(envelope, 'data')) {
+      return { status: 'error', kind: 'native', message: 'Native state read omitted found data.' };
+    }
+    return { status: 'found', value: (envelope as { data: T }).data };
+  } catch (error) {
+    return {
+      status: 'error',
+      kind: 'native',
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

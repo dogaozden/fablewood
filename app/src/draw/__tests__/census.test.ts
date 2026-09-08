@@ -87,7 +87,10 @@ import { join, relative } from 'path';
 // same file set, before and after (quoted in the fix-round report).
 const APP_SRC = join(__dirname, '../..'); // app/src
 
+// 3D rethink (2026-09-07): chooseLesson is the seventh consumer, shared by
+// discovery/waystones/battle; it preserves due -> fresh -> eligible revisit.
 const EXPECTED_CALLS: Record<string, { calls: number; fnNames: string[] }> = {
+  'game3d/knowledge.ts': { calls: 2, fnNames: ['chooseLesson'] },
   'game/scenes/dungeon/DungeonScene.ts': { calls: 5, fnNames: ['teachingFacts', 'trimDraw', 'gateDraw'] },
   'game/scenes/hamlet/HamletScene.ts': { calls: 2, fnNames: ['doWellspring'] },
   'game/combat/CombatScene.ts': { calls: 4, fnNames: ['globalDraw', 'ddDraw'] },
@@ -295,7 +298,7 @@ describe('findDrawOccurrences — the scanner itself, against synthetic sources 
   });
 });
 
-describe('the draw census — six consumers, three files (Ch. IX law, amended once by T2)', () => {
+describe('the draw census — seven consumers, four files (T2 and 3D amendments)', () => {
   it('every mention of services.draw in app/src is confined to the 3 named consumer files plus the bare-only touchpoints, and no mention anywhere is suspicious', () => {
     const allFiles = walkTsFiles(APP_SRC);
     const byFile = new Map<string, DrawOccurrence[]>();
@@ -340,7 +343,7 @@ describe('the draw census — six consumers, three files (Ch. IX law, amended on
       { kind: 'suspicious', method: null },
     ]);
 
-    // The 3 consumer files: exactly the expected CALL counts (9 total).
+    // The four consumer files: exactly the expected call counts (13 total).
     let totalCalls = 0;
     for (const [file, expected] of Object.entries(EXPECTED_CALLS)) {
       const occ = byFile.get(file) ?? [];
@@ -348,7 +351,7 @@ describe('the draw census — six consumers, three files (Ch. IX law, amended on
       expect(calls.length, `${file}: due()/fresh() CALL count`).toBe(expected.calls);
       totalCalls += calls.length;
     }
-    expect(totalCalls, '11 raw calls = 6 logical due-then-fresh-fallback consumers (teachingFacts is fresh-only)').toBe(11);
+    expect(totalCalls, '13 raw calls = 7 logical due-then-fresh-fallback consumers (teachingFacts is fresh-only)').toBe(13);
   });
 
   it('each of the five named consumer functions is still present in its file', () => {

@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, currentScene, readState, waitForCombat, tileClick, CORRECT_BRANCH_PREFIX, closeCastTurnIfOpen } from './helpers';
 // The dev fixture's own spec, so "every room got cleared" stays a statement about the fixture
@@ -405,7 +406,7 @@ test('boss-victory (real dungeon path): Vault-Warden kill via auto=boss, persist
     // simulation here is a bare '/' navigation plus the title-screen gesture BootScene's enter()
     // waits for — never page.reload() on a dev-harness URL. BootScene reads save.scene once
     // ready() resolves and resumes there (vaults or hamlet) on the first gesture, never instantly.
-    await page.goto('/');
+    await page.goto('/?renderer=classic');
     await waitReady(page); // boot marks ready immediately, before any gesture
     expect(await currentScene(page), 'a bare reload lands on the title screen (boot), not an auto-resume').toBe('boot');
     await page.keyboard.press('Enter'); // the gesture BootScene's enter() waits for

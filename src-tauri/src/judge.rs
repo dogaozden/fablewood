@@ -258,6 +258,14 @@ fn parse_verdict(raw: &str) -> Option<JudgeVerdict> {
     Some(JudgeVerdict { verdict, line })
 }
 
+fn judge_mode_is_stub(mode: Option<&str>) -> bool {
+    matches!(mode, Some("stub"))
+}
+
+pub(crate) fn stub_mode_enabled() -> bool {
+    judge_mode_is_stub(env::var("JUDGE_MODE").ok().as_deref())
+}
+
 #[tauri::command]
 pub async fn judge_grade(
     pool: tauri::State<'_, crate::judge_pool::ClaudeJudgePool>,
@@ -265,6 +273,10 @@ pub async fn judge_grade(
     answer: String,
     rubric: String,
 ) -> Result<JudgeVerdict, String> {
+    if stub_mode_enabled() {
+        clerk_log::record("native grade delegated to deterministic stub — JUDGE_MODE=stub");
+        return Err("native judge disabled — JUDGE_MODE=stub".to_string());
+    }
     grade(&pool, &prompt, &answer, &rubric).await
 }
 
@@ -388,6 +400,15 @@ pub(crate) async fn grade(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_stub_mode_disables_native_cli_grading() {
+        assert!(judge_mode_is_stub(Some("stub")));
+        assert!(!judge_mode_is_stub(None));
+        assert!(!judge_mode_is_stub(Some("")));
+        assert!(!judge_mode_is_stub(Some("live")));
+        assert!(!judge_mode_is_stub(Some("STUB")));
+    }
 
     #[test]
     fn parses_strict_json() {

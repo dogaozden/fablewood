@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect } from '@playwright/test';
 import { waitReady, tapKey, warpHamletTo, waitHamletPlayer, readState, waitForState, hamletPlayer, holdKey } from './helpers';
 
@@ -14,7 +15,7 @@ const CLEARED_SAVE = {
 };
 
 async function bootToHamlet(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page);
   await tapKey(page, 'Enter'); // title → hamlet
   await waitReady(page, 'hamlet');
@@ -142,7 +143,7 @@ test('the entry card freezes the hamlet: movement is inert and E does not also o
   await page.request.put('/api/state/save.json', { data: CLEARED_SAVE });
   await page.request.put('/api/state/story.json', { data: { version: 1, seenBeats: {}, completedArcs: {}, threadFragments: {} } });
 
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page);
   await tapKey(page, 'Enter'); // title → hamlet
   await waitReady(page, 'hamlet');

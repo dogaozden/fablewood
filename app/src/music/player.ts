@@ -150,18 +150,31 @@ export class MusicPlayer {
       const gain = new Tone.Gain(track.gainDb, "decibels");
       voice.connect(gain);
       gain.connect(this.master);
+      let lastAttackTime = Number.NEGATIVE_INFINITY;
 
       const part = new Tone.Part((time, ev) => {
         const n = ev as Note;
+        // Transport callbacks can arrive after their scheduled audio time when the browser's
+        // main thread is busy. Tone clamps every such Source.start() to currentTime; two late
+        // callbacks for one monophonic voice can therefore collapse onto the same instant and
+        // trip Tone's strict start-order assertion. Keep on-time/future events untouched, but
+        // move a stale or equal attack onto the audio clock at least one sample after its
+        // predecessor. One sample is the smallest meaningful Web Audio spacing.
+        const attackTime = Math.max(
+          time,
+          Tone.now(),
+          lastAttackTime + 1 / Tone.getContext().sampleRate,
+        );
+        lastAttackTime = attackTime;
         // Trim the release so it never coincides with the next attack (see
         // RELEASE_GAP_S) — this is what keeps the loop seam from crashing Tone.
         const durSecs = Tone.Time(n.dur).toSeconds();
         const safeDur = Math.max(durSecs - RELEASE_GAP_S, durSecs * 0.5);
         if (n.note !== undefined) {
-          voice.triggerAttackRelease(n.note, safeDur, time, n.vel);
+          voice.triggerAttackRelease(n.note, safeDur, attackTime, n.vel);
         } else {
           // Unpitched (NoiseSynth): triggerAttackRelease(duration, time, velocity)
-          voice.triggerAttackRelease(safeDur, time, n.vel);
+          voice.triggerAttackRelease(safeDur, attackTime, n.vel);
         }
       }, track.notes.map((n) => ({ ...n })));
       part.start(0);

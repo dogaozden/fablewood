@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import {
   waitReady,
@@ -141,7 +142,7 @@ async function seedSrsEmpty(page: Page): Promise<void> {
 /** Drive hamlet -> Wellspring up to its first drill encounter (wellspring-srs.spec.ts's own
  *  choreography, verbatim through the overlay-visible wait — not reinvented). */
 async function openWellspringDrill(page: Page): Promise<void> {
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');

@@ -85,6 +85,37 @@ pub fn state_read(app: AppHandle, name: String) -> Result<Option<Value>, String>
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum StrictStateRead {
+    Missing { found: bool },
+    Found { found: bool, data: Value },
+}
+
+fn state_read_strict_at(dir: &Path, name: &str) -> Result<StrictStateRead, String> {
+    if !is_valid_state_name(name) {
+        return Err(format!("invalid state name: {name}"));
+    }
+    let raw = match fs::read_to_string(dir.join(name)) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StrictStateRead::Missing { found: false });
+        }
+        Err(e) => return Err(format!("failed to read state {name}: {e}")),
+    };
+    let data =
+        serde_json::from_str(&raw).map_err(|e| format!("failed to parse state {name}: {e}"))?;
+    Ok(StrictStateRead::Found { found: true, data })
+}
+
+/// Read state without collapsing corruption or filesystem failures into absence.
+/// The explicit envelope preserves the distinction between a missing file and a
+/// file whose valid JSON value is `null`.
+#[tauri::command]
+pub fn state_read_strict(app: AppHandle, name: String) -> Result<StrictStateRead, String> {
+    state_read_strict_at(&state_dir(&app), &name)
+}
+
 #[tauri::command]
 pub fn state_write(app: AppHandle, name: String, data: Value) -> Result<(), String> {
     if !is_valid_state_name(&name) {
@@ -190,6 +221,19 @@ pub fn pack_asset(
 mod tests {
     use super::*;
 
+    fn scratch_dir(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "fablewood-bridge-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create isolated test directory");
+        dir
+    }
+
     #[test]
     fn state_names() {
         assert!(is_valid_state_name("save.json"));
@@ -218,5 +262,53 @@ mod tests {
         assert_eq!(safe_asset_path(root, "/etc/passwd"), None);
         assert_eq!(safe_asset_path(root, ""), None);
         assert_eq!(safe_asset_path(root, "."), None);
+    }
+
+    #[test]
+    fn strict_read_distinguishes_missing_valid_and_json_null() {
+        let dir = scratch_dir("strict-values");
+        fs::write(dir.join("valid.json"), r#"{"chapter":"arrival"}"#).expect("write valid fixture");
+        fs::write(dir.join("null.json"), "null").expect("write null fixture");
+
+        let missing = serde_json::to_value(
+            state_read_strict_at(&dir, "missing.json").expect("missing is a valid outcome"),
+        )
+        .expect("serialize missing envelope");
+        assert_eq!(missing, serde_json::json!({ "found": false }));
+
+        let valid = serde_json::to_value(
+            state_read_strict_at(&dir, "valid.json").expect("valid state reads"),
+        )
+        .expect("serialize valid envelope");
+        assert_eq!(
+            valid,
+            serde_json::json!({ "found": true, "data": { "chapter": "arrival" } })
+        );
+
+        let null = serde_json::to_value(
+            state_read_strict_at(&dir, "null.json").expect("JSON null is valid JSON"),
+        )
+        .expect("serialize null envelope");
+        assert_eq!(null, serde_json::json!({ "found": true, "data": null }));
+
+        fs::remove_dir_all(dir).expect("remove isolated test directory");
+    }
+
+    #[test]
+    fn strict_read_reports_malformed_and_directory_io_errors() {
+        let dir = scratch_dir("strict-errors");
+        fs::write(dir.join("malformed.json"), "{ definitely not json")
+            .expect("write malformed fixture");
+        fs::create_dir(dir.join("directory.json")).expect("create directory fixture");
+
+        let malformed = state_read_strict_at(&dir, "malformed.json")
+            .expect_err("malformed JSON must not look absent");
+        assert!(malformed.contains("failed to parse state malformed.json"));
+
+        let io_error = state_read_strict_at(&dir, "directory.json")
+            .expect_err("a found but unreadable directory must not look absent");
+        assert!(io_error.contains("failed to read state directory.json"));
+
+        fs::remove_dir_all(dir).expect("remove isolated test directory");
     }
 }

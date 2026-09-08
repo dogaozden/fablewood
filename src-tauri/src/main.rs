@@ -14,6 +14,10 @@ fn main() {
         .manage(judge_pool::ClaudeJudgePool::new())
         .setup(|app| {
             autopilot::init(app.handle().clone());
+            if judge::stub_mode_enabled() {
+                clerk_log::record("warm pool disabled — JUDGE_MODE=stub");
+                return Ok(());
+            }
             // Eagerly warm the Clerk pool at boot (see judge_pool::prewarm) and log
             // readiness once — this ONE line is the whole smoke check for a new
             // bundle: launch it and read the Clerk log (clerk_log::log_path(),
@@ -39,6 +43,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             bridge::state_read,
+            bridge::state_read_strict,
             bridge::state_write,
             bridge::packs_list,
             bridge::pack_asset,

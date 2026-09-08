@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect } from '@playwright/test';
 import {
   waitReady,
@@ -28,7 +29,7 @@ test('full chain: boot → hamlet → gate → vaults → room → teaching → 
   });
 
   // 1. boot title screen (plain '/', the true entry). One gesture enters the hamlet.
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');

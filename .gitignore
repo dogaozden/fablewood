@@ -12,6 +12,7 @@ state/
 
 # transient test + e2e artifacts
 .state-e2e/
+.state-e2e-3d/
 .state-e2e-amendments/
 .state-e2e-dragdrop/
 .state-e2e-interleave/
@@ -41,6 +42,9 @@ staging/secreg/*/cluster-cache/
 
 # SDD workspaces (ledgers are rescued into docs/superpowers/ledgers/ at close-out)
 .superpowers/
+
+# 3D visual iteration working files
+.dream-loop/
 
 # Local Workshop working ledgers; portable publications are tracked separately.
 .workshop/

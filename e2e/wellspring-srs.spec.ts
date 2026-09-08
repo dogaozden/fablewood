@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, tapKey, waitHamletPlayer, waitProvincesLoaded, warpHamletTo, readState } from './helpers';
 
@@ -37,7 +38,7 @@ async function answerAnyOverlay(page: Page): Promise<void> {
 // Proves the Leitner SRS records real due-queue facts to state/srs.json and survives a reload.
 test('SRS: Wellspring drill records facts to state/ and persists across reload', async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');
@@ -81,7 +82,7 @@ test('SRS: Wellspring drill records facts to state/ and persists across reload',
   expect(advanced, 'a recorded fact has a box, a due date, and history').toBe(true);
 
   // persists across a page reload (state lives on disk under STATE_DIR)
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   const srs2 = await readState<Srs>(page, 'srs.json');
   expect(Object.keys(srs2?.facts ?? {}).length).toBeGreaterThanOrEqual(ids.length);
@@ -89,7 +90,7 @@ test('SRS: Wellspring drill records facts to state/ and persists across reload',
 
 test('Wellspring drill: mashing Space through encounter mount cannot commit an unread answer', async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');

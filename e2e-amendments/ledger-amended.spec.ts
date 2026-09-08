@@ -66,7 +66,7 @@ async function resetLedger(page: Page, witnessed: Amendments = {}): Promise<void
 
 /** Boot into the hamlet with packs loaded. */
 async function enterHamlet(page: Page): Promise<void> {
-  await page.goto('/?seed=7');
+  await page.goto('/?renderer=classic&seed=7');
   await waitReady(page, 'boot');
   await page.keyboard.press('Enter');
   await waitReady(page, 'hamlet');
@@ -150,7 +150,7 @@ async function settleNextCard(page: Page, timeout = 4000): Promise<string> {
 
 test.describe.serial('The Ledger Amended', () => {
   test('§2 the Records Office pulses and offers the Clerk hover line', async ({ page }) => {
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page);
     await enterHamlet(page);
@@ -171,7 +171,7 @@ test.describe.serial('The Ledger Amended', () => {
   });
 
   test('§3 the card registers both truths, the quote and the Clerk lines verbatim', async ({ page }) => {
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page);
     await enterHamlet(page);
@@ -212,7 +212,7 @@ test.describe.serial('The Ledger Amended', () => {
   });
 
   test('§9 witnessing writes state, and a mid-batch reload keeps the rest pending', async ({ page }) => {
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page);
     await enterHamlet(page);
@@ -247,7 +247,7 @@ test.describe.serial('The Ledger Amended', () => {
   });
 
   test('§2 batch cap: a visit presents at most three cards, the overflow waits', async ({ page }) => {
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page);
     await enterHamlet(page);
@@ -288,7 +288,7 @@ test.describe.serial('The Ledger Amended', () => {
   test('§4 after witnessing, the new truth drills and the old one is never drawn', async ({ page }) => {
     // all four witnessed: every new truth is in play, every old truth retired
     const now = new Date().toISOString();
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page, Object.fromEntries(OLD_IDS.map((id) => [id, now])));
     await enterHamlet(page);
@@ -343,7 +343,7 @@ test.describe.serial('The Ledger Amended', () => {
   });
 
   test('§6 the Library keeps both lines (⟳ marker); the Dashboard drops the old ones', async ({ page }) => {
-    await page.goto('/?seed=7');
+    await page.goto('/?renderer=classic&seed=7');
     await waitReady(page, 'boot');
     await resetLedger(page);
 

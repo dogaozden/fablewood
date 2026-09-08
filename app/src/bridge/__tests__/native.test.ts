@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { isTauri } from '../native';
-import { getPacks, getPackAsset, getState, putState } from '../client';
+import { getPacks, getPackAsset, getState, getStateStrict, putState } from '../client';
 import { judge } from '../../judge/client';
 import { AWAY_LINE } from '../../judge/stub';
 
@@ -76,6 +76,41 @@ describe('bridge client routing under Tauri', () => {
     ]);
   });
 
+  it('getStateStrict distinguishes found, null, and absent native responses', async () => {
+    respond = async () => ({ found: true, data: { hp: 16 } });
+    expect(await getStateStrict('save.json')).toEqual({ status: 'found', value: { hp: 16 } });
+
+    respond = async () => ({ found: true, data: null });
+    expect(await getStateStrict('save.json')).toEqual({ status: 'found', value: null });
+
+    respond = async () => ({ found: false });
+    expect(await getStateStrict('save.json')).toEqual({ status: 'absent' });
+
+    expect(calls).toEqual([
+      { cmd: 'state_read_strict', args: { name: 'save.json' } },
+      { cmd: 'state_read_strict', args: { name: 'save.json' } },
+      { cmd: 'state_read_strict', args: { name: 'save.json' } },
+    ]);
+  });
+
+  it('getStateStrict reports malformed native responses and command failures', async () => {
+    respond = async () => ({ found: true });
+    expect(await getStateStrict('save.json')).toEqual({
+      status: 'error',
+      kind: 'native',
+      message: 'Native state read omitted found data.',
+    });
+
+    respond = async () => {
+      throw new Error('permission denied');
+    };
+    expect(await getStateStrict('save.json')).toEqual({
+      status: 'error',
+      kind: 'native',
+      message: 'permission denied',
+    });
+  });
+
   it('putState reports false when the command rejects', async () => {
     respond = async () => {
       throw new Error('invalid state name');
@@ -142,6 +177,65 @@ describe('without Tauri, clients stay on the HTTP path', () => {
       const res = await getPacks();
       expect(fetchSpy).toHaveBeenCalledWith('/api/packs');
       expect(res).toEqual({ packs: [] });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('getStateStrict distinguishes JSON, null, absence, HTTP failure, malformed data, and transport failure', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ hp: 16 }), { status: 200 }));
+      expect(await getStateStrict('save.json')).toEqual({ status: 'found', value: { hp: 16 } });
+
+      fetchSpy.mockResolvedValueOnce(new Response('null', { status: 200 }));
+      expect(await getStateStrict('save.json')).toEqual({ status: 'found', value: null });
+
+      fetchSpy.mockResolvedValueOnce(new Response(null, { status: 404 }));
+      expect(await getStateStrict('save.json')).toEqual({ status: 'absent' });
+
+      fetchSpy.mockResolvedValueOnce(new Response('unavailable', { status: 503 }));
+      expect(await getStateStrict('save.json')).toEqual({
+        status: 'error',
+        kind: 'http',
+        message: 'State read failed with HTTP 503.',
+        httpStatus: 503,
+      });
+
+      fetchSpy.mockResolvedValueOnce(new Response('<!doctype html>', { status: 200 }));
+      const malformed = await getStateStrict('save.json');
+      expect(malformed).toMatchObject({ status: 'error', kind: 'invalid-json' });
+
+      fetchSpy.mockRejectedValueOnce(new TypeError('network unavailable'));
+      expect(await getStateStrict('save.json')).toEqual({
+        status: 'error',
+        kind: 'transport',
+        message: 'network unavailable',
+      });
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('putState adds keepalive only when explicitly requested', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    try {
+      expect(await putState('journey.json', { gold: 4 }, { keepalive: true })).toBe(true);
+      expect(await putState('legacy.json', { gold: 1 })).toBe(true);
+
+      expect(fetchSpy).toHaveBeenNthCalledWith(1, '/api/state/journey.json', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gold: 4 }),
+        keepalive: true,
+      });
+      expect(fetchSpy).toHaveBeenNthCalledWith(2, '/api/state/legacy.json', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ gold: 1 }),
+      });
     } finally {
       fetchSpy.mockRestore();
     }

@@ -1,3 +1,4 @@
+// Original 2D regression coverage uses renderer=classic; fablewood3d.spec.ts covers the new default entry.
 import { test, expect, type Page } from '@playwright/test';
 import { waitReady, waitHamletPlayer, warpHamletTo } from './helpers';
 
@@ -52,7 +53,7 @@ async function moveToCanvasPoint(page: Page, ix: number, iy: number): Promise<vo
 test.describe('hamlet location hover tooltip (fun-review §3.6b)', () => {
   for (const id of Object.keys(EXPECT) as LocId[]) {
     test(`hovering ${id} shows its name + flavor line, verbatim`, async ({ page }) => {
-      await page.goto('/?seed=7');
+      await page.goto('/?renderer=classic&seed=7');
       await waitReady(page, 'boot');
       await page.keyboard.press('Enter');
       await waitReady(page, 'hamlet');
