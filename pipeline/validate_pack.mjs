@@ -10,6 +10,8 @@
 //     match answer pairs are drawn from the two option columns
 //   - free_recall has a non-empty rubric; scenario_branch has a correct branch
 //   - every {{var}} in a prompt is defined in template_vars
+//   - duplicate_of points directly to a distinct canonical fact in this pack;
+//     aliases cannot chain, cycle, or carry supersession metadata
 //   - supersession (docs/design/knowledge-platform-vision.md §3b, §9.3):
 //     supersedes/superseded_by reference real facts, pair up perfectly in both
 //     directions, no self-reference, no cycles, no branching (a fact may be
@@ -141,6 +143,76 @@ export function checkSupersession(pack) {
   return { errors, warnings };
 }
 
+/**
+ * Validate the pack-local durable duplicate relationship.
+ *
+ * `duplicate_of` is an explicit publisher-reviewed link, not supersession. A
+ * target must be present and canonical; chains and cycles would make the
+ * learning identity ambiguous, so both are rejected. The relationship is
+ * allowed to branch: several durable records may point at one canonical fact.
+ */
+export function checkDuplicateAliases(pack) {
+  const errors = [];
+  const facts = Array.isArray(pack?.facts) ? pack.facts : [];
+  const factsById = new Map();
+  for (const fact of facts) {
+    if (!fact || typeof fact !== 'object' || typeof fact.id !== 'string' || !fact.id || factsById.has(fact.id)) continue;
+    factsById.set(fact.id, fact);
+  }
+
+  for (const fact of facts) {
+    if (!fact || typeof fact !== 'object' || fact.duplicate_of === undefined) continue;
+    const id = typeof fact.id === 'string' && fact.id ? fact.id : '(unknown)';
+    const targetId = fact.duplicate_of;
+    if (typeof targetId !== 'string' || !targetId) {
+      errors.push(`[${id}] duplicate_of must be a non-empty string`);
+      continue;
+    }
+    if (targetId === fact.id) errors.push(`[${id}] duplicate_of itself (self-reference)`);
+    if (fact.supersedes !== undefined || fact.superseded_by !== undefined) {
+      errors.push(`[${id}] duplicate_of cannot be combined with supersedes or superseded_by`);
+    }
+
+    const target = factsById.get(targetId);
+    if (!target) {
+      errors.push(`[${id}] duplicate_of unknown fact id: ${targetId}`);
+    } else if (target.duplicate_of !== undefined) {
+      errors.push(`[${id}] duplicate_of target ${targetId} is itself an alias; duplicate chains/cycles are not allowed`);
+    } else if (target.supersedes !== undefined || target.superseded_by !== undefined) {
+      errors.push(`[${id}] duplicate_of target ${targetId} cannot carry supersedes or superseded_by metadata`);
+    }
+  }
+
+  // The direct-target error above catches every cycle edge. This additional
+  // walk names each cycle once, making the invalid graph clear to publishers.
+  const reportedCycles = new Set();
+  for (const start of facts) {
+    if (!start || typeof start !== 'object' || typeof start.id !== 'string' || typeof start.duplicate_of !== 'string') continue;
+    const path = [];
+    const position = new Map();
+    let current = start.id;
+    while (current !== undefined) {
+      if (position.has(current)) {
+        const cycle = path.slice(position.get(current)).concat(current);
+        const key = cycle.slice(0, -1).slice().sort().join('\u0000');
+        if (!reportedCycles.has(key)) {
+          reportedCycles.add(key);
+          errors.push(`duplicate_of cycle detected: ${cycle.join(' -> ')}`);
+        }
+        break;
+      }
+      position.set(current, path.length);
+      path.push(current);
+      const fact = factsById.get(current);
+      const next = fact?.duplicate_of;
+      if (typeof next !== 'string' || !factsById.has(next)) break;
+      current = next;
+    }
+  }
+
+  return errors;
+}
+
 // ---------------------------------------------------------------------------
 // CLI entrypoint — guarded (isMain, below) so checkSupersession can be
 // imported for unit tests (pipeline/validate_pack.test.mjs) without reading
@@ -238,7 +310,10 @@ function main(packPathArg) {
   for (const e of supersession.errors) push(e);
   const warnings = supersession.warnings;
 
-  // 4) Goal-2 thresholds
+  // 4) Durable duplicate checks (pack-local, direct canonical links).
+  for (const e of checkDuplicateAliases(pack)) push(e);
+
+  // 5) Goal-2 thresholds
   const nFacts = (pack.facts ?? []).length;
   const nEnc = (pack.encounters ?? []).length;
   if (nFacts < 30) push(`need >=30 facts, have ${nFacts}`);

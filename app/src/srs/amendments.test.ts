@@ -76,6 +76,42 @@ describe('buildAmendmentIndex', () => {
     const index = buildAmendmentIndex([{ id: 'weird', facts: [weird] }]);
     expect(index.superseded.size).toBe(0);
   });
+
+  it('indexes two direct aliases while retaining their distinct ids', () => {
+    const canonical = fact('fx-canonical');
+    const aliasA = fact('fx-alias-a', { duplicate_of: canonical.id });
+    const aliasB = fact('fx-alias-b', { duplicate_of: canonical.id });
+    const index = buildAmendmentIndex([{ id: 'aliases', facts: [canonical, aliasA, aliasB] }]);
+    expect([...index.aliases]).toEqual(['fx-alias-a', 'fx-alias-b']);
+    expect(index.canonicalByAlias.get('fx-alias-a')).toBe('fx-canonical');
+    expect(index.aliasesByCanonical.get('fx-canonical')).toEqual(['fx-alias-a', 'fx-alias-b']);
+    expect(isSuspended('fx-alias-a', index, never)).toBe(true);
+    expect(isSuspended('fx-alias-b', index, never)).toBe(true);
+    expect(isSuspended('fx-canonical', index, never)).toBe(false);
+  });
+
+  it('ignores malformed aliases at runtime so they cannot suppress another fact', () => {
+    const canonical = fact('fx-canonical');
+    const valid = fact('fx-valid', { duplicate_of: canonical.id });
+    const missing = fact('fx-missing', { duplicate_of: 'ghost' });
+    const self = fact('fx-self', { duplicate_of: 'fx-self' });
+    const chain = fact('fx-chain', { duplicate_of: 'fx-valid' });
+    const mixed = fact('fx-mixed', { duplicate_of: canonical.id, supersedes: 'fx-other' });
+    const targetMixed = fact('fx-target-mixed', { superseded_by: 'fx-later' });
+    const aliasToTargetMixed = fact('fx-alias-target-mixed', { duplicate_of: targetMixed.id });
+    const index = buildAmendmentIndex([{
+      id: 'aliases',
+      facts: [canonical, valid, missing, self, chain, mixed, targetMixed, aliasToTargetMixed],
+    }]);
+    expect([...index.aliases]).toEqual(['fx-valid']);
+    expect(isSuspended('fx-canonical', index, never)).toBe(false);
+    expect(isSuspended('fx-missing', index, never)).toBe(false);
+    expect(isSuspended('fx-self', index, never)).toBe(false);
+    expect(isSuspended('fx-chain', index, never)).toBe(false);
+    expect(isSuspended('fx-mixed', index, never)).toBe(false);
+    expect(isSuspended('fx-alias-target-mixed', index, never)).toBe(false);
+    expect(isSuspended('fx-target-mixed', index, never)).toBe(false);
+  });
 });
 
 describe('§4 isSuspended — the one predicate', () => {

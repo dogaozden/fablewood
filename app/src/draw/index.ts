@@ -1,16 +1,20 @@
 import type { Fact, Encounter } from '../packs/types';
+import { buildFactAliasIndex } from '../packs/aliases';
 import type { DrawIndex, DrawDeps, DrawOpts, InstalledPack } from './types';
 export * from './types';
 
 export function buildDrawIndex(packs: InstalledPack[]): DrawIndex {
   const factById = new Map<string, Fact>();
   const packIdByFactId = new Map<string, string>();
+  const rawEncountersByFactId = new Map<string, Encounter[]>();
   const encountersByFactId = new Map<string, Encounter[]>();
   const packIds: string[] = [];
+  const aliasIndex = buildFactAliasIndex(packs.map(({ id, pack }) => ({ id, facts: pack.facts })));
   let warned = false;
   for (const { id, pack } of packs) {
     packIds.push(id);
     for (const f of pack.facts) {
+      if (!f || typeof f !== 'object' || typeof f.id !== 'string') continue;
       if (factById.has(f.id)) {
         if (!warned) {
           console.warn(`[draw] duplicate fact id across packs: ${f.id} — first-installed wins`);
@@ -22,15 +26,31 @@ export function buildDrawIndex(packs: InstalledPack[]): DrawIndex {
       packIdByFactId.set(f.id, id);
     }
     for (const e of pack.encounters) {
-      for (const fid of e.fact_ids ?? []) {
+      if (!e || typeof e !== 'object') continue;
+      const factIds = Array.isArray(e.fact_ids)
+        ? e.fact_ids.filter((fid): fid is string => typeof fid === 'string')
+        : [];
+      const requiresAlias = factIds.some((fid) => aliasIndex.aliases.has(fid));
+      for (const fid of factIds) {
         if (packIdByFactId.get(fid) !== id) continue; // encounters attach only to their own pack's facts
-        const arr = encountersByFactId.get(fid) ?? [];
-        arr.push(e);
-        encountersByFactId.set(fid, arr);
+        const raw = rawEncountersByFactId.get(fid) ?? [];
+        raw.push(e);
+        rawEncountersByFactId.set(fid, raw);
+        if (requiresAlias) continue;
+        const usable = encountersByFactId.get(fid) ?? [];
+        usable.push(e);
+        encountersByFactId.set(fid, usable);
       }
     }
   }
-  return { factById, packIdByFactId, encountersByFactId, packIds };
+  return {
+    factById,
+    packIdByFactId,
+    rawEncountersByFactId,
+    encountersByFactId,
+    packIds,
+    ...aliasIndex,
+  };
 }
 
 function mulberry32(seed: number): () => number {
@@ -160,7 +180,7 @@ export function drawNew(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): strin
     if (!deps.eligible(id)) continue;
     if (deps.hasRecord(id)) continue;
     const prereqs = index.factById.get(id)!.prereqs ?? [];
-    if (!prereqs.every(deps.hasRecord)) continue;
+    if (!prereqs.every((prereqId) => prereqSatisfied(index, deps, prereqId))) continue;
     queues.get(index.packIdByFactId.get(id)!)!.push(id);
   }
 
@@ -185,4 +205,12 @@ export function drawNew(index: DrawIndex, deps: DrawDeps, opts: DrawOpts): strin
     }
   }
   return out;
+}
+
+/** A duplicate prerequisite may be satisfied by either durable record. */
+function prereqSatisfied(index: DrawIndex, deps: DrawDeps, prereqId: string): boolean {
+  if (deps.hasRecord(prereqId)) return true;
+  const canonicalId = index.canonicalByAlias.get(prereqId);
+  if (canonicalId !== undefined && deps.hasRecord(canonicalId)) return true;
+  return (index.aliasesByCanonical.get(prereqId) ?? []).some((aliasId) => deps.hasRecord(aliasId));
 }

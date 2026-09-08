@@ -11,6 +11,7 @@
  * All functions are deterministic given `now`; time is always injected.
  */
 import type { Quality } from '../game/contracts';
+import { buildFactAliasIndex, type AliasFactLike } from '../packs/aliases';
 
 const DAY_MS = 86_400_000;
 
@@ -75,6 +76,10 @@ export interface SrsState {
 /** Minimal per-fact metadata dueQueue needs for prereq gating. */
 export interface FactMeta {
   prereqs: string[];
+  /** Present when this fact is a valid direct alias of a canonical fact. */
+  canonicalId?: string;
+  /** Present on a canonical fact when valid direct aliases point at it. */
+  aliases?: string[];
 }
 
 /**
@@ -192,11 +197,28 @@ export function dueQueue(
   const blocked: string[] = [];
   for (const id of unseen) {
     const prereqs = factMeta.get(id)?.prereqs ?? [];
-    const welded = prereqs.every((p) => boxOf(state, p) >= 2);
+    const welded = prereqs.every((p) => prereqWelded(state, p, factMeta));
     (welded ? ready : blocked).push(id);
   }
 
   return [...seenDue.map((x) => x.id), ...ready, ...blocked];
+}
+
+/**
+ * A duplicate prerequisite names one of two durable records for the same
+ * proposition. A welded canonical record satisfies an alias prerequisite, and
+ * an existing welded alias record satisfies a canonical prerequisite. Neither
+ * path copies or rewrites SRS state.
+ */
+function prereqWelded(
+  state: SrsState,
+  prereqId: string,
+  factMeta: Map<string, FactMeta>,
+): boolean {
+  if (boxOf(state, prereqId) >= 2) return true;
+  const meta = factMeta.get(prereqId);
+  if (meta?.canonicalId !== undefined && boxOf(state, meta.canonicalId) >= 2) return true;
+  return (meta?.aliases ?? []).some((aliasId) => boxOf(state, aliasId) >= 2);
 }
 
 /**
@@ -211,15 +233,26 @@ export function buildFactMeta(
   for (const entry of packs) {
     const facts = (entry.pack as { facts?: unknown })?.facts;
     if (!Array.isArray(facts)) continue;
+    const aliasIndex = buildFactAliasIndex([{
+      id: entry.id,
+      facts: facts as AliasFactLike[],
+    }]);
     const meta = new Map<string, FactMeta>();
     for (const f of facts) {
+      if (!f || typeof f !== 'object') continue;
       const id = (f as { id?: unknown })?.id;
       if (typeof id !== 'string') continue;
       const rawPrereqs = (f as { prereqs?: unknown }).prereqs;
       const prereqs = Array.isArray(rawPrereqs)
         ? rawPrereqs.filter((p): p is string => typeof p === 'string')
         : [];
-      meta.set(id, { prereqs });
+      const canonicalId = aliasIndex.canonicalByAlias.get(id);
+      const aliases = aliasIndex.aliasesByCanonical.get(id);
+      meta.set(id, {
+        prereqs,
+        ...(canonicalId === undefined ? {} : { canonicalId }),
+        ...(aliases === undefined ? {} : { aliases: aliases.slice() }),
+      });
     }
     byPack.set(entry.id, meta);
   }

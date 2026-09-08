@@ -97,4 +97,40 @@ describe('validatePack', () => {
     const result = validatePack(minimal);
     expect(result.valid, JSON.stringify(result.errors)).toBe(true);
   });
+
+  describe('durable duplicate declarations', () => {
+    it('accepts two aliases pointing directly at one canonical fact', () => {
+      const pack = clone();
+      pack.facts[1].duplicate_of = 'mf-001';
+      pack.facts[2].duplicate_of = 'mf-001';
+      expect(validatePack(pack)).toEqual({ valid: true, errors: [] });
+    });
+
+    it.each([
+      ['missing target', (pack: any) => { pack.facts[1].duplicate_of = 'missing'; }],
+      ['self target', (pack: any) => { pack.facts[1].duplicate_of = 'mf-002'; }],
+      ['chained target', (pack: any) => {
+        pack.facts[1].duplicate_of = 'mf-001';
+        pack.facts[2].duplicate_of = 'mf-002';
+      }],
+      ['cyclic target', (pack: any) => {
+        pack.facts[0].duplicate_of = 'mf-002';
+        pack.facts[1].duplicate_of = 'mf-001';
+      }],
+      ['mixed supersession metadata', (pack: any) => {
+        pack.facts[1].duplicate_of = 'mf-001';
+        pack.facts[1].supersedes = 'mf-003';
+      }],
+      ['canonical mixed supersession metadata', (pack: any) => {
+        pack.facts[1].duplicate_of = 'mf-001';
+        pack.facts[0].superseded_by = 'mf-004';
+      }],
+    ])('rejects %s', (_label, mutate) => {
+      const pack = clone();
+      mutate(pack);
+      const result = validatePack(pack);
+      expect(result.valid).toBe(false);
+      expect(result.errors.join('\n')).toContain('duplicate_of');
+    });
+  });
 });

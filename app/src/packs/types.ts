@@ -45,6 +45,13 @@ export interface Fact {
   difficulty: number; // 1..5
   prereqs?: string[];
   /**
+   * Durable duplicate relationship: this fact remains addressable, but the
+   * publisher has explicitly reviewed it as a duplicate of this same-pack
+   * canonical fact. The engine consumes only direct declarations; it never
+   * merges or migrates the two records' learning history.
+   */
+  duplicate_of?: string;
+  /**
    * Supersession protocol (docs/design/knowledge-platform-vision.md §3b, §9.3):
    * id of the single old fact this fact replaces (knowledge moved — a law
    * amended, a number changed, advice aged out). v1 is one-for-one; folding

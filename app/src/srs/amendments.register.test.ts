@@ -24,6 +24,16 @@ const PACKS = {
   packs: [{ id: 'fx', dir: 'fx', pack: { meta: { id: 'fx' }, facts: FIXTURE_FACTS } }],
 };
 
+const ALIAS_FACTS = [
+  { id: 'fx-plain', statement: 'plain' },
+  { id: 'fx-canonical', statement: 'canonical' },
+  { id: 'fx-alias', statement: 'duplicate', duplicate_of: 'fx-canonical' },
+];
+const ALIAS_IDS = ALIAS_FACTS.map((f) => f.id);
+const ALIAS_PACKS = {
+  packs: [{ id: 'aliases', dir: 'aliases', pack: { meta: { id: 'aliases' }, facts: ALIAS_FACTS } }],
+};
+
 /** Survives vi.resetModules(): the on-disk state/ tree from the module graph's point of view. */
 let disk = new Map<string, unknown>();
 
@@ -92,6 +102,26 @@ describe('§4 dueQueue — the canonical filter site', () => {
     expect(services.srs.dueQueue('nope', ['x', 'y'])).toEqual(['x', 'y']);
     expect(services.amendments.pending('nope')).toEqual([]);
     expect(services.amendments.isSuspended('x')).toBe(false);
+  });
+
+  it('excludes an alias while retaining both records and the canonical schedule', async () => {
+    disk.set('srs.json', {
+      version: 1,
+      facts: {
+        'fx-canonical': { box: 4, next_due: 123, history: [{ quality: 1 }] },
+        'fx-alias': { box: 2, next_due: 456, history: [{ quality: 0 }] },
+      },
+    });
+    vi.unstubAllGlobals();
+    stubFetch(ALIAS_PACKS);
+    const services = await boot();
+
+    const queue = services.srs.dueQueue('aliases', ALIAS_IDS, 1_000);
+    expect(queue).toEqual(['fx-canonical', 'fx-plain']);
+    expect(queue).not.toContain('fx-alias');
+    expect(services.srs.boxOf('fx-alias')).toBe(2);
+    expect(services.srs.historyQualities('fx-alias')).toEqual([0]);
+    expect(services.srs.nextDueOf('fx-canonical')).toBe(123);
   });
 });
 

@@ -39,6 +39,28 @@ const PACK_GAMMA: InstalledPack = {
   },
 };
 
+const ALIAS_CANONICAL: Fact = {
+  id: 'fx.alias.canonical', type: 'concept', statement: 'canonical',
+  source_ref: { file: 'fixture.md', loc: 1, quote: 'canonical' },
+  as_of: '2026-01-01', source_version: '1.0.0', difficulty: 1,
+};
+const ALIAS_FACT: Fact = {
+  ...ALIAS_CANONICAL, id: 'fx.alias.duplicate', statement: 'duplicate', duplicate_of: ALIAS_CANONICAL.id,
+};
+const ALIAS_BYSTANDER: Fact = { ...ALIAS_CANONICAL, id: 'fx.alias.other', statement: 'other' };
+const ALIAS_PACK: InstalledPack = {
+  id: 'fx-alias',
+  pack: {
+    meta: { id: 'fx-alias', title: 'Alias Fixture', version: '1.0.0', sources: [{ title: 'Fixture' }] },
+    facts: [ALIAS_CANONICAL, ALIAS_FACT, ALIAS_BYSTANDER],
+    encounters: [
+      { id: 'fx.alias.mixed', fact_ids: [ALIAS_CANONICAL.id, ALIAS_FACT.id], kind: 'mcq', prompt: 'p' },
+      { id: 'fx.alias.other.enc', fact_ids: [ALIAS_BYSTANDER.id], kind: 'mcq', prompt: 'p' },
+    ],
+    quests: [], metaphor_map: {},
+  },
+};
+
 describe('drawDue', () => {
   it('draws from BOTH packs, most-due-first, capped at count', () => {
     // fx.a.three is due a full day before everything else — it leads on every seed.
@@ -163,5 +185,20 @@ describe('drawDue', () => {
   it('draws nothing from an empty index, or at count 0', () => {
     expect(drawDue(buildDrawIndex([]), deps(), { count: 8, seed: 1, now: 0 })).toEqual([]);
     expect(drawDue(idx, deps(), { count: 0, seed: 1, now: 0 })).toEqual([]);
+  });
+
+  it('does not draw aliases, and a mixed alias encounter cannot qualify its canonical fact', () => {
+    const aliasIdx = buildDrawIndex([ALIAS_PACK]);
+    const aliasDeps = deps({
+      eligible: id => id !== ALIAS_FACT.id,
+      dueOrder: ids => ids,
+      hasRecord: () => true,
+    });
+    const allKinds = drawDue(aliasIdx, aliasDeps, { count: 8, seed: 1, now: 0 });
+    expect(allKinds).not.toContain(ALIAS_FACT.id);
+    expect(allKinds).toContain(ALIAS_CANONICAL.id); // no kind filter: fact identity remains addressable
+
+    const mcqOnly = drawDue(aliasIdx, aliasDeps, { count: 8, seed: 1, now: 0, kinds: ['mcq'] });
+    expect(mcqOnly).toEqual([ALIAS_BYSTANDER.id]);
   });
 });

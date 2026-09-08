@@ -15,7 +15,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkSupersession } from './validate_pack.mjs';
+import { checkDuplicateAliases, checkSupersession } from './validate_pack.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(root, 'pipeline', 'validate_pack.mjs');
@@ -227,6 +227,41 @@ test('an encounter targeting the successor fact (not the superseded one) is clea
   const { errors, warnings } = checkSupersession(pack);
   assert.deepEqual(errors, []);
   assert.deepEqual(warnings, []);
+});
+
+test('duplicate_of accepts two direct aliases and rejects missing, self, chained, cyclic, and mixed declarations', () => {
+  const valid = {
+    facts: [
+      fact({ id: 'canonical' }),
+      fact({ id: 'alias-a', duplicate_of: 'canonical' }),
+      fact({ id: 'alias-b', duplicate_of: 'canonical' }),
+    ],
+  };
+  assert.deepEqual(checkDuplicateAliases(valid), []);
+
+  const cases = [
+    ['missing', [fact({ id: 'alias', duplicate_of: 'ghost' })]],
+    ['self', [fact({ id: 'alias', duplicate_of: 'alias' })]],
+    ['chain', [fact({ id: 'canonical' }), fact({ id: 'alias-a', duplicate_of: 'canonical' }), fact({ id: 'alias-b', duplicate_of: 'alias-a' })]],
+    ['cycle', [fact({ id: 'alias-a', duplicate_of: 'alias-b' }), fact({ id: 'alias-b', duplicate_of: 'alias-a' })]],
+    ['mixed', [fact({ id: 'canonical' }), fact({ id: 'alias', duplicate_of: 'canonical', supersedes: 'other' })]],
+    ['canonical mixed', [fact({ id: 'canonical', superseded_by: 'later' }), fact({ id: 'alias', duplicate_of: 'canonical' })]],
+  ];
+  for (const [label, facts] of cases) {
+    const errors = checkDuplicateAliases({ facts });
+    assert.ok(errors.length > 0, `${label} declaration should be rejected`);
+    assert.ok(errors.some((e) => e.includes('duplicate_of')), `${label}: ${errors.join('\n')}`);
+  }
+
+  const cli = runValidator({
+    meta: { id: 'alias-fixture', title: 'Alias Fixture', version: '1.0.0', sources: [{ title: 'Fixture' }] },
+    facts: [fact({ id: 'alias', duplicate_of: 'missing' })],
+    encounters: [],
+    quests: [],
+    metaphor_map: {},
+  });
+  assert.equal(cli.status, 1);
+  assert.match(cli.out, /\[alias\] duplicate_of unknown fact id: missing/);
 });
 
 // ============================================================================

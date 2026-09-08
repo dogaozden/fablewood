@@ -385,4 +385,27 @@ describe('buildFactMeta', () => {
     expect(meta.get('partly-bad')!.get('ok')).toEqual({ prereqs: ['a'] });
     expect(meta.get('partly-bad')!.size).toBe(1);
   });
+
+  it('lets a welded canonical or alias record satisfy the other id in a prerequisite', () => {
+    const meta = buildFactMeta([{
+      id: 'aliases',
+      pack: {
+        facts: [
+          { id: 'canonical' },
+          { id: 'alias', duplicate_of: 'canonical' },
+          { id: 'dependent', prereqs: ['alias'] },
+          { id: 'canonical-dependent', prereqs: ['canonical'] },
+          { id: 'free' },
+        ],
+      },
+    }]).get('aliases')!;
+    const canonicalWelded = state({ canonical: entry(2, NOW + DAY) });
+    expect(dueQueue(canonicalWelded, ['dependent', 'free'], meta, NOW)).toEqual(['dependent', 'free']);
+
+    const aliasWelded = state({ alias: entry(2, NOW + DAY) });
+    expect(dueQueue(aliasWelded, ['canonical-dependent', 'free'], meta, NOW)).toEqual(['canonical-dependent', 'free']);
+
+    const neither = state({});
+    expect(dueQueue(neither, ['dependent', 'free'], meta, NOW)).toEqual(['free', 'dependent']);
+  });
 });

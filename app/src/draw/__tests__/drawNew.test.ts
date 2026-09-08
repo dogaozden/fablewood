@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildDrawIndex, drawNew } from '../index';
 import { PACK_ALPHA, PACK_BETA } from '../__fixtures__/packs';
 import type { DrawDeps } from '../types';
+import type { Fact } from '../../packs/types';
 
 const idx = buildDrawIndex([PACK_ALPHA, PACK_BETA]);
 // dueOf is undefined throughout: drawNew surfaces UNSEEN facts, which have no next_due.
@@ -37,5 +38,38 @@ describe('drawNew', () => {
     };
     const out = drawNew(idx, eligDeps, { count: 8, seed: 1, now: 0 });
     expect(out).not.toContain('fx.a.three');
+  });
+
+  it('excludes aliases and accepts a canonical record or alias history for alias prerequisites', () => {
+    const canonical: Fact = {
+      id: 'fx.canonical', type: 'concept', statement: 'canonical',
+      source_ref: { file: 'fixture.md', loc: 1, quote: 'canonical' },
+      as_of: '2026-01-01', source_version: '1.0.0', difficulty: 1,
+    };
+    const alias: Fact = {
+      ...canonical, id: 'fx.alias', statement: 'duplicate', duplicate_of: canonical.id,
+    };
+    const dependent: Fact = {
+      ...canonical, id: 'fx.dependent', statement: 'dependent', prereqs: [alias.id],
+    };
+    const aliasPack = {
+      id: 'fx-alias',
+      pack: {
+        meta: { id: 'fx-alias', title: 'Alias Fixture', version: '1.0.0', sources: [{ title: 'Fixture' }] },
+        facts: [canonical, alias, dependent],
+        encounters: [], quests: [], metaphor_map: {},
+      },
+    };
+    const aliasIdx = buildDrawIndex([aliasPack]);
+    const draw = (seen: string[]) => drawNew(aliasIdx, {
+      dueOrder: ids => ids,
+      eligible: id => id !== alias.id,
+      hasRecord: id => seen.includes(id),
+      dueOf: () => undefined,
+    }, { count: 8, seed: 1, now: 0 });
+
+    expect(draw([canonical.id])).toContain(dependent.id);
+    expect(draw([canonical.id])).not.toContain(alias.id);
+    expect(draw([alias.id])).toContain(dependent.id);
   });
 });

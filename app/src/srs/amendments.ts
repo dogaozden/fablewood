@@ -15,12 +15,13 @@
  *   - after the witness beat the new fact enters play as a normal new fact (due
  *     immediately, box 1) — no schedule seeding, no history migration.
  *
- * Every field this module reads is OPTIONAL on Fact (`supersedes` / `superseded_by`,
- * packs/types.ts) — a pack that never amends anything produces an empty index, zero
- * suspensions and zero pending cards, which is what keeps vc-law (and the zero-packs
- * build) untouched by this feature.
+ * Every field this module reads is OPTIONAL on Fact (`duplicate_of`, `supersedes` /
+ * `superseded_by`, packs/types.ts) — a pack that never uses either relationship produces
+ * an empty index, zero suspensions and zero pending cards, which keeps old packs (and the
+ * zero-packs build) untouched by these features.
  */
 import type { Amendment, FactLite } from '../game/contracts';
+import { buildFactAliasIndex } from '../packs/aliases';
 import type { Fact } from '../packs/types';
 
 /** §2 — "an amendment is a beat, not a dump": at most this many cards per Records visit. */
@@ -37,6 +38,12 @@ export function toFactLite(f: Fact): FactLite {
  * equivalent to one per pack and spares every caller a packId it may not have.
  */
 export interface AmendmentIndex {
+  /** durable duplicate records, excluded from every practice selection */
+  aliases: Set<string>;
+  /** alias fact id -> its direct, same-pack canonical fact id */
+  canonicalByAlias: Map<string, string>;
+  /** canonical fact id -> its direct aliases, for prerequisite equivalence */
+  aliasesByCanonical: Map<string, string[]>;
   /** facts a newer fact replaces — retired from play at pack load, permanently */
   superseded: Set<string>;
   /** superseding fact id → the superseded fact id it replaces (also the witness key) */
@@ -46,7 +53,14 @@ export interface AmendmentIndex {
 }
 
 export function emptyAmendmentIndex(): AmendmentIndex {
-  return { superseded: new Set(), supersedes: new Map(), pairsByPack: new Map() };
+  return {
+    aliases: new Set(),
+    canonicalByAlias: new Map(),
+    aliasesByCanonical: new Map(),
+    superseded: new Set(),
+    supersedes: new Map(),
+    pairsByPack: new Map(),
+  };
 }
 
 /**
@@ -60,16 +74,27 @@ export function buildAmendmentIndex(
   packs: ReadonlyArray<{ id: string; facts: readonly Fact[] }>,
 ): AmendmentIndex {
   const index = emptyAmendmentIndex();
+  const aliasIndex = buildFactAliasIndex(packs);
+  index.aliases = aliasIndex.aliases;
+  index.canonicalByAlias = aliasIndex.canonicalByAlias;
+  index.aliasesByCanonical = aliasIndex.aliasesByCanonical;
   for (const { id: packId, facts } of packs) {
-    const byId = new Map(facts.map((f) => [f.id, f] as const));
+    const factList = Array.isArray(facts)
+      ? facts.filter((f): f is Fact => !!f && typeof f === 'object' && typeof f.id === 'string')
+      : [];
+    const byId = new Map(factList.map((f) => [f.id, f] as const));
     const pairs: Amendment[] = [];
-    for (const old of facts) {
+    for (const old of factList) {
+      // A duplicate declaration is a separate relationship. If malformed content
+      // mixes it with supersession, leave both records untouched at runtime rather
+      // than letting one bad declaration retire or gate an unrelated fact.
+      if (old.duplicate_of !== undefined) continue;
       const nextId = old.superseded_by;
       if (typeof nextId !== 'string' || nextId === old.id) continue;
       const next = byId.get(nextId);
       // the back-pointer must be answered by the successor's own `supersedes` (validator
       // invariant); an unpaired pointer is content corruption, not an amendment
-      if (!next || next.supersedes !== old.id) continue;
+      if (!next || next.duplicate_of !== undefined || next.supersedes !== old.id) continue;
       index.superseded.add(old.id);
       index.supersedes.set(next.id, old.id);
       pairs.push({ old: toFactLite(old), next: toFactLite(next) });
@@ -92,6 +117,7 @@ export function isSuspended(
   index: AmendmentIndex,
   isWitnessed: (supersededFactId: string) => boolean,
 ): boolean {
+  if (index.aliases.has(factId)) return true; // durable duplicate: never a practice card
   if (index.superseded.has(factId)) return true; // the old truth: retired, permanently
   const replaces = index.supersedes.get(factId);
   if (replaces === undefined) return false; // an ordinary fact

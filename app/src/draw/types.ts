@@ -1,10 +1,14 @@
 import type { Fact, Encounter, EncounterKind, Pack } from '../packs/types';
+import type { FactAliasIndex } from '../packs/aliases';
 
 export interface InstalledPack { id: string; pack: Pack }
 
-export interface DrawIndex {
+export interface DrawIndex extends FactAliasIndex {
   factById: Map<string, Fact>;
   packIdByFactId: Map<string, string>;
+  /** Encounters as authored, including encounters that require an alias. */
+  rawEncountersByFactId: Map<string, Encounter[]>;
+  /** Picker-facing encounters; any encounter requiring an alias is omitted. */
   encountersByFactId: Map<string, Encounter[]>;
   packIds: string[]; // installation order, drives rotation
 }
