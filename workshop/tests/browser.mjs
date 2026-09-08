@@ -95,6 +95,7 @@ try {
     if (path === "/workshop/workshop.css") return route.fulfill({ contentType: "text/css", body: css });
     if (path === "/workshop/workshop.js") return route.fulfill({ contentType: "text/javascript", body: js });
     if (path === "/api/workshop" && method === "GET") return route.fulfill({ json: workspace });
+    if (path === "/api/workshop/game-matches") return route.fulfill({ json: { pack_id: "neutral", matches: [] } });
     if (path === "/api/workshop/catalog") return route.fulfill({ json: { nodes: [{ id: "node.neutral", title: "Neutral node" }, { id: "node.second", title: "Second neutral node" }], sources: [{ key: "catalog.neutral", title: "Catalog reference", kind: "document", node_id: "node.neutral" }] } });
     if (path === "/api/workshop/preview") {
       const approved = workspace.propositions.filter((item) => item.review.status === "approved").length;

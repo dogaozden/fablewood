@@ -571,7 +571,7 @@ class WorkshopPublicationTests(unittest.TestCase):
         )
         self.assertEqual(published_relation["to_summary"]["review"], approved["review"])
 
-    def test_previously_published_duplicate_stays_blocked_without_retirement_contract(self):
+    def test_previously_published_duplicate_preserves_history_with_retirement_contract(self):
         text = "The amber dial points north.\nThe amber indicator points north.\n"
         _, propositions = self.ingest(
             text,
@@ -592,8 +592,11 @@ class WorkshopPublicationTests(unittest.TestCase):
             "canonical wording selected", "fixture-reviewer",
         )
         self.assertEqual(preview(self.workshop)["game_proposition_ids"], [canonical["id"]])
-        with self.assertRaisesRegex(ValueError, "no duplicate-retirement metadata"):
-            publish(self.workshop, "fixture-publisher", self.base_pack_path)
+        second = publish(self.workshop, "fixture-publisher", self.base_pack_path)
+        _, second_pack, _ = self.publication_files(second)
+        facts = {fact["id"]: fact for fact in second_pack["facts"]}
+        self.assertEqual(facts["workshop." + duplicate["id"]]["duplicate_of"], "workshop." + canonical["id"])
+        self.assertIn("workshop." + duplicate["id"] + ".recall", {e["id"] for e in second_pack["encounters"]})
         self.assertEqual((first_directory / "pack.json").read_bytes(), first_pack_bytes)
         self.assertEqual(self.history_path.read_bytes(), self.history_before)
 
@@ -625,6 +628,27 @@ class WorkshopPublicationTests(unittest.TestCase):
             exported_pack["facts"][: len(self.base_pack["facts"])],
             published_pack["facts"][: len(self.base_pack["facts"])],
         )
+        self.assertEqual(self.history_path.read_bytes(), self.history_before)
+
+    def test_reviewed_duplicate_can_change_canonical_target_without_resurrecting_history(self):
+        text = "The amber dial points north.\nThe amber indicator points north.\nThe amber pointer points north.\n"
+        _, props = self.ingest(text, [{"statement": line, "quote": line} for line in text.splitlines()])
+        old, first_target, next_target = props
+        self.approve(old)
+        publish(self.workshop, "Fixture", self.base_pack_path)
+        self.approve(first_target)
+        self.workshop.add_relation(old["id"], first_target["id"], "duplicate_of", "confirmed", "First canonical choice", "Fixture")
+        first = publish(self.workshop, "Fixture", self.base_pack_path)
+        _, first_pack, _ = self.publication_files(first)
+        self.approve(next_target)
+        self.workshop.add_relation(old["id"], first_target["id"], "duplicate_of", "dismissed", "Reconsidered target", "Fixture")
+        self.workshop.add_relation(old["id"], next_target["id"], "duplicate_of", "confirmed", "Revised canonical choice", "Fixture")
+        latest = publish(self.workshop, "Fixture", self.base_pack_path)
+        _, latest_pack, _ = self.publication_files(latest)
+        old_id = "workshop." + old["id"]
+        self.assertEqual(next(f for f in latest_pack["facts"] if f["id"] == old_id)["duplicate_of"], "workshop." + next_target["id"])
+        self.assertEqual(next(e for e in first_pack["encounters"] if e["id"] == old_id + ".recall"),
+                         next(e for e in latest_pack["encounters"] if e["id"] == old_id + ".recall"))
         self.assertEqual(self.history_path.read_bytes(), self.history_before)
 
 

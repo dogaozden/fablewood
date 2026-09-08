@@ -9,7 +9,7 @@ import threading
 from urllib.parse import unquote, urlsplit
 
 from .store import Workshop
-from . import processing, publish, sources
+from . import game_links, processing, publish, sources
 
 _run_lock = threading.Lock()
 _threads_lock = threading.Lock()
@@ -115,6 +115,8 @@ def handle_request(handler):
                 _json(handler, 200, sources.catalog(store.root))
             elif path == "/api/workshop/preview":
                 _json(handler, 200, publish.preview(store))
+            elif path == "/api/workshop/game-matches":
+                _json(handler, 200, game_links.candidates(store))
             elif path.startswith("/api/workshop/jobs/"):
                 job_id = path.rsplit("/", 1)[-1]
                 job = next((j for j in store.snapshot()["jobs"] if j["id"] == job_id), None)
@@ -146,6 +148,8 @@ def handle_request(handler):
                 _json(handler, 202, _start(store, path.split("/")[-2]))
             elif path.startswith("/api/workshop/propositions/") and path.endswith("/review"):
                 _json(handler, 200, store.review_proposition(path.split("/")[-2], **body))
+            elif path.startswith("/api/workshop/propositions/") and path.endswith("/game-link"):
+                _json(handler, 200, game_links.review(store, path.split("/")[-2], **body))
             elif path.startswith("/api/workshop/propositions/") and path.endswith("/assign"):
                 if body.get("node_id") not in {n["id"] for n in sources.catalog(store.root)["nodes"]}:
                     raise ValueError("Choose an existing outline topic")

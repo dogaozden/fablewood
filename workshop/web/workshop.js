@@ -11,6 +11,8 @@
     catalog: { nodes: [], sources: [] },
     preview: null,
     previewError: "",
+    gameMatches: [],
+    gameMatchesError: "",
     filter: "all",
     query: "",
     selected: null,
@@ -138,6 +140,14 @@
     try {
       const payload = await request("/api/workshop");
       mergeWorkspace(payload || {});
+      try {
+        const matching = await request("/api/workshop/game-matches");
+        state.gameMatches = array(matching.matches);
+        state.gameMatchesError = "";
+      } catch (error) {
+        state.gameMatches = [];
+        state.gameMatchesError = error.message;
+      }
       await loadPreview({ quiet: true });
       setConnection("online", "Workshop ready");
       renderAll();
@@ -237,6 +247,7 @@
     const outlineCount = Number(previewCounts.outline_propositions ?? result.readyPropositions) || 0;
     const noteCount = Number(previewCounts.notes ?? result.readyNotes) || 0;
     const gameCount = Number(previewCounts.game_additions) || 0;
+    const reusedCount = Number(previewCounts.game_reused) || 0;
     const excludedCount = Number(previewCounts.game_excluded) || 0;
     $("#count-review").textContent = String(result.review);
     $("#count-failure").textContent = String(result.failure);
@@ -251,7 +262,7 @@
     else clearError(previewError);
     const previewTotal = outlineCount + noteCount;
     $("#publication-summary").textContent = previewTotal
-      ? `${previewTotal} approved ${previewTotal === 1 ? "item" : "items"} will enter the Living Outline. ${gameCount} ${gameCount === 1 ? "statement is" : "statements are"} eligible for game practice.`
+      ? `${previewTotal} approved ${previewTotal === 1 ? "item" : "items"} will enter the Living Outline. ${gameCount} statements supply Workshop practice; ${reusedCount} reuse existing game knowledge and its schedule.`
       : state.publications.length
         ? "Publish an empty reviewed outline to withdraw its previous notes or outline-only claims. Game references still require reconciliation."
         : "Nothing is approved for the next publication yet.";
@@ -289,7 +300,7 @@
         node("p", { className: "item-detail", text: value(job.stage || (job.progress && job.progress.message), `Job ${idOf(job) || ""}`) }),
         job.error ? node("p", { className: "job-error", text: `Needs attention: ${value(job.error.message || job.error)}` }) : null,
         node("div", { className: "job-actions" }, [
-          node("div", { className: "progress-track", role: "progressbar", "aria-label": `${jobLabel(job)} progress`, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": progress }, [node("div", { className: "progress-fill", style: `width:${progress}%` })]),
+          node("progress", { className: "progress-track", "aria-label": `${jobLabel(job)} progress`, max: "100", value: progress }),
           canRun ? node("button", { className: "button button-secondary button-small", type: "button", text: runLabel, onclick: () => runJob(job) }) : node("span", { className: "item-detail", text: `${progress}%` }),
         ]),
       ]);
@@ -473,6 +484,7 @@
       assessmentSection(proposition),
       reviewSection("proposition", proposition),
       correctionHistorySection(proposition),
+      gameMatchSection(proposition),
       node("section", { className: "inspector-section" }, [
         node("h4", {}, ["Relationships", node("span", { className: "section-count", text: `${relationships.length} recorded` })]),
         node("div", { className: "relationship-list" }, relationships.length ? relationships.map((relation) => relationshipItem(relation, proposition)) : [node("p", { className: "item-detail", text: "No contradictions, supersessions, or other relationships recorded." })]),
@@ -485,6 +497,65 @@
 
   function truthCell(label, main, detail) {
     return node("div", { className: "truth-cell" }, [node("span", { text: label }), node("strong", { text: humanize(main) }), node("small", { text: value(detail) })]);
+  }
+
+  function gameMatchSection(proposition) {
+    const matches = state.gameMatches.filter((match) => match.proposition_id === idOf(proposition));
+    return node("section", { className: "inspector-section game-matches" }, [
+      node("h4", { text: "Existing game knowledge" }),
+      node("p", { className: "item-detail", text: "Compare conditions and scope before confirming a match. A confirmed match keeps the existing fact and its learning schedule; your new source remains in the outline. Previously published duplicate IDs remain in history and leave practice." }),
+      state.gameMatchesError ? node("p", { className: "form-error", text: state.gameMatchesError }) : null,
+      ...matches.map((match, index) => {
+        const review = match.review || {};
+        const prefix = `game-match-${index}`;
+        const form = node("form", { className: "review-form" }, [
+          node("label", { for: `${prefix}-by`, text: "Match reviewer" }),
+          node("input", { id: `${prefix}-by`, name: "by", value: value(review.by, "Local editor"), required: "true" }),
+          node("label", { for: `${prefix}-method`, text: "Match review method" }),
+          node("select", { id: `${prefix}-method`, name: "method" }, [node("option", { value: "human", text: "Human" }), node("option", { value: "agent", text: "Agent" })]),
+          node("label", { for: `${prefix}-note`, text: "Reason for this match decision" }),
+          node("textarea", { id: `${prefix}-note`, name: "note", rows: "2", required: "true", text: review.note || "" }),
+          node("p", { className: "form-error", role: "alert", hidden: "true" }),
+          node("div", { className: "review-actions" }, [
+            node("button", { className: "button button-primary", type: "submit", text: "Confirm same knowledge", disabled: !match.fact, dataset: { status: "confirmed" } }),
+            node("button", { className: "button button-secondary", type: "submit", text: "Dismiss match", dataset: { status: "dismissed" } }),
+          ]),
+        ]);
+        form.elements.method.value = review.method || "human";
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const errorTarget = form.querySelector(".form-error");
+          clearError(errorTarget);
+          const data = Object.fromEntries(new FormData(form));
+          const buttons = [...form.querySelectorAll("button")];
+          buttons.forEach((button) => { button.disabled = true; });
+          try {
+            await request(`/api/workshop/propositions/${encodeURIComponent(idOf(proposition))}/game-link`, { method: "POST", body: {
+              ...data, pack_id: match.pack_id, fact_id: match.fact_id,
+              fact_sha256: match.fact_sha256, proposition_sha256: match.proposition_sha256,
+              status: event.submitter.dataset.status,
+            } });
+            toast("Game match review recorded.");
+            await loadWorkspace({ quiet: true });
+          } catch (error) { showError(errorTarget, error); }
+          finally { buttons.forEach((button) => { button.disabled = false; }); }
+        });
+        return node("article", { className: "relationship-item", dataset: { factId: match.fact_id } }, [
+          node("div", { className: "item-topline" }, [statusBadge(match.stale ? "needs_review" : review.status || "suggested"), node("span", { text: match.reason })]),
+          node("strong", { text: "Imported claim" }),
+          node("p", { text: proposition.statement }),
+          node("strong", { text: "Existing game fact" }),
+          node("p", { className: "node-label", text: `${match.pack_id} · ${match.fact_id}` }),
+          node("p", { text: match.fact ? match.fact.statement : "The previous target is no longer in the selected pack." }),
+          match.fact ? node("blockquote", { text: match.fact.source_ref.quote }) : null,
+          match.fact ? node("p", { className: "item-detail", text: `${match.fact.source_ref.file} · ${match.fact.source_ref.loc}` }) : null,
+          review.by ? node("p", { className: "review-history", text: `${review.status} by ${review.by} (${review.method}): ${review.note}` }) : null,
+          match.stale ? node("p", { className: "form-error", text: "The claim or canonical fact changed. This prior decision cannot authorize publication until reviewed again." }) : null,
+          form,
+        ]);
+      }),
+      !matches.length && !state.gameMatchesError ? node("p", { className: "item-detail", text: "No close wording matches found in the selected base pack. Matching is advisory and may miss paraphrases." }) : null,
+    ]);
   }
 
   function topicAssignmentSection(proposition) {

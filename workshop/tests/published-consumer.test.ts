@@ -10,13 +10,15 @@ afterEach(() => {
 
 it('draws and grades the actual published pack without altering existing history or references', async () => {
   const root = path.resolve(import.meta.dirname, '../..');
-  const pack = assertPack(JSON.parse(fs.readFileSync(path.join(root, 'secreg/workshop/published/pack.json'), 'utf8')));
+  const packPath = process.env.WORKSHOP_PUBLISHED_PACK ?? path.join(root, 'secreg/workshop/published/pack.json');
+  const pack = assertPack(JSON.parse(fs.readFileSync(packPath, 'utf8')));
   const base = assertPack(JSON.parse(fs.readFileSync(path.join(root, 'packs/secreg/pack.json'), 'utf8')));
   const additions = pack.facts.filter(fact => fact.id.startsWith('workshop.'));
   expect(additions.length).toBeGreaterThan(0);
   for (const original of base.facts) expect(pack.facts.find(fact => fact.id === original.id)).toEqual(original);
   for (const original of base.encounters) expect(pack.encounters.find(item => item.id === original.id)).toEqual(original);
-  const target = additions.find(fact => !fact.supersedes && !fact.superseded_by)!;
+  const target = additions.find(fact => !fact.supersedes && !fact.superseded_by && !fact.duplicate_of)!;
+  const aliases = additions.filter(fact => fact.duplicate_of);
   expect(target).toBeDefined();
   const now = Date.UTC(2026, 8, 7);
   vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -24,7 +26,12 @@ it('draws and grades the actual published pack without altering existing history
     { quality: 1, at: now - 20000, encounter_id: 'prior-one' },
     { quality: 0.5, at: now - 10000, encounter_id: 'prior-two' },
   ], reference: { original: true } };
-  const initial = { version: 1, facts: { [base.facts[0].id]: old }, reference: { preserve: 'metadata' } };
+  const facts: Record<string, typeof old> = { [base.facts[0].id]: old };
+  for (const alias of aliases) {
+    facts[alias.id] = structuredClone(old);
+    facts[alias.duplicate_of!] = { ...structuredClone(old), box: 2, next_due: now + 86400000 };
+  }
+  const initial = { version: 1, facts, reference: { preserve: 'metadata' } };
   const disk = new Map<string, unknown>([['srs.json', structuredClone(initial)]]);
   const writes: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: unknown, init?: { method?: string; body?: string }) => {
@@ -48,6 +55,16 @@ it('draws and grades the actual published pack without altering existing history
   expect(services.draw.allFactIds()).toHaveLength(pack.facts.length);
   expect(services.draw.sourceOf(target.id)).toBe(pack.meta.id);
   expect(services.draw.fresh({ count: pack.facts.length, seed: 7, now })).toContain(target.id);
+  for (const alias of aliases) {
+    expect(services.draw.allFactIds()).toContain(alias.id);
+    expect(services.amendments.isSuspended(alias.id)).toBe(true);
+    expect(services.draw.fresh({ count: pack.facts.length, seed: 7, now })).not.toContain(alias.id);
+    expect(services.draw.due({ count: pack.facts.length, seed: 7, now })).not.toContain(alias.id);
+    expect(services.draw.encountersOf(alias.id)).toEqual([]);
+    expect(services.srs.boxOf(alias.id)).toBe(5);
+    expect(services.srs.boxOf(alias.duplicate_of!)).toBe(2);
+    expect(services.srs.nextDueOf(alias.duplicate_of!)).toBe(now + 86400000);
+  }
   const encounter = services.draw.encountersOf(target.id).find(item => item.kind === 'free_recall')!;
   expect(encounter.fact_ids).toContain(target.id);
   expect(writes).toEqual([]);
@@ -55,8 +72,12 @@ it('draws and grades the actual published pack without altering existing history
   await services.srs.record(target.id, 1, encounter.id, target.type);
   expect(writes).toEqual(['srs.json']);
   const saved = disk.get('srs.json') as typeof initial;
-  expect(saved.facts[base.facts[0].id]).toEqual(old);
+  expect(saved.facts[base.facts[0].id]).toEqual(initial.facts[base.facts[0].id]);
   expect(saved.reference).toEqual(initial.reference);
+  for (const alias of aliases) {
+    expect(saved.facts[alias.id]).toEqual(initial.facts[alias.id]);
+    expect(saved.facts[alias.duplicate_of!]).toEqual(initial.facts[alias.duplicate_of!]);
+  }
   expect(services.srs.boxOf(target.id)).toBe(2);
   expect(services.srs.nextDueOf(target.id)).toBe(now + 3 * 86400000);
   expect(services.srs.historyQualities(target.id)).toEqual([1]);

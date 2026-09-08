@@ -210,7 +210,7 @@ class Workshop:
             job.pop("runner_pid", None)
             job.pop("runner_started_at", None)
         return {key: state.get(key, []) for key in (
-            "sources", "jobs", "propositions", "relations", "notes", "publications"
+            "sources", "jobs", "propositions", "relations", "notes", "publications", "game_links"
         )}
 
     def _recover_abandoned_jobs(self) -> None:

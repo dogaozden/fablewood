@@ -106,7 +106,7 @@ can be published as attributed notes; they do not require or pretend external au
 
 ## Workshop API (JSON request and response bodies)
 
-- `GET /api/workshop`: `{sources, jobs, propositions, relations, notes, publications}`.
+- `GET /api/workshop`: `{sources, jobs, propositions, relations, notes, publications, game_links}`.
 - `GET /api/workshop/catalog`: `{nodes:[{id,title}], sources:[{key,title,kind,...}]}`.
 - `POST /api/workshop/import`: `{path?, catalog_key?, title?, kind?, node_id?, as_of?,
   attribution?, source_ref?}` → `{source, job, duplicate}`. Same bytes + source + selection
@@ -124,6 +124,12 @@ can be published as attributed notes; they do not require or pretend external au
   from the correction to the original; `relation_type` is `refines` or `supersedes`.
 - `GET /api/workshop/preview`: selected outline propositions/notes, eligible game
   proposition IDs, and counts including game exclusions before publishing.
+- `GET /api/workshop/game-matches`: read-only advisory comparisons with the selected
+  base pack, including current fact/claim fingerprints and prior attributed decisions.
+- `POST /api/workshop/propositions/<id>/game-link`: `{pack_id,fact_id,fact_sha256,
+  proposition_sha256,status,by,note,method}`; status is `confirmed|dismissed`.
+  Both fingerprints must match the displayed comparison. Confirmation selects one
+  direct canonical fact; dismiss the existing confirmed target before changing it.
 - `POST /api/workshop/relations`: `{from_id,to_id,type,status,note,by}`.
 - `POST /api/workshop/notes`: `{node_id,text,attribution}`; initial personal draft.
 - `POST /api/workshop/notes/<id>/review`: `{status,by,note,method}`.
@@ -141,7 +147,8 @@ receipts; they are not sent for new model interpretation and remain outline-only
 
 ## Game publication
 
-Use the existing `app/src/packs/pack.schema.json` with no schema changes. Only approved,
+Use `app/src/packs/pack.schema.json`, including the coordinated optional `Fact.duplicate_of`
+extension (Goal 1 approved the contract; Goal 3 owns its core implementation). Only approved,
 exactly supported, uncontested propositions with crate-eligible sources enter game output.
 The supplemental case file is reference-only; personal notes and lecture statements do
 not become statutory authority. Teaching prompts/rubrics are separate derived content.
@@ -156,9 +163,35 @@ remains null in that case. Neither value establishes current law.
 Confirmed supersession uses the existing pack's paired `supersedes`/`superseded_by`
 fields, preserves old fact and encounter IDs, and retains old source snapshots. A
 proposed supersession holds both endpoints out of new practice. Confirmed duplicate
-relations permit the canonical endpoint; retiring a previously published duplicate
-without a supported supersession remains blocked because the pack has no distinct
-duplicate-retirement contract. Failed reconciliation leaves the prior release active.
+relations permit the canonical endpoint. A previously published duplicate retains its
+fact and encounter records with `duplicate_of` pointing directly to its canonical fact
+in the same pack. Missing/self/chained/cyclic targets and supersession metadata on either
+endpoint are rejected. The raw records remain addressable; fresh, due, and revisit
+selection excludes aliases and encounters requiring any alias. The canonical schedule
+and alias history remain separate and unchanged. Prerequisites may use an existing
+canonical or alias record without creating or merging history.
+
+An optional top-level `game_links` array in the outline records reviewed links from
+propositions to existing base-pack facts. Each entry is `{id,proposition_id,pack_id,
+fact_id,fact_sha256,proposition_sha256,status,by,note,method,at}`. The publisher emits
+confirmed links for selected propositions. Claim fingerprints cover statement, detail,
+kind, type, and topic; additive evidence does not invalidate an unchanged claim. A
+changed target or claim requires renewed review before publication. Lexical matching
+is advisory, can miss paraphrases, and never confirms equivalence automatically.
+All original source evidence and proposition IDs remain in the outline. A link avoids
+minting a new game fact; if a prior release already minted one, that record becomes an
+alias. Counts distinguish `game_additions`, `game_reused`, and `game_excluded`.
+Goal 2 confirmed the reader safely ignores this additive matching metadata.
+
+New releases separate `content_sha256` from publication identity and record `previous_id`.
+An adjacent identical retry reuses its release. Returning A→B→A creates a distinct A2
+release so cumulative game references from B survive and A1 is never overwritten.
+The publisher validates in a staging directory, then installs the immutable release.
+`release.json` records artifact checksums; the ledger pins its manifest checksum. A
+verified orphan left between installation and ledger commit can be adopted on retry.
+Damaged or conflicting artifacts fail closed. Legacy releases retain their original
+format and receive identity/time/source-existence checks; historical cryptographic
+integrity is not invented. Portable exports are derived copies, not pack installations.
 
 ## Acceptance shared by Goals 2 and 3
 
