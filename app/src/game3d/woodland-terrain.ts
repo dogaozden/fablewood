@@ -310,7 +310,7 @@ function appendPaver(target: Builder, spec: PaverSpec, randomValue: () => number
     const edgeRotated = rotateXZ(edgeX, edgeZ, spec.rotation);
     edge.push({ x: spec.x + edgeRotated.x, z: spec.z + edgeRotated.z, localX: edgeX, localZ: edgeZ });
 
-    const innerRadius = spec.footprint ? .77 + randomValue() * .11 : .74 + randomValue() * .11;
+    const innerRadius = spec.footprint ? .85 + randomValue() * .08 : .835 + randomValue() * .095;
     const innerX = spec.footprint ? localX * innerRadius : outlineX * spec.width * innerRadius;
     const innerZ = spec.footprint ? localZ * innerRadius : outlineZ * spec.depth * innerRadius;
     const innerRotated = rotateXZ(innerX, innerZ, spec.rotation);
@@ -594,34 +594,42 @@ function addRibbon(
   }
 }
 
-/** A continuous weathered rock skin. The old independently jittered rings
- * folded through each other, producing sharp black slices across the bank.
- * Here all levels share one outline, with broad fracture planes and rounded
- * shoulders, and the submerged heel remains buried in the riverbed. */
+// Six authored fracture outlines: a long split slab, a stepped wedge, a broad
+// shelf, a broken corner, a tapered heel and a compact fallen block. Their
+// straight cleavage faces replace the radial lobes of the old rounded stones.
+// Every point stays inside the conservative bridge-clearance envelope above.
+const OUTCROP_FORMS = [
+  [[.96,.45],[.65,.86],[-.48,.92],[-.92,.47],[-.84,-.66],[-.35,-.94],[.68,-.79],[.98,-.29]],
+  [[.94,.14],[.48,.93],[-.64,.73],[-.95,.20],[-.72,-.71],[-.06,-.96],[.69,-.68],[.86,-.29]],
+  [[.83,.68],[.24,.96],[-.81,.71],[-.96,-.11],[-.65,-.86],[.12,-.93],[.95,-.51],[.94,.23]],
+  [[.96,.35],[.46,.91],[-.18,.87],[-.83,.48],[-.94,-.57],[-.47,-.92],[.70,-.77],[.85,-.20]],
+  [[.80,.82],[.04,.95],[-.52,.69],[-.95,-.36],[-.71,-.80],[.02,-.94],[.87,-.66],[.96,.04]],
+  [[.92,.51],[.51,.90],[-.66,.83],[-.92,.38],[-.87,-.54],[-.37,-.89],[.62,-.94],[.94,-.32]],
+] as const;
+
+/** A buried fracture with a sloped shoulder and an offset cleavage crown.
+ * Nested outlines keep adjacent layers from folding through one another;
+ * their unequal crown heights break the upright masonry silhouette. */
 function addOutcrop(target: Builder, spec: OutcropSpec, randomValue: () => number): void {
-  const sides = spec.width > .8 ? 20 : 14;
+  const form = OUTCROP_FORMS[Math.floor(randomValue() * OUTCROP_FORMS.length)];
+  const sides = form.length;
   const phase = randomValue() * TAU;
   const offsetU = randomValue() * 11, offsetV = randomValue() * 11;
   const baseY = -.36 + randomValue() * .06;
   const top = spec.height * (.88 + randomValue() * .12);
   const height = (x: number, z: number, level: number) => {
-    const ridge = Math.sin(x * 2.9 + phase + Math.sin(z * 2.1)) * .035
-      + Math.cos(z * 4.3 - phase) * .020;
+    const ridge = Math.sin(x * 4.1 + phase + Math.sin(z * 2.1)) * .014
+      + Math.cos(z * 5.3 - phase) * .011;
     return baseY + top * level + ridge * Math.sin(level * Math.PI * .85)
       + spec.topSlope * x / Math.max(.2, spec.width) * level;
   };
-  const levels = [0, .18, .47, .74, .93];
-  const radii = [.89, 1, .94, .77, .42];
-  const outline = Array.from({ length: sides }, (_, i) => {
-    const a = i / sides * TAU;
-    // Broad dissimilar lobes, with one chipped corner, rather than independent
-    // random facets on every row. The radial bound is below 1.12.
-    const broad = .91 + .085 * Math.sin(a * 2 + phase) + .055 * Math.cos(a * 3 - phase);
-    const fracture = Math.min(1, .79 / Math.max(.01, Math.abs(Math.cos(a - phase * .31))));
-    const chip = .10 * Math.max(0, Math.cos(a - phase)) ** 12;
-    const r = broad * fracture - chip;
-    return { x: Math.cos(a) * spec.width * r, z: Math.sin(a) * spec.depth * r };
-  });
+  const levels = [0, .23, .58, .85, .985];
+  const radii = [.91, 1, .95, .82, .57];
+  const mirror = randomValue() < .5 ? -1 : 1;
+  // Reverse mirrored outlines to retain their winding. The crown is lower
+  // toward the water, exposing a fractured shoulder instead of a vertical wall.
+  const outline = [...form].map(([x,z]) => ({ x: x * spec.width * mirror, z: z * spec.depth }));
+  if (mirror < 0) outline.reverse();
   const rings = levels.map((level, ring) => outline.map(p => {
     const x = p.x * radii[ring], z = p.z * radii[ring];
     const rotated = rotateXZ(x, z, spec.rotation);
@@ -752,18 +760,18 @@ function bankOutcrops(randomValue: () => number, rocks: Builder, strata: Builder
       const side = section.side;
       const innerX = creekCenter(z) + side * (creekHalfWidth(z) - .22);
       const bankX = innerX + side * (.56 + randomValue() * .36);
-      const mainDepth = .78 + randomValue() * .98;
-      const mainWidth = .63 + randomValue() * .65;
-      const mainHeight = .40 + randomValue() ** 1.6 * .65;
+      const mainDepth = .70 + randomValue() ** 1.2 * 1.65;
+      const mainWidth = .55 + randomValue() * .78;
+      const mainHeight = .44 + randomValue() ** 1.3 * (side < 0 ? .54 : .67);
       const spec = keepOutcropOutsideBridgeGap({
         side,
-        x: bankX + (randomValue() - .5) * .22,
+        x: bankX + (randomValue() - .5) * .52,
         z: z + (randomValue() - .5) * .35,
         width: mainWidth,
         depth: mainDepth,
         height: mainHeight,
-        rotation: side * (randomValue() - .5) * .22,
-        topSlope: (randomValue() - .5) * .08,
+        rotation: side * (randomValue() - .5) * .42,
+        topSlope: side * (.07 + randomValue() * .13),
         tone: .12 + randomValue() * .88,
       });
       addOutcrop(rocks, spec, randomValue);
@@ -787,14 +795,15 @@ function bankOutcrops(randomValue: () => number, rocks: Builder, strata: Builder
       }
       large += 1;
 
-      // Medium blocks tuck under the large slab, with alternating offsets that
-      // read as an interlocked bank instead of a bead-like line.
-      for (let mediumIndex = 0; mediumIndex < 2; mediumIndex += 1) {
-        const offset = side * (mainWidth * (mediumIndex ? -.52 : .64));
+      // Unequal fracture clusters bury the long shelves at different depths.
+      // Their placement is tied to each shelf rather than another river row.
+      const fragments = 1 + Math.floor(randomValue() * 3);
+      for (let mediumIndex = 0; mediumIndex < fragments; mediumIndex += 1) {
+        const offset = side * mainWidth * (mediumIndex ? -.40 : .58);
         addOutcrop(rocks, keepOutcropOutsideBridgeGap({
           side,
           x: spec.x + offset,
-          z: spec.z + (mediumIndex ? 1 : -1) * (mainDepth * (.30 + randomValue() * .24)),
+          z: spec.z + (randomValue() - .5) * mainDepth * 1.6,
           width: .28 + randomValue() * .32,
           depth: .35 + randomValue() * .43,
           height: .30 + randomValue() * .25,
@@ -819,7 +828,7 @@ function bankOutcrops(randomValue: () => number, rocks: Builder, strata: Builder
         }), randomValue);
         small += 1;
       }
-      z += 1.13 + randomValue() * .86;
+      z += Math.max(.64, mainDepth * (.72 + randomValue() * .45));
     }
   }
 

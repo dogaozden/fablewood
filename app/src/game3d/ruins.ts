@@ -1,6 +1,8 @@
 import * as T from 'three';
 import { BRIDGE } from './landscape';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { bridgeDeckHeight, hewnOutline, hewnPrismGeometry, layDeckStone, layWallStone } from './bridge-masonry';
+import { mossStone } from './stone-surfaces';
 
 type Materials = Record<string, T.MeshStandardMaterial>;
 
@@ -45,57 +47,6 @@ function stoneBlock(
 ) {
   const geometry = new RoundedBoxGeometry(sx, sy, sz, 2, Math.min(.055, sx * .09, sy * .1, sz * .09));
   const result = addMesh(parent, geometry, material, x, y, z);
-  result.rotation.set(rx, ry, rz);
-  return result;
-}
-
-/** A hand-cut block with one crushed corner and an uneven weathered skin. */
-function fracturedStoneGeometry(sx: number, sy: number, sz: number, seed: number) {
-  const geometry = new RoundedBoxGeometry(sx, sy, sz, 2, Math.min(.065, sx * .11, sy * .11, sz * .11));
-  const position = geometry.getAttribute('position');
-  const cornerX = seed % 2 === 0 ? -1 : 1;
-  const cornerZ = Math.floor(seed / 2) % 2 === 0 ? -1 : 1;
-  for (let index = 0; index < position.count; index += 1) {
-    let x = position.getX(index);
-    let y = position.getY(index);
-    let z = position.getZ(index);
-    const nx = x / (sx * .5);
-    const ny = y / (sy * .5);
-    const nz = z / (sz * .5);
-    const noise = Math.sin(nx * 12.9898 + ny * 23.233 + nz * 37.719 + seed * 1.618) * .5 + .5;
-    x *= .965 + noise * .045;
-    z *= .965 + (1 - noise) * .04;
-    if (ny > .32 && Math.sign(nx) === cornerX && Math.sign(nz) === cornerZ && Math.abs(nx) + Math.abs(nz) > 1.12) {
-      x *= .86;
-      z *= .86;
-      y -= sy * (.075 + noise * .07);
-    } else if (ny > .65) {
-      y -= sy * noise * .025;
-    }
-    position.setXYZ(index, x, y, z);
-  }
-  position.needsUpdate = true;
-  geometry.computeVertexNormals();
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function fracturedBlock(
-  parent: T.Object3D,
-  material: T.Material,
-  seed: number,
-  x: number,
-  y: number,
-  z: number,
-  sx: number,
-  sy: number,
-  sz: number,
-  rx = 0,
-  ry = 0,
-  rz = 0,
-) {
-  const result = addMesh(parent, fracturedStoneGeometry(sx, sy, sz, seed), material, x, y, z);
   result.rotation.set(rx, ry, rz);
   return result;
 }
@@ -165,10 +116,6 @@ function irregularPatchGeometry(width: number, depth: number, seed: number) {
   return new T.ShapeGeometry(shape);
 }
 
-function bridgeDeckHeight(x: number) {
-  return 1.05 * Math.sin((x - 8.5) / 5 * Math.PI);
-}
-
 function bridgeArchBody(material: T.Material, parent: T.Object3D) {
   const shape = new T.Shape();
   const segments = 28;
@@ -198,158 +145,136 @@ function bridgeArchBody(material: T.Material, parent: T.Object3D) {
   addMesh(parent, body, material);
 }
 
+/** Courses share their joints; random placement cannot leave individual blocks
+ * balancing above gaps or overhanging neighbouring stones. */
+function bridgeCourse(start: number, end: number, seed: number, min: number, max: number) {
+  const rand = random(seed);
+  const joints = [start];
+  let cursor = start;
+  while (cursor < end) {
+    const width = min + rand() * (max - min);
+    cursor = end - cursor < width + min * .7 ? end : cursor + width;
+    joints.push(cursor);
+  }
+  return joints.slice(0, -1).map((left, index) => [left, joints[index + 1]] as const);
+}
+
 function addBridgeArchStones(parent: T.Object3D, materials: Materials) {
-  const rand = random(0x6d2b79f5);
-  const count = 15;
-  for (const z of [2, 6]) {
-    for (let index = 0; index < count; index += 1) {
-      const gap = .018 + rand() * .012;
-      const start = index / count * Math.PI + gap;
-      const end = (index + 1) / count * Math.PI - gap;
-      const innerX = 2.66 + (rand() - .5) * .06;
-      const innerY = 1.26 + (rand() - .5) * .04;
-      const thickness = .34 + rand() * .12;
-      const geometry = wedgeGeometry(11, -.67, innerX, innerY, innerX + thickness, innerY + thickness * .72, start, end, .29);
-      const stone = addMesh(parent, geometry, materials.rock);
-      stone.position.z = z;
-      stone.rotation.z = (rand() - .5) * .012;
-      stone.scale.set(1 + (rand() - .5) * .05, 1 + (rand() - .5) * .06, 1);
-    }
+  // The same springing and soffit as the structural vault, with radial joints
+  // fitted continuously across it. The outer edge closes against the deck.
+  const inner = (t: number) => new T.Vector2(8.2 + 5.6 * t, -.68 + 1.3 * Math.sin(t * Math.PI));
+  const outer = (t: number) => {
+    const x = 8.2 + 5.6 * t - Math.sin(t * Math.PI * 2) * .13;
+    return new T.Vector2(x, bridgeDeckHeight(x) - .105);
+  };
+  const joints = bridgeCourse(0, 1, 0x6d2b79f5, .043, .075);
+  for (const [side, z] of [1.99, 6.01].entries()) {
+    joints.forEach(([left, right], index) => {
+      const start = left + .0011, end = right - .0011, mid = (start + end) * .5;
+      const polygon = [inner(start), inner(mid), inner(end), outer(end), outer(mid), outer(start)];
+      const geometry = hewnPrismGeometry(polygon, .38, 500 + index + side * 50);
+      const stone = addMesh(parent, geometry, materials.rock, 0, 0, z);
+      stone.name = 'bridge-arch-stone';
+    });
   }
 }
 
 function addBridgeDeck(parent: T.Object3D, materials: Materials) {
-  const rand = random(0x8f13ab21);
-  const along = 15;
-  const span = 5.6 / along;
-  for (let row = 0; row < along; row += 1) {
-    const x = 8.2 + (row + .5) * span;
-    const tangent = Math.atan(1.05 * Math.PI / 5 * Math.cos((x - 8.5) / 5 * Math.PI));
-    let cursor = 2.15, column = 0;
-    while (cursor < 5.80) {
-      const length = Math.min(.42 + rand() * .52, 5.85 - cursor);
-      const z = cursor + length * .5;
-      const slab = fracturedBlock(
-        parent,
-        materials.rock,
-        900 + row * 20 + column++,
-        x + (rand() - .5) * .04,
-        bridgeDeckHeight(x) - .095 + (rand() - .5) * .025,
-        z,
-        span * (.95 + rand() * .055),
-        .17 + rand() * .035,
-        length - .02,
-        0,
-        (rand() - .5) * .045,
-        tangent + (rand() - .5) * .015,
-      );
-      slab.receiveShadow = true;
-      cursor += length;
-    }
-  }
+  // Staggered narrow courses run along the crossing. Unequal bed widths and
+  // lengths replace the full-width ladder of fifteen identical slab rows.
+  const rows = bridgeCourse(2.035, 5.965, 0x8f13ab21, .42, .68);
+  rows.forEach(([near, far], row) => {
+    const columns = bridgeCourse(8.2, 13.8, 0x24ad6b + row * 3907, .29, .59);
+    columns.forEach(([left, right], column) => {
+      const seed = 900 + row * 40 + column;
+      const thickness = .16;
+      const geometry = hewnPrismGeometry(hewnOutline(right - left - .013, far - near - .013, seed), thickness, seed);
+      layDeckStone(geometry, (left + right) * .5, (near + far) * .5, thickness);
+      const stone = addMesh(parent, geometry, materials.rock);
+      stone.name = 'bridge-deck-stone';
+    });
+  });
 }
 
-/** Stone-scale mapping and coherent moss growth across cut surfaces. */
+/** Stone-scale mapping, restrained face variation, and surface-bound moss. */
 function weatherBridge(group: T.Group, materials: Materials): void {
   group.updateWorldMatrix(true, true);
   const inverse = group.matrixWorld.clone().invert();
   const worn = materials.rock.clone();
-  worn.vertexColors=true;worn.roughness=.66;worn.bumpScale=.11;
-  const stone = new T.Color('#fff9e8'), moss = new T.Color('#879952');
+  worn.vertexColors = true;
+  worn.roughness = .82;
+  worn.bumpScale = .11;
+  if (materials.moss.map) mossStone(worn, materials.moss.map);
+  const stone = new T.Color('#fff9e8'), moss = new T.Color('#8a995e');
   group.traverse(object => {
     if (!(object instanceof T.Mesh) || object.material !== materials.rock) return;
-    object.material=worn;
-    const geometry=object.geometry,positions=geometry.getAttribute('position'),normals=geometry.getAttribute('normal');
-    const transform=inverse.clone().multiply(object.matrixWorld),normalMatrix=new T.Matrix3().getNormalMatrix(transform);
-    const colors=new Float32Array(positions.count*3),uvs=new Float32Array(positions.count*2);
-    for(let i=0;i<positions.count;i++){
-      const p=new T.Vector3().fromBufferAttribute(positions,i).applyMatrix4(transform);
-      const normal=new T.Vector3().fromBufferAttribute(normals,i).applyMatrix3(normalMatrix).normalize();
-      const patch=.5+.28*Math.sin(p.x*3.4+Math.sin(p.z*2.1))+.22*Math.cos(p.z*4.5+p.y*2);
-      const sheltered=T.MathUtils.clamp((Math.abs(p.z-4)-.8)*.7,0,1);
-      const growth=T.MathUtils.smoothstep(patch,.4,.85)*sheltered*(.3+.7*Math.max(0,normal.y));
-      const tone=.94+.06*Math.sin(p.x*2.3+p.z*1.9)**2;
-      const color=stone.clone().lerp(moss,growth).multiplyScalar(tone);
-      colors.set([color.r,color.g,color.b],i*3);
-      const axes=Math.abs(normal.y)>.6?[p.x,p.z]:Math.abs(normal.z)>.6?[p.x,p.y]:[p.z,p.y];
-      uvs.set([axes[0]*.85,axes[1]*.85],i*2);
+    object.material = worn;
+    const geometry = object.geometry, positions = geometry.getAttribute('position'), normals = geometry.getAttribute('normal');
+    const transform = inverse.clone().multiply(object.matrixWorld), normalMatrix = new T.Matrix3().getNormalMatrix(transform);
+    const colors = new Float32Array(positions.count * 3), uvs = new Float32Array(positions.count * 2);
+    const bounds = new T.Box3().setFromBufferAttribute(positions), center = bounds.getCenter(new T.Vector3());
+    const unitTone = .82 + .18 * (Math.sin(center.x * 8.17 + center.y * 19.1 + center.z * 11.7) * .5 + .5);
+    for (let i = 0; i < positions.count; i += 1) {
+      const p = new T.Vector3().fromBufferAttribute(positions, i).applyMatrix4(transform);
+      const normal = new T.Vector3().fromBufferAttribute(normals, i).applyMatrix3(normalMatrix).normalize();
+      const patch = .5 + .28 * Math.sin(p.x * 3.4 + Math.sin(p.z * 2.1)) + .22 * Math.cos(p.z * 4.5 + p.y * 2);
+      const sheltered = T.MathUtils.clamp((Math.abs(p.z - 4) - 1.1) * .8, 0, 1);
+      // The generated moss map supplies the upper patches. This subdued stain
+      // carries growth down the recessed side faces, with no floating sheets.
+      const growth = T.MathUtils.smoothstep(patch, .54, .86) * sheltered * .43;
+      const tone = unitTone * (.96 + .04 * Math.sin(p.x * 2.3 + p.z * 1.9) ** 2);
+      const color = stone.clone().lerp(moss, growth).multiplyScalar(tone);
+      colors.set([color.r, color.g, color.b], i * 3);
+      const axes = Math.abs(normal.y) > .6 ? [p.x, p.z] : Math.abs(normal.z) > .6 ? [p.x, p.y] : [p.z, p.y];
+      uvs.set([axes[0] * .85, axes[1] * .85], i * 2);
     }
-    geometry.setAttribute('color',new T.BufferAttribute(colors,3));
-    geometry.setAttribute('uv',new T.BufferAttribute(uvs,2));
+    geometry.setAttribute('color', new T.BufferAttribute(colors, 3));
+    geometry.setAttribute('uv', new T.BufferAttribute(uvs, 2));
   });
 }
 
+function bridgeParapetCore(parent: T.Object3D, material: T.Material, z: number) {
+  const shape = new T.Shape();
+  const steps = 36;
+  for (let i = 0; i <= steps; i += 1) {
+    const x = 8.2 + 5.6 * i / steps;
+    const y = bridgeDeckHeight(x) + .46;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  for (let i = steps; i >= 0; i -= 1) {
+    const x = 8.2 + 5.6 * i / steps;
+    shape.lineTo(x, bridgeDeckHeight(x) - .1);
+  }
+  shape.closePath();
+  const geometry = new T.ExtrudeGeometry(shape, { depth: .3, bevelEnabled: false, steps: 1 });
+  geometry.translate(0, 0, z - .15);
+  const core = addMesh(parent, geometry, material);
+  core.name = 'bridge-parapet-core';
+}
+
 function addBridgeParapets(parent: T.Object3D, materials: Materials) {
-  const rand = random(0x243f6a88);
-  const stones = 12;
-  for (const z of [1.77, 6.23]) {
-    for (let index = 0; index < stones; index += 1) {
-      const x = 8.2 + (index + .5) * 5.6 / stones;
-      const deckY = bridgeDeckHeight(x);
-      const slope = Math.atan(1.05 * Math.PI / 5 * Math.cos((x - 8.5) / 5 * Math.PI));
-      const broken = z < 3 ? index === 7 || index === 8 : index === 3 || index === 10;
-      if (!broken) {
-        const lowerHeight = .43 + rand() * .23;
-        const lowerWidth = .43 + rand() * .17;
-        fracturedBlock(
-          parent,
-          materials.rock,
-          index + (z > 3 ? 100 : 0),
-          x + (rand() - .5) * .035,
-          deckY + lowerHeight * .45,
-          z,
-          lowerWidth,
-          lowerHeight,
-          .38 + rand() * .035,
-          (rand() - .5) * .055,
-          (rand() - .5) * .035,
-          slope + (rand() - .5) * .045,
-        );
-        if ((index + (z > 3 ? 1 : 0)) % 5 !== 0) {
-          fracturedBlock(
-            parent,
-            materials.rock,
-            index + (z > 3 ? 160 : 60),
-            x + (rand() - .5) * .05,
-            deckY + lowerHeight + .07,
-            z + (rand() - .5) * .025,
-            lowerWidth * (.93 + rand() * .18),
-            .14 + rand() * .065,
-            .42 + rand() * .035,
-            (rand() - .5) * .06,
-            (rand() - .5) * .045,
-            slope + (rand() - .5) * .04,
-          );
-        }
-      } else {
-        const fallen = fracturedBlock(parent, materials.rock, 220 + index, x + (z < 3 ? -.1 : .12), deckY + .03, z + (z < 3 ? -.32 : .32), .58, .28, .47);
-        fallen.rotation.set(.22, .4, slope + .34);
-      }
+  for (const [side, z] of [1.79, 6.21].entries()) {
+    bridgeParapetCore(parent, materials.stoneDark, z);
+    // Narrow irregular bed joints sit in a continuous wall, with the second
+    // course's vertical joints shifted away from those below.
+    for (let course = 0; course < 3; course += 1) {
+      const coping = course === 2;
+      const bottom = course === 0 ? -.04 : course === 1 ? .245 : .52;
+      const height = course === 0 ? .274 : course === 1 ? .264 : .14;
+      const spans = bridgeCourse(8.2, 13.8, 0x243f6a88 + side * 731 + course * 3049, coping ? .39 : .28, coping ? .74 : .62);
+      spans.forEach(([left, right], index) => {
+        const seed = 1700 + side * 190 + course * 37 + index;
+        // A single lost coping unit exposes the top bed, not a hole through
+        // the whole parapet. The opposite wall's loss is at another joint.
+        if (coping && index === (side === 0 ? 5 : 2)) return;
+        const depth = coping ? .49 : .43;
+        const geometry = hewnPrismGeometry(hewnOutline(right - left - .014, height, seed), depth, seed);
+        layWallStone(geometry, (left + right) * .5, bottom, height);
+        const stone = addMesh(parent, geometry, materials.rock, 0, 0, z);
+        stone.name = coping ? 'bridge-coping-stone' : 'bridge-parapet-stone';
+      });
     }
-  }
-
-  for (const [x, z, width, depth, seed] of [
-    [8.82, 1.77, 1.15, .34, 13],
-    [9.78, 1.77, 1.48, .36, 19],
-    [11.0, 6.23, 1.72, .36, 29],
-    [12.18, 1.77, 1.44, .35, 41],
-    [12.92, 6.23, 1.16, .34, 51],
-    [13.48, 6.23, .8, .32, 57],
-  ] as const) {
-    const patch = addMesh(parent, irregularPatchGeometry(width, depth, seed), materials.moss, x, bridgeDeckHeight(x) + .64, z);
-    patch.rotation.x = -Math.PI / 2;
-    patch.rotation.z = Math.atan(1.05 * Math.PI / 5 * Math.cos((x - 8.5) / 5 * Math.PI));
-    patch.castShadow = false;
-  }
-
-  // Thin hanging sheets make the moss read on the front faces as well as from above.
-  for (const [x, y, z, width, height, seed] of [
-    [9.45, .37, 1.986, 1.35, .44, 301],
-    [11.65, .72, 6.014, 1.75, .38, 307],
-    [13.15, .12, 1.986, .92, .34, 313],
-  ] as const) {
-    const patch = addMesh(parent, irregularPatchGeometry(width, height, seed), materials.moss, x, bridgeDeckHeight(x) + y, z);
-    patch.castShadow = false;
   }
 }
 

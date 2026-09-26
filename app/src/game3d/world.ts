@@ -38,7 +38,7 @@ function materials() {
   const loader = new T.TextureLoader();
   const texture = (name: string, repeat = 1) => { const t = loader.load(`/art/3d/${name}.png`); t.colorSpace = T.SRGBColorSpace; t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(repeat, repeat); t.anisotropy = 8; return t; };
   const bark = texture('bark'), earth = texture('earth', 6), roof = texture('roof'), rock = texture('rock'), leaves=texture('leaves'), leafSurface=texture('leaf-surface-v1'),mossSurface=texture('moss-surface-v1');
-  const mat = (color: string | number, map?: T.Texture) => new T.MeshStandardMaterial({ color, map, roughness: .92, bumpMap: map, bumpScale: map ? .16 : 0 });
+  const mat = (color: string | number, map?: T.Texture) => new T.MeshStandardMaterial({ color, map: map ?? null, roughness: .92, bumpMap: map ?? null, bumpScale: map ? .16 : 0 });
   // Masonry joints come from the modeled blocks. Mapping a complete brick wall
   // onto each block made the well and waystones read as miniature brickwork.
   const broadleaf=new T.MeshStandardMaterial({map:leafSurface,bumpMap:leafSurface,bumpScale:.016,roughness:.78,vertexColors:true,side:T.DoubleSide});
@@ -115,6 +115,46 @@ function stones(p:T.Object3D,m:Materials) {
     ring(g,m.stone,x===6?0:.02,.16,0,1.05,.05);
   });return result;
 }
+
+/** Curled fallen leaves collect at root shoulders, with exposed soil between
+ * clusters. One instanced mesh keeps these ground contacts inexpensive. */
+function rootLitter(parent:T.Group,base:T.MeshStandardMaterial,roots:{x:number;z:number;r:number}[]) {
+  const geometry=new T.BufferGeometry();
+  geometry.setAttribute('position',new T.Float32BufferAttribute([
+    0,.008,-.18, -.064,.002,-.045, -.044,0,.105, 0,.004,.17,
+    .059,.003,.07, .048,.011,-.10, 0,.024,-.01,
+  ],3));
+  geometry.setAttribute('uv',new T.Float32BufferAttribute([
+    .5,1, 0,.62, .16,.19, .5,0, .97,.29, .88,.77, .5,.53,
+  ],2));
+  geometry.setIndex([0,1,6,1,2,6,2,3,6,3,4,6,4,5,6,5,0,6]);
+  geometry.computeVertexNormals();
+  const material=base.clone();material.name='woodland-margin-litter';
+  material.vertexColors=false;material.color.set('#b69a65');material.roughness=.98;
+  const leaves=new T.InstancedMesh(geometry,material,roots.length*36);
+  const placed=new T.Object3D(),randomLeaf=random(4907);
+  let count=0;
+  for(const root of roots){
+    if(root.z < -24)continue;
+    const radius=root.x===-2&&root.z===-11?2.1:root.r;
+    for(let cluster=0;cluster<6;cluster++){
+      const angle=randomLeaf()*TAU,reach=radius*(1.5+randomLeaf()*1.25);
+      const cx=root.x+Math.cos(angle)*reach,cz=root.z+Math.sin(angle)*reach;
+      for(let leaf=0;leaf<6;leaf++){
+        const x=cx+(randomLeaf()-.5)*.65,z=cz+(randomLeaf()-.5)*.65;
+        if(isCreekPoint(x,z,.2)||courtContains(x,z))continue;
+        const y=terrainHeight(x,z)-.05+Math.sin(x*.6)*Math.cos(z*.45)*.025;
+        placed.position.set(x,y+.009,z);
+        placed.rotation.set((randomLeaf()-.5)*.1,randomLeaf()*TAU,(randomLeaf()-.5)*.1);
+        placed.scale.set(.7+randomLeaf()*.7,.6+randomLeaf()*.4,.7+randomLeaf()*.8);
+        placed.updateMatrix();leaves.setMatrixAt(count,placed.matrix);
+        leaves.setColorAt(count,new T.Color('#e3cc9d').multiplyScalar(.55+randomLeaf()*.35));
+        count++;
+      }
+    }
+  }
+  leaves.count=count;leaves.receiveShadow=true;parent.add(leaves);
+}
 /** Batch static meshes by material to keep the detailed world cheap to draw. */
 function batchStatic(group:T.Group) {
   group.updateWorldMatrix(true,true);const inverse=group.matrixWorld.clone().invert();const bins=new Map<T.Material,T.BufferGeometry[]>(),remove:T.Mesh[]=[];
@@ -169,20 +209,23 @@ export function buildWorld(scene:T.Scene):World {
     }
     leaves.name='canopy';leaves.castShadow=leaves.receiveShadow=true;g.add(leaves);batchStatic(g);
   }
+  rootLitter(statics,m.broadleaf,treePoints);
   // Fine fronds, broad folded leaves and upright grasses grow in overlapping
   // colonies. Three silhouettes replace the conspicuous repeated fern stamps.
   const vegetation=[fernGeometry(7),woodlandPlantGeometry('broadleaf',11),woodlandPlantGeometry('grass',23)]
     .map((geometry,i)=>new T.InstancedMesh(geometry,i===1?m.broadleaf:new T.MeshLambertMaterial({vertexColors:true,side:T.DoubleSide}),600));
   const counts=[0,0,0];
   const plant=(x:number,z:number,scale:number,family:number,y=terrainHeight(x,z)+.02)=>{
-    dummy.position.set(x,y,z);dummy.rotation.set((rng()-.5)*.2,rng()*TAU,(rng()-.5)*.2);
-    dummy.scale.set(scale*(.8+rng()*.4),scale*(.8+rng()*.6),scale*(.8+rng()*.4));dummy.updateMatrix();
+    dummy.position.set(x,y,z);dummy.rotation.set((rng()-.5)*.5,rng()*TAU,(rng()-.5)*.5);
+    dummy.scale.set(scale*(.6+rng()*.8),scale*(.65+rng()*.8),scale*(.6+rng()*.8));dummy.updateMatrix();
     const instance=counts[family]++;
     vegetation[family].setMatrixAt(instance,dummy.matrix);
     vegetation[family].setColorAt(instance,new T.Color().setRGB(1,.99,.92).multiplyScalar(.72+rng()*.28));
   };
   const soilPocket=(x:number,z:number)=>((x+6.2)/1.05)**2+((z-13.1)/1.45)**2<1
-    ||((x+9)/.8)**2+((z-7.5)/1.1)**2<1;
+    ||((x+9)/.8)**2+((z-7.5)/1.1)**2<1
+    ||((x+8.9)/1.25)**2+((z-10.8)/.95)**2<1
+    ||((x+7.1)/.85)**2+((z-15.6)/1.6)**2<1;
   const colonies=[[-8,9],[-5.8,15],[-13,8],[-9,-11],[0,-16],[9,-17],[21,9],[27,13],[25,-10],[31,-12],[-18,-12],[6,-6]];
   for(let j=0;j<400;j++){
     const anchor=colonies[j%colonies.length],a=rng()*TAU,r=Math.sqrt(rng())*3.1;

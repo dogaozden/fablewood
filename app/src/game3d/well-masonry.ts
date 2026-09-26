@@ -49,6 +49,8 @@ export function addWellMasonry(parent: T.Group, base: T.MeshStandardMaterial, ra
   material.bumpScale = .055;
   const rimMaterial = material.clone();
   rimMaterial.name = 'weathered-well-rim';
+  // Reveal the body without changing the already exposed lantern-lit rim.
+  material.color.multiplyScalar(2 ** .3);
   const add = (geometry: T.BufferGeometry, y: number, cap: boolean) => {
     const mesh = new T.Mesh(geometry, cap ? rimMaterial : material);
     mesh.position.y = y;

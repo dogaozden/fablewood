@@ -334,8 +334,8 @@ function addRoots(
     const points = [
       origin.add(new T.Vector3(0, radius * (.35 + rand() * .2), 0)),
       direction.clone().multiplyScalar(spread * .28).add(side.clone().multiplyScalar((rand() - .5) * radius * .42)).add(new T.Vector3(0, radius * .25, 0)),
-      direction.clone().multiplyScalar(spread * .66).add(side.clone().multiplyScalar((rand() - .5) * radius * .8)).add(new T.Vector3(0, radius * .08, 0)),
-      direction.clone().multiplyScalar(spread).add(side.clone().multiplyScalar((rand() - .5) * radius * .65)).add(new T.Vector3(0, .035, 0)),
+      direction.clone().multiplyScalar(spread * .66).add(side.clone().multiplyScalar((rand() - .5) * radius * .8)).add(new T.Vector3(0, radius * .025 - .025, 0)),
+      direction.clone().multiplyScalar(spread).add(side.clone().multiplyScalar((rand() - .5) * radius * .65)).add(new T.Vector3(0, -.08 - radius * .018, 0)),
     ];
     const root: RootModel = {
       curve: new T.CatmullRomCurve3(points),
