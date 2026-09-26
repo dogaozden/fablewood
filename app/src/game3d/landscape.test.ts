@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BRIDGE, CREEK_HALF_WIDTH, creekCenter, isCreekPoint, landscapeHeight } from './landscape';
+import { BRIDGE, CREEK_HALF_WIDTH, creekCenter, creekHalfWidth, isCreekPoint, landscapeHeight, woodlandSoilRelief } from './landscape';
 import { isWalkable } from './navigation';
 
 describe('shared woodland landscape', () => {
@@ -13,9 +13,27 @@ describe('shared woodland landscape', () => {
         const x = center + side * (CREEK_HALF_WIDTH + .4);
         expect(isCreekPoint(x, z)).toBe(false);
         expect(isWalkable({ x, z }, true)).toBe(true);
-        expect(landscapeHeight(x, z)).toBe(-.04);
+        expect(landscapeHeight(x, z)).toBeCloseTo(-.04 + woodlandSoilRelief(x, z), 10);
       }
     }
+  });
+
+  it('embeds bank stones with low continuous soil while preserving the court and crossing approaches', () => {
+    for (const [x,z] of [[4.5,10],[-11.5,-4],[8.5,2],[17.5,2],[3,6]]) {
+      expect(woodlandSoilRelief(x,z)).toBe(0);
+    }
+    for (const z of [7,12,18,-8]) for (const side of [-1,1]) {
+      const x=creekCenter(z)+side*(creekHalfWidth(z)+.75);
+      expect(woodlandSoilRelief(x,z)).toBeGreaterThan(.14);
+      expect(woodlandSoilRelief(x,z)).toBeLessThan(.7);
+      expect(isWalkable({x,z},true)).toBe(true);
+      // The soil returns smoothly to the existing bank height; no detached
+      // overlay or sudden step is introduced at the outer shoulder.
+      const outer=creekCenter(z)+side*(creekHalfWidth(z)+2.5);
+      expect(Math.abs(landscapeHeight(outer,z)-landscapeHeight(outer+side*.01,z))).toBeLessThan(.01);
+    }
+    expect(landscapeHeight(-8.6,10.5)).toBeGreaterThan(.9);
+    expect(woodlandSoilRelief(-2,-11)).toBeGreaterThan(.15);
   });
 
   it('uses the modeled bridge arch for walking height throughout the crossing', () => {

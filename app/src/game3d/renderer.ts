@@ -9,6 +9,7 @@ import { buildWorld, character, terrainHeight, type Character } from './world';
 import { LANDMARKS, distance, findPath, isNearLandmark, nearestReachable, type LandmarkId, type Point } from './navigation';
 import { canAction, type Journey } from './model';
 import { disposeTree } from './dispose';
+import { intersectLandscape } from './landscape-picking';
 
 interface Callbacks { onStep:(point:Point)=>boolean; onInteract:(id:LandmarkId)=>void; onSelectEnemy:(id:string)=>void; onStats:(fps:number,drawCalls:number)=>void; onMoving:(moving:boolean)=>void; onReady:()=>void }
 export class RealmRenderer {
@@ -30,7 +31,6 @@ export class RealmRenderer {
   private markers=new Map<string,HTMLButtonElement>();
   private enemies=new Map<string,Character>();
   private ray=new T.Raycaster();
-  private plane=new T.Plane(new T.Vector3(0,1,0),0);
   private pointer=new T.Vector2();
   private startPointer={x:0,y:0};
   private destination:T.Mesh;
@@ -42,7 +42,7 @@ export class RealmRenderer {
   private up=(e:PointerEvent)=>{
     if(e.button!==0||!this.enabled||Math.hypot(e.clientX-this.startPointer.x,e.clientY-this.startPointer.y)>6)return;
     const rect=this.renderer.domElement.getBoundingClientRect();this.pointer.set((e.clientX-rect.left)/rect.width*2-1,-(e.clientY-rect.top)/rect.height*2+1);this.ray.setFromCamera(this.pointer,this.camera);
-    const p=new T.Vector3();if(this.ray.ray.intersectPlane(this.plane,p))this.walkTo({x:p.x,z:p.z});
+    const point=intersectLandscape(this.ray.ray);if(point)this.walkTo(point);
   };
   private key=(e:KeyboardEvent)=>{
     if(!this.enabled||e.target instanceof HTMLInputElement||e.target instanceof HTMLTextAreaElement||e.target instanceof HTMLSelectElement)return;
@@ -106,7 +106,7 @@ export class RealmRenderer {
     this.world.stoneLines.forEach((line,i)=>{const active=state.renewed.includes(`stone-${Math.floor(i/3)+1}`);const mat=line.material as T.MeshStandardMaterial;mat.emissiveIntensity=active?2.2:0;mat.color.set(active?'#ffd79c':'#70827d');});
     this.world.guardian.group.visible=state.chapter!=='return'&&state.chapter!=='complete'&&!state.combat;
     const live=new Set(state.combat?.enemies.map(e=>e.id)??[]);for(const [id,c]of this.enemies){if(!live.has(id)){disposeTree(c.group);this.enemies.delete(id);this.markers.get(id)?.remove();this.markers.delete(id);}}
-    for(const e of state.combat?.enemies??[]){let c=this.enemies.get(e.id);if(!c){c=character('#5e5777',state.combat?.kind==='guardian');this.enemies.set(e.id,c);this.scene.add(c.group);const b=document.createElement('button');b.className='realm-marker enemy-marker';b.addEventListener('click',()=>this.callbacks.onSelectEnemy(e.id));this.labels.appendChild(b);this.markers.set(e.id,b);}if(e.hp<(old.combat?.enemies.find(previous=>previous.id===e.id)?.hp??e.hp))c.hurt?.();if(state.hp<old.hp)c.strike?.();c.group.position.set(e.position.x,0,e.position.z);c.group.rotation.y=Math.atan2(state.position.x-e.position.x,state.position.z-e.position.z);c.group.visible=e.hp>0;const b=this.markers.get(e.id)!;b.innerHTML=`<span class="marker-symbol">⚔</span><span class="marker-label">${state.combat?.kind==='guardian'?'The Toll-Warden':'Faded sentinel'} · ${e.hp}/${e.maxHp}</span>`;b.setAttribute('aria-label',`Target ${e.id}`);}
+    for(const e of state.combat?.enemies??[]){let c=this.enemies.get(e.id);if(!c){c=character('#5e5777',state.combat?.kind==='guardian');this.enemies.set(e.id,c);this.scene.add(c.group);const b=document.createElement('button');b.className='realm-marker enemy-marker';b.addEventListener('click',()=>this.callbacks.onSelectEnemy(e.id));this.labels.appendChild(b);this.markers.set(e.id,b);}if(e.hp<(old.combat?.enemies.find(previous=>previous.id===e.id)?.hp??e.hp))c.hurt?.();if(state.hp<old.hp)c.strike?.();c.group.position.set(e.position.x,terrainHeight(e.position.x,e.position.z)+.08,e.position.z);c.group.rotation.y=Math.atan2(state.position.x-e.position.x,state.position.z-e.position.z);c.group.visible=e.hp>0;const b=this.markers.get(e.id)!;b.innerHTML=`<span class="marker-symbol">⚔</span><span class="marker-label">${state.combat?.kind==='guardian'?'The Toll-Warden':'Faded sentinel'} · ${e.hp}/${e.maxHp}</span>`;b.setAttribute('aria-label',`Target ${e.id}`);}
   }
   private project(x:number,y:number,z:number){const p=new T.Vector3(x,y,z).project(this.camera),r=this.container.getBoundingClientRect();return {x:(p.x*.5+.5)*r.width,y:(-.5*p.y+.5)*r.height,visible:p.z<1&&p.z>-1&&Math.abs(p.x)<1.1&&Math.abs(p.y)<1.1};}
   private animate=()=>{
@@ -126,10 +126,10 @@ export class RealmRenderer {
     const view=this.camera.position.clone().sub(this.controls.target);view.y=0;view.normalize();
     for(const tree of this.world.trees){const d=tree.position.clone().sub(this.controls.target);d.y=0;const front=d.dot(view),side=d.clone().addScaledVector(view,-front).length();tree.visible=!(front>3&&side<23);const canopy=tree.getObjectByName('canopy');if(canopy)canopy.visible=!(front>0&&side<20);}
 
-    this.range.visible=!!this.state.combat;this.range.position.set(actor.position.x,.14,actor.position.z);this.range.scale.setScalar((this.state.combat?.moveRemaining??3)/3);
-    const tel=this.state.combat?.telegraph;this.telegraph.visible=!!tel;if(tel){this.telegraph.position.set(tel.x,.12,tel.z);}
+    this.range.visible=!!this.state.combat;this.range.position.set(actor.position.x,terrainHeight(actor.position.x,actor.position.z)+.14,actor.position.z);this.range.scale.setScalar((this.state.combat?.moveRemaining??3)/3);
+    const tel=this.state.combat?.telegraph;this.telegraph.visible=!!tel;if(tel){this.telegraph.position.set(tel.x,terrainHeight(tel.x,tel.z)+.12,tel.z);}
     for(const l of LANDMARKS){const b=this.markers.get(l.id)!;const p=this.project(l.position.x,l.id==='well'?3.8:l.id.startsWith('stone')?2.6:2.2,l.position.z);const near=distance(this.state.position,l.position)<8;b.style.display=p.visible&&!this.state.combat?'':'none';b.style.transform=`translate(-50%,-100%) translate(${p.x}px,${p.y}px)`;b.classList.toggle('near',near);b.classList.toggle('renewed',this.state.renewed.includes(l.id));if(l.id==='mira'&&this.state.companion)b.style.display='none';}
-    for(const e of this.state.combat?.enemies??[]){const b=this.markers.get(e.id);if(!b)continue;const p=this.project(e.position.x,3.4,e.position.z);b.style.display=p.visible&&e.hp>0?'':'none';b.style.transform=`translate(-50%,-100%) translate(${p.x}px,${p.y}px)`;}
+    for(const e of this.state.combat?.enemies??[]){const b=this.markers.get(e.id);if(!b)continue;const p=this.project(e.position.x,terrainHeight(e.position.x,e.position.z)+3.4,e.position.z);b.style.display=p.visible&&e.hp>0?'':'none';b.style.transform=`translate(-50%,-100%) translate(${p.x}px,${p.y}px)`;}
     this.renderer.info.reset();this.composer.render();if(!this.ready){this.ready=true;this.callbacks.onReady();}
     if(rawDt>0)this.frames.push(rawDt);if(time-this.lastStats>1){const avg=this.frames.reduce((a,b)=>a+b,0)/this.frames.length;this.callbacks.onStats(Math.round(1/avg),this.renderer.info.render.calls);this.frames=[];this.lastStats=time;}
   };

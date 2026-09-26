@@ -6,7 +6,7 @@ import { fernGeometry, woodlandPlantGeometry } from './foliage';
 import { buildCottage } from './cottage';
 import { buildTree } from './trees';
 import { buildWoodlandTerrain, courtContains } from './woodland-terrain';
-import { BRIDGE, creekCenter, creekHalfWidth, isCreekPoint, landscapeHeight } from './landscape';
+import { BRIDGE, creekCenter, creekHalfWidth, isCreekPoint, landscapeHeight, woodlandSoilRelief } from './landscape';
 import { buildBridge, buildRuinedGate } from './ruins';
 import { linkWoodlandLights } from './ground-bounce';
 import { woodlandWater } from './water';
@@ -170,7 +170,7 @@ export function buildWorld(scene:T.Scene):World {
   rng = random();
   const m=materials(),root=new T.Group(),statics=new T.Group();root.add(statics);scene.add(root);
   m.ground.color.set('#e1dfb5');
-  const groundGeo=new T.PlaneGeometry(110,120,110,120),pos=groundGeo.getAttribute('position');
+  const groundGeo=new T.PlaneGeometry(110,120,220,240),pos=groundGeo.getAttribute('position');
   for(let i=0;i<pos.count;i++){const x=pos.getX(i),z=-pos.getY(i);const edge=Math.max(Math.abs(x-4)-25,Math.abs(z)-22,0);const base=isCreekPoint(x,z,.2)?-.9:terrainHeight(x,z);pos.setZ(i,base+Math.min(edge*.15,2)+Math.sin(x*.6)*Math.cos(z*.45)*.025);}
   // Broad moss/soil variation gives the ground coherent masses beneath its
   // small leaf texture; a single tiled albedo otherwise reads as visual noise.
@@ -179,6 +179,8 @@ export function buildWorld(scene:T.Scene):World {
     const x=pos.getX(i),z=-pos.getY(i);
     const patch=T.MathUtils.clamp(.5+Math.sin(x*.24+Math.sin(z*.19))*.25+Math.cos(z*.31+x*.07)*.25,0,1);
     const c=soil.clone().lerp(forest,patch);
+    const sheltered=T.MathUtils.smoothstep(woodlandSoilRelief(x,z),.05,.30);
+    c.multiplyScalar(1-sheltered*.16);
     groundColors.set([c.r,c.g,c.b],i*3);
   }
   groundGeo.setAttribute('color',new T.BufferAttribute(groundColors,3));m.ground.vertexColors=true;m.ground.bumpScale=.075;

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { freshJourney, type Journey } from '../app/src/game3d/model';
+import type { RealmRenderer } from '../app/src/game3d/renderer';
 
 // Subject-specific answers remain content, alongside the installed fixture pack.
 const authoredRecallAnswers: Record<string, string> = JSON.parse(readFileSync(
@@ -20,8 +21,8 @@ type ObservedEncounter = {
   correct: boolean;
 };
 
-async function openWood(page: Page) {
-  await page.goto('/');
+async function openWood(page: Page, url = '/') {
+  await page.goto(url);
   await expect(page.getByRole('region', { name: 'Fablewood 3D' })).toBeVisible();
   await page.waitForFunction(() => (window as unknown as { __FW3D?: { ready: boolean } }).__FW3D?.ready);
   const welcome = page.getByRole('button', { name: 'Step into the wood' });
@@ -177,6 +178,28 @@ test('the default entry is a real 3D world with keyboard movement and a modal jo
   await page.keyboard.press('d');
   await expect.poll(async () => JSON.stringify((await snapshot(page)).position)).not.toBe(JSON.stringify(initial.position));
   expect(errors).toEqual([]);
+});
+
+test('clicking the raised bridge walks to its visible surface and saves that destination', async ({ page }) => {
+  const journey: Journey = {
+    ...freshJourney(), position: { x: 10, z: 2 }, companion: true, chapter: 'road',
+    renewed: ['stone-1'], learned: ['neutral-bridge-click-memory'],
+  };
+  await page.request.put(`/api/state/${file}`, { data: journey });
+  await openWood(page, '/?profile-render=1');
+  const target = await page.evaluate(() => {
+    const realm = (window as unknown as { __FW_RENDERER: RealmRenderer }).__FW_RENDERER;
+    const projected = realm.camera.position.clone().set(13, 1.05, 2).project(realm.camera);
+    const rect = realm.renderer.domElement.getBoundingClientRect();
+    const x = rect.left + (projected.x * .5 + .5) * rect.width;
+    const y = rect.top + (-projected.y * .5 + .5) * rect.height;
+    return { x, y, surface: document.elementFromPoint(x,y)?.tagName };
+  });
+  expect(target.surface).toBe('CANVAS');
+  await page.mouse.click(target.x, target.y);
+  await expect.poll(async () => (await snapshot(page)).position).toEqual({ x: 13, z: 2 });
+  await waitForJourneySave(page);
+  expect((await (await page.request.get(`/api/state/${file}`)).json()).position).toEqual({ x: 13, z: 2 });
 });
 
 test('world remounts preserve the journey and release the old canvas and overlays', async ({ page }) => {

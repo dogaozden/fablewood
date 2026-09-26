@@ -310,9 +310,13 @@ function appendPaver(target: Builder, spec: PaverSpec, randomValue: () => number
     const edgeRotated = rotateXZ(edgeX, edgeZ, spec.rotation);
     edge.push({ x: spec.x + edgeRotated.x, z: spec.z + edgeRotated.z, localX: edgeX, localZ: edgeZ });
 
-    const innerRadius = spec.footprint ? .85 + randomValue() * .08 : .835 + randomValue() * .095;
-    const innerX = spec.footprint ? localX * innerRadius : outlineX * spec.width * innerRadius;
-    const innerZ = spec.footprint ? localZ * innerRadius : outlineZ * spec.depth * innerRadius;
+    const innerRadius = spec.footprint ? .92 + randomValue() * .065 : .90 + randomValue() * .08;
+    // Inset from the actual chipped outline for both court and path stones.
+    // An independent radius could extend past a short outer corner and fold
+    // the shoulder back underneath the cap.
+    const nestedRadius = Math.min(innerRadius, edgeScale - .012);
+    const innerX = localX * nestedRadius;
+    const innerZ = localZ * nestedRadius;
     const innerRotated = rotateXZ(innerX, innerZ, spec.rotation);
     inner.push({ x: spec.x + innerRotated.x, z: spec.z + innerRotated.z, localX: innerX, localZ: innerZ });
 
@@ -338,7 +342,9 @@ function appendPaver(target: Builder, spec: PaverSpec, randomValue: () => number
   ];
   const sideColors: [number, number, number] = [topColors[0] * .78, topColors[1] * .79, topColors[2] * .77];
   const lowerColors: [number, number, number] = [topColors[0] * .60, topColors[1] * .63, topColors[2] * .58];
-  const centerY = spec.top + .035 + spec.wear * (.5 + randomValue() * .40);
+  // Foot-worn flags can have shallow depressions. Raising every centre above
+  // its edges made even narrow bevels read as uniformly inflated panels.
+  const centerY = spec.top + (randomValue() - .55) * (.018 + spec.wear);
   const center = point(spec.x + (randomValue() - .5) * .035, centerY + (randomValue() - .5) * .010, spec.z + (randomValue() - .5) * .035);
   // Corner heights are shared by both adjacent faces. Wear stays varied per
   // corner, but no edge receives a second random height for the same vertex.
