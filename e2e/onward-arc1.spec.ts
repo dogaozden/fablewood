@@ -88,14 +88,26 @@ async function bootToHamlet(page: Page): Promise<void> {
 // instance directly instead of a DOM locator.
 
 type GateChoice = { label: string; value: string };
+type GateDialogue = {
+  isOpen: boolean;
+  showingChoices: boolean;
+  choices: GateChoice[];
+  selected: number;
+  isLastPage: boolean;
+};
 
-async function gateDialogue(
-  page: Page,
-): Promise<{ isOpen: boolean; showingChoices: boolean; choices: GateChoice[]; selected: number } | null> {
+async function gateDialogue(page: Page): Promise<GateDialogue | null> {
   return page.evaluate(() => {
     const g = window.__FABLEWOOD_GAME as { scene?: { getScene?(k: string): unknown } } | undefined;
     const h = g?.scene?.getScene?.('hamlet') as
-      | { dialogue?: { isOpen?: boolean; showingChoices?: boolean; choices?: GateChoice[]; selected?: number } }
+      | { dialogue?: {
+          isOpen?: boolean;
+          showingChoices?: boolean;
+          choices?: GateChoice[];
+          selected?: number;
+          pageIdx?: number;
+          pages?: string[];
+        } }
       | undefined;
     const d = h?.dialogue;
     if (!d) return null;
@@ -104,6 +116,7 @@ async function gateDialogue(
       showingChoices: !!d.showingChoices,
       choices: d.choices ?? [],
       selected: d.selected ?? 0,
+      isLastPage: d.pageIdx === (d.pages?.length ?? 0) - 1,
     };
   });
 }
@@ -114,6 +127,17 @@ async function advanceToGateChoices(page: Page): Promise<GateChoice[]> {
   for (let i = 0; i < 10; i++) {
     const d = await gateDialogue(page);
     if (d?.showingChoices) return d.choices;
+    if (d?.isOpen && d.isLastPage) {
+      // The typewriter can finish between this observation and the next keydown.
+      // On the last page that key would accept the default destination, so let the
+      // real typewriter reveal its menu before the caller selects the road.
+      await expect.poll(async () => (await gateDialogue(page))?.showingChoices, {
+        message: 'Alder finishes the final page and reveals the destination menu',
+        timeout: 10_000,
+      }).toBe(true);
+      return (await gateDialogue(page))!.choices;
+    }
+    if (!d?.isOpen) throw new Error(`gate dialogue closed before choices in scene ${await currentScene(page)}`);
     await tapKey(page, 'e');
     await page.waitForTimeout(250);
   }
