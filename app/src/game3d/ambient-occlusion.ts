@@ -12,9 +12,15 @@ export class WoodlandOcclusionPass extends GTAOPass {
         object.visible = false;
       }
     });
+    // RenderPass has already refreshed this frame's shadows. The normal/depth
+    // render inside GTAO must reuse them instead of rendering every caster again.
+    const shadowMap = args[0].shadowMap;
+    const previousAutoUpdate = shadowMap.autoUpdate;
+    shadowMap.autoUpdate = false;
     try {
       super.render(...args);
     } finally {
+      shadowMap.autoUpdate = previousAutoUpdate;
       for (const object of hidden) object.visible = true;
     }
   }

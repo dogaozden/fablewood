@@ -59,12 +59,12 @@ export class RealmRenderer {
   constructor(private container:HTMLDivElement,private labels:HTMLDivElement,initial:Journey,private callbacks:Callbacks){
     this.state=initial;
     this.renderer=new T.WebGLRenderer({antialias:true,powerPreference:'high-performance',alpha:false});
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));this.renderer.info.autoReset=false;this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.15;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));this.renderer.info.autoReset=false;this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.VSMShadowMap;this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.15;
     this.renderer.domElement.setAttribute('aria-label','The Lantern Wood, an interactive 3D world');this.renderer.domElement.tabIndex=0;container.appendChild(this.renderer.domElement);
-    this.scene.background=new T.Color('#102832');this.scene.fog=new T.Fog('#173d4d',37,90);
-    this.scene.add(new T.HemisphereLight('#a9c4d8','#394537',2.6));
-    const moon=new T.DirectionalLight('#94c5db',3.1);moon.position.set(-15,30,6);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.left=-35;moon.shadow.camera.right=35;moon.shadow.camera.top=35;moon.shadow.camera.bottom=-35;moon.shadow.camera.far=90;moon.shadow.normalBias=.045;moon.shadow.bias=-.0002;this.scene.add(moon);
-    const rim=new T.DirectionalLight('#367aa3',1.5);rim.position.set(15,14,-24);this.scene.add(rim);
+    this.scene.background=new T.Color('#112f46');this.scene.fog=new T.Fog('#1b4c68',38,80);
+    this.scene.add(new T.HemisphereLight('#8fb2d0','#19252f',3.6));
+    const moon=new T.DirectionalLight('#94c5db',3.1);moon.position.set(-15,30,6);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.radius=3;moon.shadow.blurSamples=8;moon.shadow.intensity=.75;moon.shadow.camera.left=-35;moon.shadow.camera.right=35;moon.shadow.camera.top=35;moon.shadow.camera.bottom=-35;moon.shadow.camera.far=90;moon.shadow.normalBias=.045;moon.shadow.bias=-.0002;this.scene.add(moon);
+    const rim=new T.DirectionalLight('#4c93c8',2);rim.position.set(15,14,-24);this.scene.add(rim);
     this.world=buildWorld(this.scene);
     this.world.keeper.group.position.set(initial.position.x,0,initial.position.z);
     this.camera.position.set(5,15,30);this.controls=new OrbitControls(this.camera,this.renderer.domElement);this.controls.target.set(5,.7,1);this.controls.minDistance=9;this.controls.maxDistance=49;this.controls.minPolarAngle=.25;this.controls.maxPolarAngle=1.2;this.controls.enableDamping=true;this.controls.dampingFactor=.075;this.controls.enablePan=true;this.controls.maxTargetRadius=40;this.controls.mouseButtons={LEFT:undefined as unknown as T.MOUSE,MIDDLE:T.MOUSE.PAN,RIGHT:T.MOUSE.ROTATE};
@@ -77,6 +77,9 @@ export class RealmRenderer {
     this.destination=flatRing(.5,'#efd3a0',.8);this.destination.visible=false;this.range=flatRing(3,'#bbd9cc',.4);this.telegraph=new T.Mesh(new T.CircleGeometry(1.65,48),new T.MeshBasicMaterial({color:'#d28a69',transparent:true,opacity:.24,depthWrite:false}));this.telegraph.rotation.x=-Math.PI/2;this.scene.add(this.telegraph);
     for(const landmark of LANDMARKS){const b=document.createElement('button');b.className='realm-marker';b.setAttribute('aria-label',landmark.label);b.innerHTML=`<span class="marker-symbol">${landmark.id.startsWith('stone')?'◇':landmark.id==='mira'?'✧':landmark.id==='guardian'?'⚔':landmark.id==='chest'?'▣':'⌂'}</span><span class="marker-label">${landmark.label}</span>`;b.addEventListener('click',()=>{if(!this.enabled)return;if(isNearLandmark(this.state.position,landmark.id))this.callbacks.onInteract(landmark.id);else this.walkNear(landmark.id);});labels.appendChild(b);this.markers.set(landmark.id,b);}
     this.renderer.domElement.addEventListener('pointerdown',this.down);this.renderer.domElement.addEventListener('pointerup',this.up);window.addEventListener('keydown',this.key);
+    if(import.meta.env.DEV&&new URLSearchParams(location.search).has('profile-render')){
+      (window as Window & {__FW_RENDERER?:RealmRenderer}).__FW_RENDERER=this;
+    }
     this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(container);this.resize();this.setState(initial);this.animate();
   }
   private resize(){const {width,height}=this.container.getBoundingClientRect();if(!width||!height)return;this.renderer.setSize(width,height);this.composer.setSize(width,height);this.ambientOcclusion.setSize(Math.ceil(width*.65),Math.ceil(height*.65));this.camera.aspect=width/height;this.camera.updateProjectionMatrix();}
@@ -113,7 +116,9 @@ export class RealmRenderer {
     if(this.path.length && !canAction(this.state,{type:'move',to:this.path[0]}).ok)this.stop();
     if(this.path.length&&this.enabled){const next=this.path[0],target=new T.Vector3(next.x,terrainHeight(next.x,next.z)+.08,next.z);const d=target.clone().sub(actor.position);if(d.length()<.13){if(this.callbacks.onStep(next)){actor.position.copy(target);this.path.shift();}else this.stop();if(!this.path.length)this.stop();}else{moving=true;actor.position.add(d.normalize().multiplyScalar(Math.min(4.8*dt,d.length())));actor.rotation.y=Math.atan2(next.x-actor.position.x,next.z-actor.position.z);}}
     if(!this.path.length){const target=new T.Vector3(this.state.position.x,terrainHeight(this.state.position.x,this.state.position.z)+.08,this.state.position.z);actor.position.lerp(target,Math.min(1,dt*12));}
-    if(this.state.companion){const cp=this.world.companion.group;const target=actor.position.clone().add(new T.Vector3(-.9,0,1));const d=target.clone().sub(cp.position);cp.position.lerp(target,Math.min(1,dt*3));cp.rotation.y=Math.atan2(d.x,d.z);this.world.companion.update(time,d.length()>.25);}else this.world.companion.update(time,false);
+    if(this.state.companion){const cp=this.world.companion.group;const desired={x:actor.position.x+1.6,z:actor.position.z+.55};
+      const reachable=nearestReachable(desired,this.state.renewed.includes('stone-1'))??this.state.position;
+      const target=new T.Vector3(reachable.x,terrainHeight(reachable.x,reachable.z)+.08,reachable.z);const d=target.clone().sub(cp.position);cp.position.lerp(target,Math.min(1,dt*3));cp.rotation.y=Math.atan2(d.x,d.z);this.world.companion.update(time,d.length()>.25);}else this.world.companion.update(time,false);
     this.world.keeper.update(time,moving);this.world.guardian.update(time,false);for(const c of this.enemies.values())c.update(time,false);
     const onScreen=actor.position.clone().project(this.camera);
     if(moving&&(Math.abs(onScreen.x)>.72||Math.abs(onScreen.y)>.68)){const delta=actor.position.clone().sub(this.controls.target).multiplyScalar(dt*1.2);delta.y=0;this.controls.target.add(delta);this.camera.position.add(delta);}
@@ -128,5 +133,8 @@ export class RealmRenderer {
     this.renderer.info.reset();this.composer.render();if(!this.ready){this.ready=true;this.callbacks.onReady();}
     if(rawDt>0)this.frames.push(rawDt);if(time-this.lastStats>1){const avg=this.frames.reduce((a,b)=>a+b,0)/this.frames.length;this.callbacks.onStats(Math.round(1/avg),this.renderer.info.render.calls);this.frames=[];this.lastStats=time;}
   };
-  dispose(){cancelAnimationFrame(this.frame);this.stop();this.resizeObserver.disconnect();window.removeEventListener('keydown',this.key);this.renderer.domElement.removeEventListener('pointerdown',this.down);this.renderer.domElement.removeEventListener('pointerup',this.up);this.controls.dispose();this.world.dispose();for(const c of this.enemies.values())disposeTree(c.group);for(const m of this.markers.values())m.remove();for(const object of [this.destination,this.range,this.telegraph])disposeTree(object);for(const pass of this.composer.passes)pass.dispose();this.composer.dispose();this.renderer.dispose();this.renderer.forceContextLoss();this.renderer.domElement.remove();}
+  dispose(){
+    const debugWindow=window as Window & {__FW_RENDERER?:RealmRenderer};
+    if(debugWindow.__FW_RENDERER===this)delete debugWindow.__FW_RENDERER;
+    cancelAnimationFrame(this.frame);this.stop();this.resizeObserver.disconnect();window.removeEventListener('keydown',this.key);this.renderer.domElement.removeEventListener('pointerdown',this.down);this.renderer.domElement.removeEventListener('pointerup',this.up);this.controls.dispose();this.world.dispose();for(const c of this.enemies.values())disposeTree(c.group);for(const m of this.markers.values())m.remove();for(const object of [this.destination,this.range,this.telegraph])disposeTree(object);for(const pass of this.composer.passes)pass.dispose();this.composer.dispose();this.renderer.dispose();this.renderer.forceContextLoss();this.renderer.domElement.remove();}
 }

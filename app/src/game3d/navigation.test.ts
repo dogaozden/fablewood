@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { BRIDGE, isCreekPoint } from './landscape'
 import {
   LANDMARKS,
   STATIC_OBSTACLES,
@@ -17,7 +18,7 @@ describe('game3d navigation', () => {
     expect(Object.fromEntries(LANDMARKS.map(({ id, position }) => [id, position]))).toEqual({
       hearth: { x: -10, z: 1 },
       mira: { x: 3, z: 6 },
-      well: { x: 4.5, z: 8 },
+      well: { x: 4.5, z: 10 },
       'stone-1': { x: 6, z: 4 },
       'stone-2': { x: 17, z: 3 },
       'stone-3': { x: 24, z: -6 },
@@ -32,8 +33,8 @@ describe('game3d navigation', () => {
     expect(isWalkable({ x: -10, z: -6 }, true)).toBe(false)
     expect(isWalkable({ x: -16, z: -6 }, true)).toBe(false)
     expect(isWalkable({ x: -8, z: 0 }, true)).toBe(true)
-    expect(isWalkable({ x: 3, z: -12 }, true)).toBe(false)
-    expect(isWalkable({ x: 4.5, z: 8 }, true)).toBe(false)
+    expect(isWalkable({ x: 3, z: -12 }, true)).toBe(true)
+    expect(isWalkable({ x: 4.5, z: 10 }, true)).toBe(false)
     expect(isWalkable({ x: -19, z: -15 }, true)).toBe(false)
     expect(isWalkable({ x: -23.01, z: 0 }, true)).toBe(false)
     expect(isWalkable({ x: -23, z: 0 }, true)).toBe(true)
@@ -42,8 +43,8 @@ describe('game3d navigation', () => {
   it('blocks the creek until renewal and then opens only the bridge span', () => {
     expect(isWalkable({ x: 11, z: 4 }, false)).toBe(false)
     expect(isWalkable({ x: 11, z: 4 }, true)).toBe(true)
-    expect(isWalkable({ x: 11, z: 1.99 }, true)).toBe(false)
-    expect(isWalkable({ x: 11, z: 6.01 }, true)).toBe(false)
+    expect(isWalkable({ x: 11, z: -.01 }, true)).toBe(false)
+    expect(isWalkable({ x: 11, z: 4.01 }, true)).toBe(false)
     expect(findPath({ x: 6, z: 4 }, { x: 17, z: 3 }, false)).toEqual([])
   })
 
@@ -54,7 +55,7 @@ describe('game3d navigation', () => {
     expect(path.length).toBeGreaterThan(8)
     expect(path.every((point) => isWalkable(point, true))).toBe(true)
     expect(path.slice(1).every((point, index) => distance(path[index], point) <= Math.SQRT2 + 0.001)).toBe(true)
-    expect(path.filter(({ x }) => x > 9 && x < 13).every(({ z }) => z >= 2 && z <= 6)).toBe(true)
+    expect(path.filter(({ x, z }) => isCreekPoint(x, z)).every(({ z }) => z >= BRIDGE.minZ && z <= BRIDGE.maxZ)).toBe(true)
     expect(findPath({ x: 6, z: 4 }, { x: 17, z: 3 }, true)).toEqual(path)
   })
 
@@ -80,7 +81,7 @@ describe('game3d navigation', () => {
     expect(path.at(-1)).toEqual({ x: -2.6, z: 0.1 })
     expect(path.every((point) => isWalkable(point, false))).toBe(true)
 
-    const besideWell = nearestReachable({ x: 4.5, z: 8 }, false)
+    const besideWell = nearestReachable({ x: 4.5, z: 10 }, false)
     expect(besideWell).not.toBeNull()
     expect(isWalkable(besideWell!, false)).toBe(true)
     expect(isNearLandmark(besideWell!, 'well')).toBe(true)

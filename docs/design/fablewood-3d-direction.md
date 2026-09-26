@@ -20,3 +20,17 @@ Goal 1: app/src/game3d, game entry integration, dependencies, 3D art, new gamepl
 
 ## First implementation
 Separate geometry/material generation, renderer/input lifecycle, pure journey/tactical reducer, React HUD, and service adapter. New default entry is 3D; explicit legacy scene/developer routes retain the 2D regression harness. The old engine is retained as compatibility access while the new experience becomes the primary game.
+
+## Composition revision 19
+
+The selected visual target requires the bridge to span the image farther right and
+back, with the well lower in the foreground. Shared landscape dimensions now govern
+both navigation and rendered terrain: bridge center(13,2), walking span x8.75–17.25,
+z0–4, a curved creek with3.5-unit half-width, and the well at(4.5,10). The old central
+cottage was removed to expose a winding forest path. The courtyard narrows toward
+the hamlet and continues through the foreground with smaller embedded paving.
+
+These are physical scene changes, not a screenshot-only transform. Navigation,
+walking heights, water vertices, bank geometry, well collision, markers and camera
+captures use the same updated layout. Pack IDs, SRS references and save schema are
+unchanged. All validation continues in isolated state; no live save is migrated.

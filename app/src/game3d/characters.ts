@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { batchRigidParts } from './rigid-batch';
 
 const TAU = Math.PI * 2;
 const UP = new T.Vector3(0, 1, 0);
@@ -223,6 +224,7 @@ function traveler(color: string): Character {
 
   body.updateWorldMatrix(true, true);
   elbows[1].attach(staff);
+  batchRigidParts(group, new Set([torso, cape]));
 
   let lastTime = 0;
   let strikeStarted = -10;
@@ -394,6 +396,7 @@ function guardian(color: string): Character {
   body.updateWorldMatrix(true, true);
   elbows[1].attach(pole);
   elbows[0].attach(lantern);
+  batchRigidParts(group, new Set([ribcage, cape]));
 
   let lastTime = 0;
   let strikeStarted = -10;
@@ -415,6 +418,7 @@ function guardian(color: string): Character {
       });
       arms.forEach((arm, index) => {
         arm.rotation.x = moving ? -Math.sin(pace + index * Math.PI) * .17 : Math.sin(time * 1.25 + index) * .015;
+        arm.rotation.z = (index === 0 ? 1 : -1) * .1;
         elbows[index].rotation.x = -.1;
       });
       const strikeAge = time - strikeStarted;

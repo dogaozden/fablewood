@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { BRIDGE } from './landscape';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 type Materials = Record<string, T.MeshStandardMaterial>;
@@ -219,31 +220,63 @@ function addBridgeArchStones(parent: T.Object3D, materials: Materials) {
 
 function addBridgeDeck(parent: T.Object3D, materials: Materials) {
   const rand = random(0x8f13ab21);
-  const along = 13;
-  const across = 5;
+  const along = 15;
   const span = 5.6 / along;
-  const lane = 3.7 / across;
   for (let row = 0; row < along; row += 1) {
     const x = 8.2 + (row + .5) * span;
     const tangent = Math.atan(1.05 * Math.PI / 5 * Math.cos((x - 8.5) / 5 * Math.PI));
-    for (let column = 0; column < across; column += 1) {
-      const z = 2.15 + (column + .5) * lane + (row % 2 ? .08 : -.08);
-      const slab = stoneBlock(
+    let cursor = 2.15, column = 0;
+    while (cursor < 5.80) {
+      const length = Math.min(.42 + rand() * .52, 5.85 - cursor);
+      const z = cursor + length * .5;
+      const slab = fracturedBlock(
         parent,
         materials.rock,
+        900 + row * 20 + column++,
         x + (rand() - .5) * .04,
-        bridgeDeckHeight(x) - .095,
+        bridgeDeckHeight(x) - .095 + (rand() - .5) * .025,
         z,
-        span * (.9 + rand() * .1),
+        span * (.95 + rand() * .055),
         .17 + rand() * .035,
-        lane * (.82 + rand() * .1),
+        length - .02,
         0,
         (rand() - .5) * .045,
         tangent + (rand() - .5) * .015,
       );
       slab.receiveShadow = true;
+      cursor += length;
     }
   }
+}
+
+/** Stone-scale mapping and coherent moss growth across cut surfaces. */
+function weatherBridge(group: T.Group, materials: Materials): void {
+  group.updateWorldMatrix(true, true);
+  const inverse = group.matrixWorld.clone().invert();
+  const worn = materials.rock.clone();
+  worn.vertexColors=true;worn.roughness=.66;worn.bumpScale=.11;
+  const stone = new T.Color('#fff9e8'), moss = new T.Color('#879952');
+  group.traverse(object => {
+    if (!(object instanceof T.Mesh) || object.material !== materials.rock) return;
+    object.material=worn;
+    const geometry=object.geometry,positions=geometry.getAttribute('position'),normals=geometry.getAttribute('normal');
+    const transform=inverse.clone().multiply(object.matrixWorld),normalMatrix=new T.Matrix3().getNormalMatrix(transform);
+    const colors=new Float32Array(positions.count*3),uvs=new Float32Array(positions.count*2);
+    for(let i=0;i<positions.count;i++){
+      const p=new T.Vector3().fromBufferAttribute(positions,i).applyMatrix4(transform);
+      const normal=new T.Vector3().fromBufferAttribute(normals,i).applyMatrix3(normalMatrix).normalize();
+      const patch=.5+.28*Math.sin(p.x*3.4+Math.sin(p.z*2.1))+.22*Math.cos(p.z*4.5+p.y*2);
+      const sheltered=T.MathUtils.clamp((Math.abs(p.z-4)-.8)*.7,0,1);
+      const growth=T.MathUtils.smoothstep(patch,.4,.85)*sheltered*(.3+.7*Math.max(0,normal.y));
+      const tone=.94+.06*Math.sin(p.x*2.3+p.z*1.9)**2;
+      const color=stone.clone().lerp(moss,growth).multiplyScalar(tone);
+      colors.set([color.r,color.g,color.b],i*3);
+      const axes=Math.abs(normal.y)>.6?[p.x,p.z]:Math.abs(normal.z)>.6?[p.x,p.y]:[p.z,p.y];
+      uvs.set([axes[0]*.85,axes[1]*.85],i*2);
+    }
+    geometry.setAttribute('color',new T.BufferAttribute(colors,3));
+    geometry.setAttribute('uv',new T.BufferAttribute(uvs,2));
+  });
 }
 
 function addBridgeParapets(parent: T.Object3D, materials: Materials) {
@@ -368,6 +401,8 @@ export function buildBridge(parent: T.Object3D, materials: Record<string, T.Mesh
     moss: materials.moss ?? materials.rock ?? materials.stone,
   };
   const group = new T.Group();
+  group.scale.x = BRIDGE.scaleX;
+  group.position.set(BRIDGE.centerX - 11 * BRIDGE.scaleX, 0, BRIDGE.centerZ - 4);
   parent.add(group);
   bridgeArchBody(m.stoneDark, group);
   addBridgeArchStones(group, m);
@@ -376,6 +411,7 @@ export function buildBridge(parent: T.Object3D, materials: Record<string, T.Mesh
   addBridgeBanks(group, m);
   bridgeLantern(group, m, 8.14, 1.76);
   bridgeLantern(group, m, 13.86, 6.24);
+  weatherBridge(group,m);
 }
 
 function addGatePiers(parent: T.Object3D, materials: Materials) {
@@ -571,15 +607,14 @@ function addGatePortal(
   portal.userData.dynamic = true;
   portal.renderOrder = 1;
 
-  // Nested ripples sit behind the carved front face and reveal the recess when rotated.
-  for (let index = 0; index < 3; index += 1) {
-    const ripple = addMesh(parent, new T.TorusGeometry(.58 + index * .17, .018 + index * .004, 5, 28), runeMaterial, 0, 3.55, -.02 - index * .07);
-    ripple.scale.set(1.42, 2.05, 1);
-    ripple.castShadow = false;
-  }
+  // A small seal marks the road within the recess; the light belongs to the
+  // weathered arch instead of drawing a large neon target over its opening.
+  const seal = addMesh(parent, new T.TorusGeometry(.12, .018, 5, 28), runeMaterial, 0, 3.55, -.06);
+  seal.scale.set(1, 1.4, 1);
+  seal.castShadow = false;
 
-  const light = new T.PointLight('#7650b5', 12, 8.5, 2);
-  light.position.set(0, 4.05, .15);
+  const light = new T.PointLight('#7650b5', 50, 14, 2);
+  light.position.set(0, 3.6, 1.6);
   light.castShadow = false;
   parent.add(light);
 }

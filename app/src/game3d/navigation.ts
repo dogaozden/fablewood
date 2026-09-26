@@ -1,3 +1,5 @@
+import { BRIDGE, isCreekPoint } from './landscape'
+
 export type Point = { x: number; z: number }
 
 export type LandmarkId =
@@ -21,7 +23,7 @@ export type Landmark = {
 export const LANDMARKS: readonly Landmark[] = [
   { id: 'hearth', label: 'The Hearth', subtitle: 'Rest and return', position: { x: -10, z: 1 }, radius: 2.5 },
   { id: 'mira', label: 'Mira', subtitle: 'A companion waits', position: { x: 3, z: 6 }, radius: 2.5 },
-  { id: 'well', label: 'Old Well', subtitle: 'The hamlet remembers', position: { x: 4.5, z: 8 }, radius: 2.5 },
+  { id: 'well', label: 'Old Well', subtitle: 'The hamlet remembers', position: { x: 4.5, z: 10 }, radius: 2.5 },
   { id: 'stone-1', label: 'First Waystone', subtitle: 'The near road', position: { x: 6, z: 4 }, radius: 2.5 },
   { id: 'stone-2', label: 'Second Waystone', subtitle: 'Beyond the bridge', position: { x: 17, z: 3 }, radius: 2.5 },
   { id: 'stone-3', label: 'Third Waystone', subtitle: 'At the lost road', position: { x: 24, z: -6 }, radius: 2.5 },
@@ -37,10 +39,11 @@ export type StaticObstacle = CircleObstacle | RectObstacle
 
 export const STATIC_OBSTACLES: readonly StaticObstacle[] = [
   { kind: 'rect', minX: -18.8, maxX: -7, minZ: -7.5, maxZ: -0.08 },
-  { kind: 'rect', minX: 0, maxX: 7, minZ: -15, maxZ: -9 },
-  { kind: 'circle', center: { x: 4.5, z: 8 }, radius: 1.5, feature: 'well' },
+  { kind: 'circle', center: { x: 4.5, z: 10 }, radius: 1.5, feature: 'well' },
   { kind: 'circle', center: { x: -2, z: -11 }, radius: 2.2 },
   { kind: 'circle', center: { x: 13, z: -13 }, radius: 2.2 },
+  { kind: 'circle', center: { x: 17, z: -10 }, radius: 1.6 },
+  { kind: 'rect', minX: -4.45, maxX: -2.95, minZ: 9.7, maxZ: 18.1 },
   { kind: 'circle', center: { x: -19, z: -15 }, radius: 1.25 },
   { kind: 'circle', center: { x: -20, z: -5 }, radius: 1.1 },
   { kind: 'circle', center: { x: -18, z: 8 }, radius: 1.2 },
@@ -56,10 +59,6 @@ export const STATIC_OBSTACLES: readonly StaticObstacle[] = [
   { kind: 'circle', center: { x: 15, z: 14 }, radius: 1.1 },
 ] as const
 
-const CREEK_MIN_X = 9
-const CREEK_MAX_X = 13
-const BRIDGE_MIN_Z = 2
-const BRIDGE_MAX_Z = 6
 const GRID_STEP = 1
 
 export const distance = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.z - b.z)
@@ -91,8 +90,8 @@ export const isWalkable = (point: Point, bridgeOpen: boolean): boolean => {
     point.z > WORLD_BOUNDS.maxZ
   ) return false
 
-  const inCreek = point.x > CREEK_MIN_X && point.x < CREEK_MAX_X
-  const onBridge = point.z >= BRIDGE_MIN_Z && point.z <= BRIDGE_MAX_Z
+  const inCreek = isCreekPoint(point.x, point.z)
+  const onBridge = point.z >= BRIDGE.minZ && point.z <= BRIDGE.maxZ
   if (inCreek && (!bridgeOpen || !onBridge)) return false
   return !STATIC_OBSTACLES.some((obstacle) => insideObstacle(point, obstacle))
 }

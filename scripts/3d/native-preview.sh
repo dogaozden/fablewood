@@ -26,7 +26,8 @@ write_config() {
       "height": 800,
       "minWidth": 960,
       "minHeight": 600,
-      "resizable": true
+      "resizable": true,
+      "focus": false
     }]
   },
   "bundle": {
@@ -136,7 +137,7 @@ start_preview() {
 })();
 JAVASCRIPT
 
-  /usr/bin/open -n \
+  /usr/bin/open -g -n \
     -o "$stdout_log" \
     --stderr "$stdout_log" \
     --env "PATH=/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -214,11 +215,20 @@ stop_preview() {
 
 case "$MODE" in
   build) build_preview ;;
-  start) start_preview ;;
+  start)
+    # macOS Wry activates NSApplication when creating its webview. Neither
+    # open -g nor the window's focus:false prevents that activation. The caller
+    # must obtain current foreground permission before passing this flag.
+    if [[ "${2:-}" != "--allow-focus" ]]; then
+      echo "preview launch can take desktop focus; obtain foreground permission, then use start --allow-focus" >&2
+      exit 2
+    fi
+    start_preview
+    ;;
   status) status_preview ;;
   stop) stop_preview ;;
   *)
-    echo "usage: $0 [build|start|status|stop]" >&2
+    echo "usage: $0 [build|start --allow-focus|status|stop]" >&2
     exit 2
     ;;
 esac
