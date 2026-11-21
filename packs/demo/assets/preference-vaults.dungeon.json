@@ -1,0 +1,33 @@
+{
+  "id": "preference-vaults",
+  "name": "The Preference Vaults",
+  "region": "The Demo Coast",
+  "packId": "demo",
+  "rooms": [
+    {
+      "id": "room.demo.cellar",
+      "name": "The Tea Cellar",
+      "blurb": "Shelves of tins and a kettle that never quite boils. The Clerk wants to know how tea is kept.",
+      "teaching": [
+        "demo.tea.steep-time",
+        "demo.tea.water-temp",
+        "demo.tea.black-temp",
+        "demo.tea.storage"
+      ],
+      "enemies": [
+        {
+          "archetype": "wisp",
+          "tags": [
+            "demo"
+          ],
+          "kinds": [
+            "mcq"
+          ]
+        }
+      ],
+      "gate": {
+        "encounterId": "demo.fr.storage"
+      }
+    }
+  ]
+}

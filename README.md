@@ -9,6 +9,7 @@ npm ci
 npm run dev        # http://localhost:5173
 npm run build
 npm test
+npm run e2e:demo          # plays the demo quest headless (hamlet → gate → dungeon → combat)
 npm run check:zero-packs   # engine builds and passes with no packs at all
 ```
 

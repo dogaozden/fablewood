@@ -49,3 +49,4 @@ staging/secreg/*/cluster-cache/
 # Local Workshop working ledgers; portable publications are tracked separately.
 .workshop/
 .workshop-*/
+.state-demo/

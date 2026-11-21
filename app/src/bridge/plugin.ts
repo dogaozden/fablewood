@@ -231,7 +231,8 @@ export function fablewoodBridge(): Plugin {
             if (req.method === 'GET') {
               const data = await readState(stateDir(), name);
               if (data === null) {
-                send(res, 404, { error: 'not found' });
+                res.statusCode = 204;
+                res.end();
                 return;
               }
               send(res, 200, data);

@@ -54,7 +54,7 @@ export async function getState<T = unknown>(name: string): Promise<T | null> {
   if (isTauri()) return nativeGetState<T>(name);
   try {
     const res = await fetch(`/api/state/${encodeURIComponent(name)}`);
-    if (!res.ok) return null;
+    if (!res.ok || res.status === 204) return null;
     return (await res.json()) as T;
   } catch {
     return null;
@@ -63,7 +63,7 @@ export async function getState<T = unknown>(name: string): Promise<T | null> {
 
 /**
  * State read for data that must not be replaced after a transient failure.
- * Only a real HTTP 404/native NotFound is absence; every other failure remains
+ * Only a real HTTP 204 (dev bridge) or 404 / native NotFound is absence; every other failure remains
  * explicit so the caller can keep the existing bytes untouched.
  */
 export async function getStateStrict<T = unknown>(name: string): Promise<StrictStateReadResult<T>> {
@@ -78,7 +78,7 @@ export async function getStateStrict<T = unknown>(name: string): Promise<StrictS
       message: error instanceof Error ? error.message : String(error),
     };
   }
-  if (response.status === 404) return { status: 'absent' };
+  if (response.status === 404 || response.status === 204) return { status: 'absent' };
   if (!response.ok) {
     return {
       status: 'error',
