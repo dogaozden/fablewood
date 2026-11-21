@@ -1,0 +1,185 @@
+{
+  "meta": {
+    "id": "demo",
+    "title": "Demo Deck: Tea Basics",
+    "version": "0.1.0",
+    "sources": [
+      {
+        "id": "demo-notes",
+        "title": "Demo notes (written for this repository)",
+        "file": "demo-notes.md",
+        "version": "1"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "id": "demo.tea.steep-time",
+      "type": "concept",
+      "statement": "Green tea is best steeped for about two minutes.",
+      "detail": "Long steeping pulls out bitter tannins.",
+      "source_ref": {
+        "file": "demo-notes.md",
+        "loc": "Demo",
+        "quote": "Demo note: two minutes for green tea."
+      },
+      "as_of": "2026-11-21",
+      "source_version": "demo 1.0",
+      "tags": [
+        "demo"
+      ],
+      "difficulty": 1
+    },
+    {
+      "id": "demo.tea.water-temp",
+      "type": "concept",
+      "statement": "Green tea wants water well below boiling, around 80 degrees C.",
+      "detail": "Boiling water scalds delicate leaves.",
+      "source_ref": {
+        "file": "demo-notes.md",
+        "loc": "Demo",
+        "quote": "Demo note: 80 C for green tea."
+      },
+      "as_of": "2026-11-21",
+      "source_version": "demo 1.0",
+      "tags": [
+        "demo"
+      ],
+      "difficulty": 1
+    },
+    {
+      "id": "demo.tea.black-temp",
+      "type": "concept",
+      "statement": "Black tea can take water at a full boil.",
+      "detail": "Robust leaves tolerate the heat.",
+      "source_ref": {
+        "file": "demo-notes.md",
+        "loc": "Demo",
+        "quote": "Demo note: black tea takes boiling water."
+      },
+      "as_of": "2026-11-21",
+      "source_version": "demo 1.0",
+      "tags": [
+        "demo"
+      ],
+      "difficulty": 2,
+      "prereqs": [
+        "demo.tea.water-temp"
+      ]
+    },
+    {
+      "id": "demo.tea.storage",
+      "type": "concept",
+      "statement": "Tea keeps best in an airtight container away from light and moisture.",
+      "detail": "Air, light and damp all dull flavour.",
+      "source_ref": {
+        "file": "demo-notes.md",
+        "loc": "Demo",
+        "quote": "Demo note: store tea airtight and dark."
+      },
+      "as_of": "2026-11-21",
+      "source_version": "demo 1.0",
+      "tags": [
+        "demo"
+      ],
+      "difficulty": 2
+    }
+  ],
+  "encounters": [
+    {
+      "id": "demo.mcq.steep",
+      "fact_ids": [
+        "demo.tea.steep-time"
+      ],
+      "kind": "mcq",
+      "prompt": "About how long should green tea steep?",
+      "options": [
+        "2 minutes",
+        "10 minutes",
+        "30 seconds",
+        "1 hour"
+      ],
+      "answer": "2 minutes",
+      "trap_notes": "Longer steeping makes green tea bitter."
+    },
+    {
+      "id": "demo.mcq.temp",
+      "fact_ids": [
+        "demo.tea.water-temp"
+      ],
+      "kind": "mcq",
+      "prompt": "Which water temperature suits green tea?",
+      "options": [
+        "About 80 C",
+        "100 C, fully boiling",
+        "20 C, cold tap",
+        "60 C, barely warm"
+      ],
+      "answer": "About 80 C",
+      "trap_notes": "Boiling water scalds the leaves."
+    },
+    {
+      "id": "demo.mcq.black",
+      "fact_ids": [
+        "demo.tea.black-temp"
+      ],
+      "kind": "mcq",
+      "prompt": "Black tea differs from green tea in that it can be brewed with...",
+      "options": [
+        "Water at a full boil",
+        "Ice water only",
+        "Milk instead of water",
+        "Water at 50 C"
+      ],
+      "answer": "Water at a full boil",
+      "trap_notes": "Black tea leaves are robust."
+    },
+    {
+      "id": "demo.fr.storage",
+      "fact_ids": [
+        "demo.tea.storage"
+      ],
+      "kind": "free_recall",
+      "prompt": "How should tea be stored, and why?",
+      "answer": "Airtight, away from light and moisture, because air, light and damp dull the flavour.",
+      "rubric": "Mentions airtight plus dark or dry storage."
+    }
+  ],
+  "quests": [
+    {
+      "id": "q.demo.first",
+      "title": "The First Cup",
+      "region": "The Preference Vaults",
+      "encounter_ids": [
+        "demo.mcq.steep",
+        "demo.mcq.temp",
+        "demo.mcq.black",
+        "demo.fr.storage"
+      ],
+      "dialogue": [
+        {
+          "speaker": "The Laconic Clerk",
+          "text": "A small ledger to start with. Bring your own material for the real thing."
+        }
+      ],
+      "reward": {
+        "xp": 50
+      }
+    }
+  ],
+  "npcs": [
+    {
+      "id": "npc.laconic-clerk",
+      "name": "The Laconic Clerk",
+      "role": "assessor",
+      "blurb": "The Ledger's appraiser."
+    }
+  ],
+  "metaphor_map": [
+    {
+      "game": "The Preference Vaults",
+      "real": "tea basics (demo content)",
+      "note": "Placeholder dungeon."
+    }
+  ]
+}
