@@ -12,4 +12,4 @@ npm test
 npm run check:zero-packs   # engine builds and passes with no packs at all
 ```
 
-See `Fable_SPEC.md` and `SPEC.md` for the design, and `AGENTS.md` for how the code base is organised.
+See `Fable_SPEC.md` for the design, and `AGENTS.md` for how the code base is organised.
