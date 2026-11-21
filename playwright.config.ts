@@ -25,7 +25,7 @@ export default defineConfig({
     url: 'http://localhost:5175',
     reuseExistingServer: false,
     timeout: 60_000,
-    env: { PACKS_DIR: 'e2e/fixtures/packs-vc-law', STATE_DIR: '.state-e2e', JUDGE_MODE: 'stub' },
+    env: { PACKS_DIR: 'packs', STATE_DIR: '.state-e2e', JUDGE_MODE: 'stub' },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
 });
